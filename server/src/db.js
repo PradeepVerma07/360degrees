@@ -3,10 +3,13 @@ import bcrypt from 'bcryptjs';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
 const dbHost = configuredDbHost === 'localhost' ? '127.0.0.1' : configuredDbHost;
+const dbSocketPath = (process.env.DB_SOCKET_PATH || '').trim();
+const dbConnectionTarget = dbSocketPath
+  ? { socketPath: dbSocketPath }
+  : { host: dbHost, port: Number(process.env.DB_PORT || 3306) };
 
 export const pool = mysql.createPool({
-  host: dbHost,
-  port: Number(process.env.DB_PORT || 3306),
+  ...dbConnectionTarget,
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'ci360_realtime',
