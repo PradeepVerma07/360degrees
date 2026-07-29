@@ -175,7 +175,20 @@ export async function initialiseDatabase() {
 
   await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
   const row = await one('SELECT COUNT(*) AS count FROM clients');
-  if (Number(row.count) === 0 && process.env.SEED_DEMO_DATA !== 'false') await seed();
+  if (process.env.SEED_DEMO_DATA !== 'false') {
+    if (Number(row.count) === 0) await seed();
+    await ensureDemoAdmin();
+  }
+  const adminRow = await one("SELECT COUNT(*) AS count FROM users WHERE role='admin' AND status='active'");
+  if (Number(adminRow.count) === 0) await ensureDemoAdmin();
+}
+
+async function ensureDemoAdmin() {
+  const adminHash = await bcrypt.hash('CI360Demo#2026', 12);
+  await query(`INSERT INTO users (id,name,password_hash,role,client_id,status)
+    VALUES (?,?,?,?,?,?)
+    ON DUPLICATE KEY UPDATE name=?,password_hash=?,role='admin',client_id=NULL,status='active'`,
+    ['ci360admin', 'CI360 Team', adminHash, 'admin', null, 'active', 'CI360 Team', adminHash]);
 }
 
 async function seed() {
