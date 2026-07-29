@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
 const dbHost = configuredDbHost === 'localhost' ? '127.0.0.1' : configuredDbHost;
-const dbSocketPath = (process.env.DB_SOCKET_PATH || '').trim();
+const dbSocketPath = (process.env.DB_SOCKET_PATH || (configuredDbHost === 'localhost' ? '/var/lib/mysql/mysql.sock' : '')).trim();
 const dbConnectionTarget = dbSocketPath
   ? { socketPath: dbSocketPath }
   : { host: dbHost, port: Number(process.env.DB_PORT || 3306) };
