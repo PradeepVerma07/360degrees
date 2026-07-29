@@ -39,6 +39,22 @@ const initialiseDatabaseWithRetry = async () => {
     }
 };
 void initialiseDatabaseWithRetry();
+const databaseHealthDetails = () => {
+    if (databaseReady || !databaseInitError)
+        return {};
+    const code = databaseInitError.code || 'UNKNOWN';
+    const hints = {
+        ER_ACCESS_DENIED_ERROR: 'Check DB_USER and DB_PASSWORD, and confirm the MySQL user is assigned to this database.',
+        ER_BAD_DB_ERROR: 'Check DB_NAME.',
+        ENOENT: 'Check DB_SOCKET_PATH, or remove it and use DB_HOST/DB_PORT.',
+        ECONNREFUSED: 'Check DB_HOST and DB_PORT.',
+        ETIMEDOUT: 'Check DB_HOST, DB_PORT and hosting firewall settings.'
+    };
+    return {
+        code,
+        hint: hints[code] || 'Check Hostinger runtime logs for the full database error.'
+    };
+};
 app.use(helmet());
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
@@ -112,6 +128,7 @@ const ticketDetail = async ticket => {
 app.get('/api/health', async (_req, res) => res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : (databaseInitError ? 'error' : 'starting'),
+    ...databaseHealthDetails(),
     error: databaseReady || process.env.NODE_ENV === 'production' ? undefined : databaseInitError?.message
 }));
 app.use('/api', (_req, res, next) => {
