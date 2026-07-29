@@ -1,0 +1,3 @@
+-- The SQLite file supplied in the original package contained no tables or records.
+-- The application will create the MySQL schema automatically.
+-- Set SEED_DEMO_DATA=true for the included demo accounts, or false for a clean database.
