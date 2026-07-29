@@ -12,12 +12,33 @@ import { z } from 'zod';
 import { pool, query, one, transaction, initialiseDatabase, audit } from './db.js';
 import { requireAdmin, requireAuth, signToken } from './auth.js';
 import { calculateHours } from './tat.js';
-await initialiseDatabase();
 const app = express();
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const io = new Server(httpServer, { cors: { origin } });
+let databaseReady = false;
+let databaseInitError = null;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const initialiseDatabaseWithRetry = async () => {
+    let attempt = 0;
+    while (!databaseReady) {
+        attempt += 1;
+        try {
+            await initialiseDatabase();
+            databaseReady = true;
+            databaseInitError = null;
+            console.log('CI360 database ready');
+        }
+        catch (error) {
+            databaseInitError = error;
+            const delayMs = Math.min(30000, attempt * 5000);
+            console.error(`CI360 database initialization failed; retrying in ${delayMs / 1000}s`, error);
+            await wait(delayMs);
+        }
+    }
+};
+void initialiseDatabaseWithRetry();
 app.use(helmet());
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
@@ -88,7 +109,16 @@ const ticketDetail = async ticket => {
     }
     return { ...mapTicket(ticket), messages, attachments };
 };
-app.get('/api/health', async (_req, res) => res.json({ ok: true }));
+app.get('/api/health', async (_req, res) => res.status(databaseReady ? 200 : 503).json({
+    ok: databaseReady,
+    database: databaseReady ? 'ready' : (databaseInitError ? 'error' : 'starting'),
+    error: databaseReady || process.env.NODE_ENV === 'production' ? undefined : databaseInitError?.message
+}));
+app.use('/api', (_req, res, next) => {
+    if (databaseReady)
+        return next();
+    res.status(503).json({ error: 'Database is not ready' });
+});
 app.post('/api/auth/login', async (req, res) => {
     const parsed = z.object({ id: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
     if (!parsed.success)
@@ -326,8 +356,8 @@ const publicDir = [
 ].find(candidate => fs.existsSync(path.join(candidate, 'index.html')));
 if (publicDir) {
     app.use(express.static(publicDir));
-    app.get('*', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
+    app.use((req, res, next) => {
+        if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
             return next();
         res.sendFile(path.join(publicDir, 'index.html'));
     });
