@@ -1,11 +1,16 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? '';
-let token = localStorage.getItem('ci360-token');
-export const setToken = (value) => {
+let token = localStorage.getItem('ci360-token') || sessionStorage.getItem('ci360-token');
+export const getToken = () => token;
+export const setToken = (value, remember = true) => {
     token = value;
-    if (value)
+    localStorage.removeItem('ci360-token');
+    sessionStorage.removeItem('ci360-token');
+    if (!value)
+        return;
+    if (remember)
         localStorage.setItem('ci360-token', value);
     else
-        localStorage.removeItem('ci360-token');
+        sessionStorage.setItem('ci360-token', value);
 };
 async function request(path, options = {}) {
     const response = await fetch(API_URL + path, {

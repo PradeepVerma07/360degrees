@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
-import { api, API_URL, setToken } from './api';
+import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import './styles.css';
@@ -28,8 +28,24 @@ const groupByMonth = (jobs, getDate) => jobs.reduce((groups, job) => {
 }, {});
 const sortedMonthKeys = groups => Object.keys(groups).sort().reverse();
 const clientNameFor = (data, id) => data.clients.find(c => c.id === id)?.name || id;
+const initialAuthMode = () => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('reset_token'))
+        return 'reset';
+    if (params.has('admin_invite') || params.has('admin_code') || window.location.hash === '#admin-signup')
+        return 'signup';
+    return 'login';
+};
+const passwordChecks = password => ({
+    length: password.length >= 8,
+    upper: /[A-Z]/.test(password),
+    lower: /[a-z]/.test(password),
+    number: /\d/.test(password),
+    special: /[^A-Za-z0-9]/.test(password)
+});
+const passwordScore = password => Object.values(passwordChecks(password)).filter(Boolean).length;
 export default function App() {
-    const [auth, setAuth] = useState(Boolean(localStorage.getItem('ci360-token')));
+    const [auth, setAuth] = useState(Boolean(getToken()));
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [tab, setTab] = useState('overview');
@@ -55,14 +71,126 @@ export default function App() {
     const logout = () => { setToken(null); setAuth(false); setData(null); };
     return _jsxs("main", { className: "app", children: [_jsxs("header", { children: [_jsxs("div", { children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Realtime Job Board" })] }), _jsxs("div", { className: "identity", children: ["Logged in as ", _jsx("b", { children: data.user.name }), _jsx("button", { onClick: logout, children: "Log out" })] })] }), _jsx("nav", { children: tabs.map(([id, label]) => _jsx("button", { className: tab === id ? 'active' : '', onClick: () => setTab(id), children: label }, id)) }), error && _jsx("div", { className: "alert error", children: error }), tab === 'overview' && _jsx(Overview, { data: data }), " ", tab === 'submit' && _jsx(Submit, { data: data, reload: load }), " ", tab === 'jobs' && _jsx(Jobs, { data: data, reload: load }), " ", tab === 'settings' && data.user.role === 'admin' && _jsx(SettingsPanel, { initial: data.settings, reload: load }), " ", tab === 'clients' && data.user.role === 'admin' && _jsx(Clients, { data: data, reload: load }), " ", tab === 'support' && _jsx(SupportTickets, { data: data, reload: load }), " "] });
 }
-function Login({ onLogin }) { const [id, setId] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const submit = async (e) => { e.preventDefault(); try {
-    const r = await api.login(id, password);
-    setToken(r.token);
-    onLogin();
+function Login({ onLogin }) {
+    const [mode, setMode] = useState(initialAuthMode);
+    const showMode = next => {
+        setMode(next);
+        if (next === 'login')
+            window.history.replaceState(null, '', window.location.pathname);
+    };
+    return _jsxs("div", { className: "auth-shell", children: [
+            _jsxs("aside", { className: "auth-story", children: [
+                    _jsx(AuthLogo, {}),
+                    _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: "Work requests, organised beautifully." }), _jsx("p", { children: "Submit jobs, follow turnaround times, collaborate with the CI360 team, and manage your projects from one secure workspace." })] }),
+                    _jsx("div", { className: "auth-orbits", "aria-hidden": "true", children: [_jsx("span", {}), _jsx("span", {}), _jsx("span", {})] }),
+                    _jsx("div", { className: "auth-story-foot", children: "Strategy \u2022 Creative \u2022 Technology" })
+                ] }),
+            _jsx("main", { className: "auth-panel", children: _jsxs("div", { className: "auth-card", children: [
+                        _jsx("div", { className: "auth-mobile-logo", children: _jsx(AuthLogo, {}) }),
+                        mode === 'login' && _jsx(LoginForm, { onLogin: onLogin, onMode: showMode }),
+                        mode === 'forgot' && _jsx(ForgotPassword, { onMode: showMode }),
+                        mode === 'reset' && _jsx(ResetPassword, { onMode: showMode }),
+                        mode === 'signup' && _jsx(AdminSignup, { onMode: showMode })
+                    ] }) })
+        ] });
 }
-catch (err) {
-    setError(err.message);
-} }; return _jsx("div", { className: "login-shell", children: _jsxs("form", { className: "login-card", onSubmit: submit, children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Job Board Sign In" }), _jsxs("label", { children: ["ID", _jsx("input", { value: id, onChange: e => setId(e.target.value), autoComplete: "username" })] }), _jsxs("label", { children: ["Password", _jsx("input", { type: "password", value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password" })] }), error && _jsx("div", { className: "alert error", children: error }), _jsx("button", { className: "primary", children: "Log in" }), _jsx("small", { children: "Demo admin: ci360admin / CI360Demo#2026" })] }) }); }
+function AuthLogo() {
+    return _jsxs("div", { className: "auth-logo", children: ["CI", _jsx("span", { children: "360" }), "degrees"] });
+}
+function GoogleIcon() {
+    return _jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06L5.84 9.9C6.71 7.3 9.14 5.38 12 5.38z" })] });
+}
+function LoginForm({ onLogin, onMode }) {
+    const [id, setId] = useState('');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [remember, setRemember] = useState(true);
+    const [error, setError] = useState('');
+    const submit = async (e) => {
+        e.preventDefault();
+        try {
+            const r = await api.login(id.trim(), password);
+            setToken(r.token, remember);
+            onLogin();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
+            _jsx("div", { className: "auth-kicker", children: "CLIENT WORKSPACE" }),
+            _jsx("h2", { children: "Welcome Back" }),
+            _jsx("p", { className: "auth-subtitle", children: "Sign in to access your workspace." }),
+            _jsxs("label", { children: ["Email Address", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or admin ID", required: true })] }),
+            _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
+            _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
+            error && _jsx("div", { className: "alert error", children: error }),
+            _jsx("button", { className: "primary auth-primary", children: "Log in Securely" }),
+            _jsxs("div", { className: "auth-divider", children: [_jsx("span", {}), "OR", _jsx("span", {})] }),
+            _jsxs("button", { type: "button", className: "google-button", onClick: () => setError('Google sign in requires OAuth credentials before it can be enabled.'), children: [_jsx(GoogleIcon, {}), "Continue with Google"] }),
+            _jsxs("p", { className: "auth-footnote", children: ["Protected by secure authentication.", _jsx("br", {}), _jsx("a", { href: "#privacy", children: "Privacy Policy" }), " \u00B7 ", _jsx("a", { href: "#terms", children: "Terms" })] })
+        ] });
+}
+function ForgotPassword({ onMode }) {
+    const [email, setEmail] = useState('');
+    const [sent, setSent] = useState(false);
+    return _jsxs("form", { className: "auth-form", onSubmit: e => { e.preventDefault(); setSent(true); }, children: [
+            _jsx("div", { className: "auth-kicker", children: "PASSWORD RECOVERY" }),
+            _jsx("h2", { children: "Forgot your password?" }),
+            _jsx("p", { className: "auth-subtitle", children: "Enter your email address. If it matches a workspace account, reset instructions will be sent." }),
+            _jsxs("label", { children: ["Email", _jsx("input", { type: "email", value: email, onChange: e => setEmail(e.target.value), autoComplete: "email", required: true })] }),
+            sent && _jsxs("div", { className: "alert success", children: [_jsx("b", { children: "Check your inbox." }), _jsx("br", {}), "Password reset instructions will arrive if email delivery is configured for this workspace."] }),
+            _jsx("button", { className: "primary auth-primary", children: "Send Reset Link" }),
+            _jsx("button", { type: "button", className: "text-button back-button", onClick: () => onMode('login'), children: "Back to Login" })
+        ] });
+}
+function ResetPassword({ onMode }) {
+    const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [message, setMessage] = useState('');
+    const score = passwordScore(password);
+    const checks = passwordChecks(password);
+    const submit = e => {
+        e.preventDefault();
+        if (password !== confirm)
+            return setMessage('Passwords do not match.');
+        if (score < 5)
+            return setMessage('Password does not meet all strength requirements.');
+        setMessage('Password reset endpoint is ready for integration. Connect the secure reset token API to activate this action.');
+    };
+    return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
+            _jsx("div", { className: "auth-kicker", children: "SECURE RESET" }),
+            _jsx("h2", { children: "Reset Password" }),
+            _jsx("p", { className: "auth-subtitle", children: "Create a strong password for your workspace account." }),
+            _jsxs("label", { children: ["New Password", _jsx("input", { type: "password", value: password, onChange: e => setPassword(e.target.value), autoComplete: "new-password", required: true })] }),
+            _jsxs("div", { className: "strength-meter", children: [_jsx("span", { style: { width: `${score * 20}%` } }), _jsx("small", { children: score >= 5 ? 'Strong password' : 'Password strength' })] }),
+            _jsx("ul", { className: "password-rules", children: [['length', 'Minimum 8 characters'], ['upper', 'Uppercase'], ['lower', 'Lowercase'], ['number', 'Number'], ['special', 'Special character']].map(([key, label]) => _jsx("li", { className: checks[key] ? 'met' : '', children: label }, key)) }),
+            _jsxs("label", { children: ["Confirm Password", _jsx("input", { type: "password", value: confirm, onChange: e => setConfirm(e.target.value), autoComplete: "new-password", required: true })] }),
+            message && _jsx("div", { className: message.includes('ready') ? 'alert success' : 'alert error', children: message }),
+            _jsx("button", { className: "primary auth-primary", children: "Update Password" }),
+            _jsx("button", { type: "button", className: "text-button back-button", onClick: () => onMode('login'), children: "Go to Login" })
+        ] });
+}
+function AdminSignup({ onMode }) {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get('admin_invite') || params.get('admin_code') || '';
+    const [message, setMessage] = useState('');
+    if (!invite || invite.length < 8)
+        return _jsxs("div", { className: "auth-form access-denied", children: [_jsx("div", { className: "auth-kicker", children: "403 ACCESS DENIED" }), _jsx("h2", { children: "Restricted Admin Signup" }), _jsx("p", { className: "auth-subtitle", children: "Only a Super Admin can create new Admin accounts. A valid invitation token or secret admin access code is required." }), _jsx("button", { type: "button", className: "primary auth-primary", onClick: () => onMode('login'), children: "Return to Login" })] });
+    return _jsxs("form", { className: "auth-form", onSubmit: e => { e.preventDefault(); setMessage('Admin invitation UI is ready. Connect the invitation validation endpoint before enabling account creation.'); }, children: [
+            _jsx("div", { className: "auth-kicker", children: "ADMIN INVITATION" }),
+            _jsx("h2", { children: "Create Admin Account" }),
+            _jsx("p", { className: "auth-subtitle", children: "Restricted workspace setup for invited administrators." }),
+            _jsxs("label", { children: ["Admin Invitation Token", _jsx("input", { value: invite, readOnly: true })] }),
+            _jsxs("div", { className: "auth-grid", children: [_jsxs("label", { children: ["Full Name", _jsx("input", { required: true })] }), _jsxs("label", { children: ["Company Name", _jsx("input", { required: true })] })] }),
+            _jsxs("div", { className: "auth-grid", children: [_jsxs("label", { children: ["Email", _jsx("input", { type: "email", required: true })] }), _jsxs("label", { children: ["Phone Number", _jsx("input", { type: "tel", required: true })] })] }),
+            _jsxs("div", { className: "auth-grid", children: [_jsxs("label", { children: ["Password", _jsx("input", { type: "password", required: true })] }), _jsxs("label", { children: ["Confirm Password", _jsx("input", { type: "password", required: true })] })] }),
+            _jsxs("label", { children: ["Role", _jsx("input", { value: "Admin", readOnly: true })] }),
+            _jsxs("button", { type: "button", className: "google-button", children: [_jsx(GoogleIcon, {}), "Link Google Account (Optional)"] }),
+            message && _jsx("div", { className: "alert success", children: message }),
+            _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
+        ] });
+}
 function Overview({ data }) {
     const [client, setClient] = useState('');
     const jobs = client ? data.jobs.filter(job => job.clientId === client) : data.jobs;
