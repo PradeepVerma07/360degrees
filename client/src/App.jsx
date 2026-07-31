@@ -253,7 +253,9 @@ function DashboardIcon({ name }) {
         total: ['M7 7h10', 'M7 12h10', 'M7 17h10', 'M4 4h16v16H4z'],
         pending: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v6l4 2'],
         completed: ['M20 6L9 17l-5-5', 'M21 12a9 9 0 1 1-3.2-6.9'],
-        document: ['M7 3h7l5 5v13H7z', 'M14 3v6h5', 'M10 14h6', 'M10 18h4']
+        document: ['M7 3h7l5 5v13H7z', 'M14 3v6h5', 'M10 14h6', 'M10 18h4'],
+        moon: ['M21 14.4A8.6 8.6 0 0 1 9.6 3 7 7 0 1 0 21 14.4z'],
+        sun: ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 'M12 2v2', 'M12 20v2', 'M4.93 4.93l1.41 1.41', 'M17.66 17.66l1.41 1.41', 'M2 12h2', 'M20 12h2', 'M4.93 19.07l1.41-1.41', 'M17.66 6.34l1.41-1.41']
     };
     return _jsx("svg", { className: "dashboard-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: (paths[name] || paths.overview).map((d, index) => _jsx("path", { d: d }, index)) });
 }
@@ -261,6 +263,20 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [notificationOpen, setNotificationOpen] = useState(false);
+    const [theme, setTheme] = useState(() => {
+        try {
+            return localStorage.getItem('ci360-theme') === 'dark' ? 'dark' : 'light';
+        }
+        catch {
+            return 'light';
+        }
+    });
+    useEffect(() => {
+        try {
+            localStorage.setItem('ci360-theme', theme);
+        }
+        catch { }
+    }, [theme]);
     const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
     const urgentJobs = data.jobs.filter(job => isPendingJob(job) && job.priority === 'Urgent').length;
     const notificationCount = Math.min(openTickets + urgentJobs, 99);
@@ -272,7 +288,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         setUserMenuOpen(false);
         setNotificationOpen(false);
     };
-    return _jsxs("main", { className: `dashboard-shell ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+    return _jsxs("main", { className: `dashboard-shell theme-${theme} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
             _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "CI360 dashboard navigation", children: [
                     _jsxs("div", { className: "dashboard-brand", children: [_jsx("img", { src: ci360LogoMark, alt: "", "aria-hidden": "true" }), _jsxs("div", { children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Realtime Job Board" })] })] }),
@@ -283,7 +299,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
                     _jsxs("div", { className: "dashboard-topbar", children: [
                             _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: "CI360degrees Workspace" })] })] }),
                             _jsxs("div", { className: "dashboard-user-area", children: [
-                                    _jsxs("span", { className: "dashboard-login-text", children: ["Logged in as ", data.user.name] }),
+                                    _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
                                     _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Latest activity", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Latest Activity" }), _jsxs("span", { children: [notificationCount, " open notice", notificationCount === 1 ? '' : 's'] })] }), activities.length ? _jsx("div", { className: "dashboard-activity-list compact", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Latest job, ticket, and client updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo('overview'), children: "Open Dashboard" })] })] }),
                                     _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.role === 'admin' ? 'Administrator' : 'Client workspace' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
                                 ] })
