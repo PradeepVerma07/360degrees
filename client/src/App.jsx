@@ -254,14 +254,17 @@ function DashboardIcon({ name }) {
 function DashboardShell({ data, tabs, tab, setTab, logout, error, children }) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const [notificationOpen, setNotificationOpen] = useState(false);
     const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
     const urgentJobs = data.jobs.filter(job => isPendingJob(job) && job.priority === 'Urgent').length;
     const notificationCount = Math.min(openTickets + urgentJobs, 99);
+    const activities = recentActivityItems(data);
     const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
     const goTo = id => {
         setTab(id);
         setSidebarOpen(false);
         setUserMenuOpen(false);
+        setNotificationOpen(false);
     };
     return _jsxs("main", { className: `dashboard-shell ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
@@ -275,8 +278,8 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, children }) {
                             _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": "Open navigation", onClick: () => setSidebarOpen(true), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: "CI360degrees Workspace" })] })] }),
                             _jsxs("div", { className: "dashboard-user-area", children: [
                                     _jsxs("span", { className: "dashboard-login-text", children: ["Logged in as ", data.user.name] }),
-                                    _jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity dashboard", onClick: () => goTo('overview'), children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }),
-                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => setUserMenuOpen(open => !open), children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.role === 'admin' ? 'Administrator' : 'Client workspace' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
+                                    _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Latest activity", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Latest Activity" }), _jsxs("span", { children: [notificationCount, " open notice", notificationCount === 1 ? '' : 's'] })] }), activities.length ? _jsx("div", { className: "dashboard-activity-list compact", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Latest job, ticket, and client updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo('overview'), children: "Open Dashboard" })] })] }),
+                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.role === 'admin' ? 'Administrator' : 'Client workspace' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
                                 ] })
                         ] }),
                     error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
@@ -295,10 +298,10 @@ function recentActivityItems(data) {
         const completed = isCompletedJob(job);
         const verb = completed ? 'completed' : job.status === 'submitted' ? 'submitted' : 'updated';
         const date = completed ? dateForMonth(job) : job.updatedAt || job.datePosted;
-        return { id: `job-${job.id}`, tone: completed ? 'success' : job.priority === 'Urgent' ? 'urgent' : 'blue', description: `Job "${job.title}" ${verb}`, date };
+        return { id: `job-${job.id}`, tab: 'jobs', tone: completed ? 'success' : job.priority === 'Urgent' ? 'urgent' : 'blue', description: `Job "${job.title}" ${verb}`, date };
     });
-    const ticketItems = (data.supportTickets || []).map(ticket => ({ id: `ticket-${ticket.ticketNumber}`, tone: ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'success' : 'purple', description: `Ticket "${ticket.subject}" ${ticket.status === 'Open' ? 'created' : 'updated'}`, date: ticket.updatedAt || ticket.createdAt }));
-    const clientItems = data.user.role === 'admin' ? data.clients.map(client => ({ id: `client-${client.id}`, tone: 'gold', description: `Client "${client.name}" added`, date: client.createdAt })) : [];
+    const ticketItems = (data.supportTickets || []).map(ticket => ({ id: `ticket-${ticket.ticketNumber}`, tab: 'support', tone: ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'success' : 'purple', description: `Ticket "${ticket.subject}" ${ticket.status === 'Open' ? 'created' : 'updated'}`, date: ticket.updatedAt || ticket.createdAt }));
+    const clientItems = data.user.role === 'admin' ? data.clients.map(client => ({ id: `client-${client.id}`, tab: 'clients', tone: 'gold', description: `Client "${client.name}" added`, date: client.createdAt })) : [];
     return [...jobItems, ...ticketItems, ...clientItems].filter(item => timestamp(item.date)).sort((a, b) => timestamp(b.date) - timestamp(a.date)).slice(0, 5);
 }
 function Overview({ data, setTab }) {
@@ -357,7 +360,7 @@ function Overview({ data, setTab }) {
                         ] }),
                     _jsxs("aside", { className: "dashboard-work-right", children: [
                             _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Quick Actions" }), _jsx("div", { className: "dashboard-action-list", children: quickActions.map(([id, icon, title, description]) => _jsxs("button", { type: "button", onClick: () => setTab(id), children: [_jsx("span", { children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("span", { children: [_jsx("b", { children: title }), _jsx("small", { children: description })] }), _jsx(DashboardIcon, { name: "chevron" })] }, id)) })] }),
-                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Recent Activity" }), activities.length ? _jsx("div", { className: "dashboard-activity-list", children: activities.map(item => _jsxs("div", { className: `dashboard-activity ${item.tone}`, children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("div", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Job, ticket, and client updates will appear here." })] })
+                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Recent Activity" }), activities.length ? _jsx("div", { className: "dashboard-activity-list", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => setTab(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Job, ticket, and client updates will appear here." })] })
                         ] })
                 ] })
         ] });
