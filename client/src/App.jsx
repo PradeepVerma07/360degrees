@@ -49,6 +49,7 @@ export default function App() {
     const [data, setData] = useState(null);
     const [error, setError] = useState('');
     const [tab, setTab] = useState('overview');
+    const [supportCreateSignal, setSupportCreateSignal] = useState(0);
     const load = useCallback(async () => { try {
         setData(await api.bootstrap());
         setError('');
@@ -69,6 +70,10 @@ export default function App() {
         return _jsx("div", { className: "center", children: error || 'Loading CI360 Job Board...' });
     const tabs = data.user.role === 'admin' ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']] : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['support', 'Support Tickets']];
     const logout = () => { setToken(null); setAuth(false); setData(null); };
+    const openSupportTicketForm = () => {
+        setSupportCreateSignal(value => value + 1);
+        setTab('support');
+    };
     const currentContent = tab === 'overview'
         ? _jsx(Overview, { data: data, setTab: setTab })
         : tab === 'submit'
@@ -80,9 +85,9 @@ export default function App() {
                     : tab === 'clients' && data.user.role === 'admin'
                         ? _jsx(Clients, { data: data, reload: load })
                         : tab === 'support'
-                            ? _jsx(SupportTickets, { data: data, reload: load })
+                            ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
                             : _jsx(Overview, { data: data, setTab: setTab });
-    return _jsx(DashboardShell, { data: data, tabs: tabs, tab: tab, setTab: setTab, logout: logout, error: error, children: currentContent });
+    return _jsx(DashboardShell, { data: data, tabs: tabs, tab: tab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
     const [mode, setMode] = useState(initialAuthMode);
@@ -251,7 +256,7 @@ function DashboardIcon({ name }) {
     };
     return _jsx("svg", { className: "dashboard-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: (paths[name] || paths.overview).map((d, index) => _jsx("path", { d: d }, index)) });
 }
-function DashboardShell({ data, tabs, tab, setTab, logout, error, children }) {
+function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTicketForm, children }) {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [notificationOpen, setNotificationOpen] = useState(false);
@@ -271,7 +276,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, children }) {
             _jsxs("aside", { className: "dashboard-sidebar", "aria-label": "CI360 dashboard navigation", children: [
                     _jsxs("div", { className: "dashboard-brand", children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Realtime Job Board" })] }),
                     _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
-                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [_jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => goTo('support'), children: "Create Ticket" })] }), _jsxs("p", { className: "dashboard-copyright", children: ["\u00A9 ", new Date().getFullYear(), " CI360degrees", _jsx("span", { children: "All rights reserved." })] })] })
+                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [_jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => { setSidebarOpen(false); setUserMenuOpen(false); setNotificationOpen(false); openSupportTicketForm(); }, children: "Create Ticket" })] }), _jsxs("p", { className: "dashboard-copyright", children: ["\u00A9 ", new Date().getFullYear(), " CI360degrees", _jsx("span", { children: "All rights reserved." })] })] })
                 ] }),
             _jsxs("section", { className: "dashboard-main", children: [
                     _jsxs("div", { className: "dashboard-topbar", children: [

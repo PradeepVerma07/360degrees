@@ -41,7 +41,7 @@ async function attachmentPayload(file) {
         data: bytesToBase64(new Uint8Array(buffer))
     };
 }
-export default function SupportTickets({ data, reload }) {
+export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
     const isAdmin = data.user.role === 'admin';
     const tickets = useMemo(() => data.supportTickets || [], [data.supportTickets]);
     const [showForm, setShowForm] = useState(false);
@@ -60,6 +60,12 @@ export default function SupportTickets({ data, reload }) {
         const timer = window.setTimeout(() => setToast(''), 4500);
         return () => window.clearTimeout(timer);
     }, [toast]);
+    useEffect(() => {
+        if (!openCreateSignal)
+            return;
+        setSelected(null);
+        setShowForm(true);
+    }, [openCreateSignal]);
     const resetForm = () => {
         setForm({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
         setAttachment(null);
