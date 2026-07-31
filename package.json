@@ -13,5 +13,12 @@
     "build": "npm run build -w client && npm run build -w server",
     "start": "npm run start -w server",
     "hostinger-build": "npm install && npm run build"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2"
   }
 }
