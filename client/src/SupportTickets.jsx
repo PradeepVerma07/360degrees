@@ -1,5 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api';
 const categories = [
     'Technical Issue',
@@ -54,6 +54,8 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
     const [loadingTicket, setLoadingTicket] = useState('');
     const [reply, setReply] = useState('');
     const [detailError, setDetailError] = useState('');
+    const selectedRef = useRef(null);
+    const selectedTicketSummary = useMemo(() => selected ? tickets.find(ticket => ticket.ticketNumber === selected.ticketNumber) : null, [tickets, selected?.ticketNumber]);
     useEffect(() => {
         if (!toast)
             return;
@@ -61,11 +63,78 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
         return () => window.clearTimeout(timer);
     }, [toast]);
     useEffect(() => {
+        selectedRef.current = selected;
+    }, [selected]);
+    useEffect(() => {
         if (!openCreateSignal)
             return;
         setSelected(null);
         setShowForm(true);
     }, [openCreateSignal]);
+    useEffect(() => {
+        if (!selected || !selectedTicketSummary || selectedTicketSummary.updatedAt === selected.updatedAt)
+            return;
+        let active = true;
+        api.getSupportTicket(selected.ticketNumber)
+            .then(result => {
+            if (!active)
+                return;
+            setSelected(current => current?.ticketNumber === result.ticket.ticketNumber ? result.ticket : current);
+        })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+        };
+    }, [selected?.ticketNumber, selected?.updatedAt, selectedTicketSummary?.updatedAt]);
+    useEffect(() => {
+        if (!selected?.ticketNumber)
+            return;
+        const ticketNumber = selected.ticketNumber;
+        let active = true;
+        let inFlight = false;
+        const refreshTicket = async () => {
+            if (inFlight || document.hidden)
+                return;
+            inFlight = true;
+            try {
+                const result = await api.getSupportTicket(ticketNumber);
+                if (!active)
+                    return;
+                const current = selectedRef.current;
+                if (!current || current.ticketNumber !== ticketNumber)
+                    return;
+                const currentLastMessage = current.messages?.[current.messages.length - 1]?.id;
+                const nextLastMessage = result.ticket.messages?.[result.ticket.messages.length - 1]?.id;
+                const changed = current.updatedAt !== result.ticket.updatedAt
+                    || current.status !== result.ticket.status
+                    || currentLastMessage !== nextLastMessage
+                    || (current.messages?.length ?? 0) !== (result.ticket.messages?.length ?? 0);
+                if (changed) {
+                    setSelected(result.ticket);
+                    await reload();
+                }
+            }
+            catch (_error) {
+                // Keep the open conversation usable if a background refresh briefly fails.
+            }
+            finally {
+                inFlight = false;
+            }
+        };
+        const refreshWhenVisible = () => {
+            if (!document.hidden)
+                refreshTicket();
+        };
+        const timer = window.setInterval(refreshTicket, 6000);
+        window.addEventListener('focus', refreshTicket);
+        document.addEventListener('visibilitychange', refreshWhenVisible);
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refreshTicket);
+            document.removeEventListener('visibilitychange', refreshWhenVisible);
+        };
+    }, [selected?.ticketNumber, reload]);
     const resetForm = () => {
         setForm({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
         setAttachment(null);
