@@ -254,6 +254,23 @@ app.patch('/api/clients/:id', requireAuth, requireAdmin, async (req, res) => {
     emitRefresh();
     res.json({ ok: true });
 });
+app.delete('/api/clients/:id', requireAuth, requireAdmin, async (req, res) => {
+    const client = await one('SELECT * FROM clients WHERE id=?', [req.params.id]);
+    if (!client)
+        return res.status(404).json({ error: 'Client not found' });
+    const jobs = await one('SELECT COUNT(*) AS count FROM jobs WHERE client_id=?', [req.params.id]);
+    if (Number(jobs.count) > 0)
+        return res.status(409).json({ error: 'This client has job history. Archive the client instead, or remove/reassign jobs before deleting.' });
+    await transaction(async connection => {
+        const tickets = await query('SELECT ticket_number FROM support_tickets WHERE client_id=? OR user_id IN (SELECT id FROM users WHERE client_id=?)', [req.params.id, req.params.id], connection);
+        await query('DELETE FROM support_tickets WHERE client_id=? OR user_id IN (SELECT id FROM users WHERE client_id=?)', [req.params.id, req.params.id], connection);
+        await query('DELETE FROM users WHERE client_id=?', [req.params.id], connection);
+        await query('DELETE FROM clients WHERE id=?', [req.params.id], connection);
+        await audit(req.user.id, 'delete', 'client', req.params.id, { name: client.name, removedTickets: tickets.length }, connection);
+    });
+    emitRefresh();
+    res.json({ ok: true });
+});
 app.post('/api/support-tickets', requireAuth, async (req, res) => {
     const schema = z.object({
         subject: z.string().trim().min(3),
@@ -292,6 +309,25 @@ app.post('/api/support-tickets', requireAuth, async (req, res) => {
     emitRefresh();
     res.status(201).json({ ticket: mapTicket(await getTicketRow(ticketNumber)) });
 });
+app.post('/api/support-tickets/bulk-delete', requireAuth, async (req, res) => {
+    const parsed = z.object({ ticketNumbers: z.array(z.string().min(1)).min(1).max(100) }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const ticketNumbers = [...new Set(parsed.data.ticketNumbers)];
+    const placeholders = ticketNumbers.map(() => '?').join(',');
+    const rows = await query(`SELECT id,ticket_number,user_id FROM support_tickets WHERE ticket_number IN (${placeholders})`, ticketNumbers);
+    const accessible = rows.filter(ticket => canAccessTicket(req.user, ticket));
+    if (!accessible.length)
+        return res.status(404).json({ error: 'No accessible tickets found' });
+    await transaction(async connection => {
+        const ids = accessible.map(ticket => ticket.id);
+        await query(`DELETE FROM support_tickets WHERE id IN (${ids.map(() => '?').join(',')})`, ids, connection);
+        for (const ticket of accessible)
+            await audit(req.user.id, 'delete', 'support_ticket', ticket.ticket_number, { bulk: true }, connection);
+    });
+    emitRefresh();
+    res.json({ ok: true, deleted: accessible.length });
+});
 app.get('/api/support-tickets/:ticketNumber', requireAuth, async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
@@ -299,6 +335,22 @@ app.get('/api/support-tickets/:ticketNumber', requireAuth, async (req, res) => {
     if (!canAccessTicket(req.user, ticket))
         return res.status(403).json({ error: 'Ticket access denied' });
     res.json({ ticket: await ticketDetail(ticket) });
+});
+app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, async (req, res) => {
+    const ticket = await getTicketRow(req.params.ticketNumber);
+    if (!ticket)
+        return res.status(404).json({ error: 'Ticket not found' });
+    if (!canAccessTicket(req.user, ticket))
+        return res.status(403).json({ error: 'Ticket access denied' });
+    const now = new Date().toISOString();
+    await transaction(async connection => {
+        await query('DELETE FROM support_ticket_attachments WHERE ticket_id=?', [ticket.id], connection);
+        await query('DELETE FROM support_ticket_messages WHERE ticket_id=?', [ticket.id], connection);
+        await query('UPDATE support_tickets SET updated_at=? WHERE id=?', [now, ticket.id], connection);
+        await audit(req.user.id, 'clear', 'support_ticket', ticket.ticket_number, {}, connection);
+    });
+    emitRefresh();
+    res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
 app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, async (req, res) => {
     const parsed = z.object({ body: z.string().trim().min(1).max(5000) }).safeParse(req.body);
@@ -353,6 +405,19 @@ app.patch('/api/support-tickets/:ticketNumber', requireAuth, requireAdmin, async
     await audit(req.user.id, 'update', 'support_ticket', ticket.ticket_number, parsed.data);
     emitRefresh();
     res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
+});
+app.delete('/api/support-tickets/:ticketNumber', requireAuth, async (req, res) => {
+    const ticket = await getTicketRow(req.params.ticketNumber);
+    if (!ticket)
+        return res.status(404).json({ error: 'Ticket not found' });
+    if (!canAccessTicket(req.user, ticket))
+        return res.status(403).json({ error: 'Ticket access denied' });
+    await transaction(async connection => {
+        await query('DELETE FROM support_tickets WHERE id=?', [ticket.id], connection);
+        await audit(req.user.id, 'delete', 'support_ticket', ticket.ticket_number, {}, connection);
+    });
+    emitRefresh();
+    res.json({ ok: true });
 });
 app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireAuth, async (req, res) => {
     const row = await one(`SELECT a.*,t.ticket_number,t.user_id FROM support_ticket_attachments a JOIN support_tickets t ON t.id=a.ticket_id WHERE t.ticket_number=? AND a.id=?`,

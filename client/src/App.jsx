@@ -460,16 +460,21 @@ function Clients({ data, reload }) {
     const [form, setForm] = useState({ id: '', name: '', password: '' });
     const [passwords, setPasswords] = useState({});
     const [message, setMessage] = useState('');
-    const create = async () => { try {
-        await api.createClient(form);
-        setForm({ id: '', name: '', password: '' });
-        setMessage('Client added.');
+    const create = async () => {
+        try {
+            await api.createClient(form);
+            setForm({ id: '', name: '', password: '' });
+            setMessage('Client added.');
+            await reload();
+        }
+        catch (err) {
+            setMessage(err.message);
+        }
+    };
+    const update = async (id, patch) => {
+        await api.updateClient(id, patch);
         await reload();
-    }
-    catch (err) {
-        setMessage(err.message);
-    } };
-    const update = async (id, patch) => { await api.updateClient(id, patch); await reload(); };
+    };
     const resetPassword = async (id) => {
         const password = (passwords[id] || '').trim();
         if (password.length < 6) {
@@ -489,12 +494,91 @@ function Clients({ data, reload }) {
         const next = status === 'active' ? 'archived' : 'active';
         try {
             await update(id, { status: next });
-            setMessage(next === 'archived' ? 'Client removed.' : 'Client restored.');
+            setMessage(next === 'archived' ? 'Client archived.' : 'Client restored.');
         }
         catch (err) {
             setMessage(err.message);
         }
     };
-    return _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Manage clients" }), _jsx("p", { className: "muted", children: "Each client logs in with their own ID and password, and only sees their own jobs." }), message && _jsx("div", { className: "alert", children: message }), _jsx("div", { className: "client-table-wrap", children: _jsxs("table", { className: "client-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { children: "Client ID" }), _jsx("th", { children: "Name" }), _jsx("th", { children: "Status" }), _jsx("th", { children: "New Password" }), _jsx("th", { children: "Actions" })] }) }), _jsx("tbody", { children: data.clients.map(c => _jsxs("tr", { children: [_jsx("td", { children: _jsx("b", { children: c.id }) }), _jsx("td", { children: c.name }), _jsx("td", { children: _jsx("span", { className: `status-pill ${c.status}`, children: c.status }) }), _jsx("td", { children: _jsx("input", { type: "password", value: passwords[c.id] || '', onChange: e => setPasswords(current => ({ ...current, [c.id]: e.target.value })), onKeyDown: e => { if (e.key === 'Enter')
-                                                resetPassword(c.id); }, placeholder: "minimum 6 characters", "aria-label": `New password for ${c.name}` }) }), _jsx("td", { children: _jsxs("div", { className: "client-actions", children: [_jsx("button", { type: "button", className: "primary small", onClick: () => resetPassword(c.id), children: "Reset Password" }), _jsx("button", { type: "button", className: c.status === 'active' ? 'danger small' : 'small', onClick: () => toggleClient(c.id, c.status), children: c.status === 'active' ? 'Remove' : 'Restore' })] }) })] }, c.id)) })] }) }), _jsx("h3", { children: "Add client" }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Client ID", _jsx("input", { value: form.id, onChange: e => setForm({ ...form, id: e.target.value.toLowerCase() }) })] }), _jsxs("label", { children: ["Name", _jsx("input", { value: form.name, onChange: e => setForm({ ...form, name: e.target.value }) })] }), _jsxs("label", { children: ["Temporary password", _jsx("input", { value: form.password, onChange: e => setForm({ ...form, password: e.target.value }) })] })] }), _jsx("button", { type: "button", className: "primary", onClick: create, children: "+ Add client" })] });
+    const deleteClient = async (client) => {
+        if (!window.confirm(`Permanently delete ${client.name}? This cannot be undone.`))
+            return;
+        try {
+            await api.deleteClient(client.id);
+            setPasswords(current => {
+                const next = { ...current };
+                delete next[client.id];
+                return next;
+            });
+            setMessage('Client deleted.');
+            await reload();
+        }
+        catch (err) {
+            setMessage(err.message);
+        }
+    };
+    return (
+        <section className="card">
+            <h2>Manage clients</h2>
+            <p className="muted">Each client logs in with their own ID and password, and only sees their own jobs.</p>
+            {message && <div className="alert">{message}</div>}
+            <div className="client-table-wrap">
+                <table className="client-table">
+                    <thead>
+                        <tr>
+                            <th>Client ID</th>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>New Password</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.clients.map(client => (
+                            <tr key={client.id}>
+                                <td><b>{client.id}</b></td>
+                                <td>{client.name}</td>
+                                <td><span className={`status-pill ${client.status}`}>{client.status}</span></td>
+                                <td>
+                                    <input
+                                        type="password"
+                                        value={passwords[client.id] || ''}
+                                        onChange={event => setPasswords(current => ({ ...current, [client.id]: event.target.value }))}
+                                        onKeyDown={event => {
+                                            if (event.key === 'Enter')
+                                                resetPassword(client.id);
+                                        }}
+                                        placeholder="minimum 6 characters"
+                                        aria-label={`New password for ${client.name}`}
+                                    />
+                                </td>
+                                <td>
+                                    <div className="client-actions">
+                                        <button type="button" className="primary small" onClick={() => resetPassword(client.id)}>Reset Password</button>
+                                        <button type="button" className={client.status === 'active' ? 'danger small' : 'small'} onClick={() => toggleClient(client.id, client.status)}>
+                                            {client.status === 'active' ? 'Archive' : 'Restore'}
+                                        </button>
+                                        <button type="button" className="danger small" onClick={() => deleteClient(client)}>Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            <h3>Add client</h3>
+            <div className="row">
+                <label>Client ID
+                    <input value={form.id} onChange={event => setForm({ ...form, id: event.target.value.toLowerCase() })} />
+                </label>
+                <label>Name
+                    <input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} />
+                </label>
+                <label>Temporary password
+                    <input value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} />
+                </label>
+            </div>
+            <button type="button" className="primary" onClick={create}>+ Add client</button>
+        </section>
+    );
 }
