@@ -69,7 +69,20 @@ export default function App() {
         return _jsx("div", { className: "center", children: error || 'Loading CI360 Job Board...' });
     const tabs = data.user.role === 'admin' ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']] : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['support', 'Support Tickets']];
     const logout = () => { setToken(null); setAuth(false); setData(null); };
-    return _jsxs("main", { className: "app", children: [_jsxs("header", { children: [_jsxs("div", { children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Realtime Job Board" })] }), _jsxs("div", { className: "identity", children: ["Logged in as ", _jsx("b", { children: data.user.name }), _jsx("button", { onClick: logout, children: "Log out" })] })] }), _jsx("nav", { children: tabs.map(([id, label]) => _jsx("button", { className: tab === id ? 'active' : '', onClick: () => setTab(id), children: label }, id)) }), error && _jsx("div", { className: "alert error", children: error }), tab === 'overview' && _jsx(Overview, { data: data }), " ", tab === 'submit' && _jsx(Submit, { data: data, reload: load }), " ", tab === 'jobs' && _jsx(Jobs, { data: data, reload: load }), " ", tab === 'settings' && data.user.role === 'admin' && _jsx(SettingsPanel, { initial: data.settings, reload: load }), " ", tab === 'clients' && data.user.role === 'admin' && _jsx(Clients, { data: data, reload: load }), " ", tab === 'support' && _jsx(SupportTickets, { data: data, reload: load }), " "] });
+    const currentContent = tab === 'overview'
+        ? _jsx(Overview, { data: data, setTab: setTab })
+        : tab === 'submit'
+            ? _jsx(Submit, { data: data, reload: load })
+            : tab === 'jobs'
+                ? _jsx(Jobs, { data: data, reload: load })
+                : tab === 'settings' && data.user.role === 'admin'
+                    ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
+                    : tab === 'clients' && data.user.role === 'admin'
+                        ? _jsx(Clients, { data: data, reload: load })
+                        : tab === 'support'
+                            ? _jsx(SupportTickets, { data: data, reload: load })
+                            : _jsx(Overview, { data: data, setTab: setTab });
+    return _jsx(DashboardShell, { data: data, tabs: tabs, tab: tab, setTab: setTab, logout: logout, error: error, children: currentContent });
 }
 function Login({ onLogin }) {
     const [mode, setMode] = useState(initialAuthMode);
@@ -191,17 +204,162 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-function Overview({ data }) {
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', support: 'support' };
+const dashboardTabDescriptions = {
+    overview: 'Workspace summary',
+    submit: 'Create a request',
+    jobs: 'Browse every job',
+    settings: 'Turnaround rules',
+    clients: 'Client access',
+    support: 'Help and tickets'
+};
+const dashboardDate = value => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return 'Date unavailable';
+    return date.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+};
+const shortDateTime = value => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return 'Date unavailable';
+    return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+const timestamp = value => {
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+};
+const initialsFor = value => (value || 'CI360').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'CI';
+function DashboardIcon({ name }) {
+    const paths = {
+        overview: ['M4 13h6V4H4z', 'M14 20h6v-9h-6z', 'M4 20h6v-4H4z', 'M14 8h6V4h-6z'],
+        submit: ['M12 5v14', 'M5 12h14', 'M5 4h14v16H5z'],
+        jobs: ['M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2', 'M4 7h16v12H4z', 'M9 12h6'],
+        clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
+        users: ['M16 18a4 4 0 0 0-8 0', 'M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M20 18a3.5 3.5 0 0 0-3-3.45', 'M17 5.3a2.6 2.6 0 0 1 0 5.4'],
+        support: ['M5 18v-5a7 7 0 0 1 14 0v5', 'M5 18h3v-5H5z', 'M16 18h3v-5h-3z', 'M16 19a4 4 0 0 1-8 0'],
+        bell: ['M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16z', 'M10 20a2 2 0 0 0 4 0'],
+        menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+        chevron: ['M9 6l6 6-6 6'],
+        calendar: ['M7 3v4', 'M17 3v4', 'M4 8h16', 'M5 5h14v16H5z'],
+        plus: ['M12 5v14', 'M5 12h14'],
+        arrow: ['M5 12h14', 'M13 6l6 6-6 6'],
+        total: ['M7 7h10', 'M7 12h10', 'M7 17h10', 'M4 4h16v16H4z'],
+        pending: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v6l4 2'],
+        completed: ['M20 6L9 17l-5-5', 'M21 12a9 9 0 1 1-3.2-6.9'],
+        document: ['M7 3h7l5 5v13H7z', 'M14 3v6h5', 'M10 14h6', 'M10 18h4']
+    };
+    return _jsx("svg", { className: "dashboard-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: (paths[name] || paths.overview).map((d, index) => _jsx("path", { d: d }, index)) });
+}
+function DashboardShell({ data, tabs, tab, setTab, logout, error, children }) {
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [userMenuOpen, setUserMenuOpen] = useState(false);
+    const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
+    const urgentJobs = data.jobs.filter(job => isPendingJob(job) && job.priority === 'Urgent').length;
+    const notificationCount = Math.min(openTickets + urgentJobs, 99);
+    const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
+    const goTo = id => {
+        setTab(id);
+        setSidebarOpen(false);
+        setUserMenuOpen(false);
+    };
+    return _jsxs("main", { className: `dashboard-shell ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+            _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
+            _jsxs("aside", { className: "dashboard-sidebar", "aria-label": "CI360 dashboard navigation", children: [
+                    _jsxs("div", { className: "dashboard-brand", children: [_jsxs("h1", { children: ["CI360", _jsx("span", { children: "degrees" })] }), _jsx("p", { children: "Realtime Job Board" })] }),
+                    _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
+                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [_jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => goTo('support'), children: "Create Ticket" })] }), _jsxs("p", { className: "dashboard-copyright", children: ["\u00A9 ", new Date().getFullYear(), " CI360degrees", _jsx("span", { children: "All rights reserved." })] })] })
+                ] }),
+            _jsxs("section", { className: "dashboard-main", children: [
+                    _jsxs("div", { className: "dashboard-topbar", children: [
+                            _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": "Open navigation", onClick: () => setSidebarOpen(true), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: "CI360degrees Workspace" })] })] }),
+                            _jsxs("div", { className: "dashboard-user-area", children: [
+                                    _jsxs("span", { className: "dashboard-login-text", children: ["Logged in as ", data.user.name] }),
+                                    _jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": `${notificationCount} notifications`, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }),
+                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => setUserMenuOpen(open => !open), children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.role === 'admin' ? 'Administrator' : 'Client workspace' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
+                                ] })
+                        ] }),
+                    error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
+                    _jsx("div", { className: "dashboard-content", children: children })
+                ] })
+        ] });
+}
+function DashboardStat({ tone, icon, value, label, support }) {
+    return _jsxs("article", { className: `dashboard-stat ${tone}`, children: [_jsx("span", { className: "dashboard-stat-icon", children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("div", { children: [_jsx("strong", { children: value }), _jsx("span", { children: label }), _jsx("small", { children: support })] })] });
+}
+function DashboardEmptyState({ title, body }) {
+    return _jsxs("div", { className: "dashboard-empty", children: [_jsx("span", { children: _jsx(DashboardIcon, { name: "document" }) }), _jsx("b", { children: title }), _jsx("p", { children: body })] });
+}
+function recentActivityItems(data) {
+    const jobItems = data.jobs.map(job => {
+        const completed = isCompletedJob(job);
+        const verb = completed ? 'completed' : job.status === 'submitted' ? 'submitted' : 'updated';
+        const date = completed ? dateForMonth(job) : job.updatedAt || job.datePosted;
+        return { id: `job-${job.id}`, tone: completed ? 'success' : job.priority === 'Urgent' ? 'urgent' : 'blue', description: `Job "${job.title}" ${verb}`, date };
+    });
+    const ticketItems = (data.supportTickets || []).map(ticket => ({ id: `ticket-${ticket.ticketNumber}`, tone: ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'success' : 'purple', description: `Ticket "${ticket.subject}" ${ticket.status === 'Open' ? 'created' : 'updated'}`, date: ticket.updatedAt || ticket.createdAt }));
+    const clientItems = data.user.role === 'admin' ? data.clients.map(client => ({ id: `client-${client.id}`, tone: 'gold', description: `Client "${client.name}" added`, date: client.createdAt })) : [];
+    return [...jobItems, ...ticketItems, ...clientItems].filter(item => timestamp(item.date)).sort((a, b) => timestamp(b.date) - timestamp(a.date)).slice(0, 5);
+}
+function Overview({ data, setTab }) {
     const [client, setClient] = useState('');
-    const jobs = client ? data.jobs.filter(job => job.clientId === client) : data.jobs;
-    const pendingGroups = groupByMonth(jobs.filter(isPendingJob), job => job.datePosted);
-    const completedGroups = groupByMonth(jobs.filter(isCompletedJob), dateForMonth);
+    const [pendingMonth, setPendingMonth] = useState('');
+    const [completedMonth, setCompletedMonth] = useState('');
+    const jobs = useMemo(() => client ? data.jobs.filter(job => job.clientId === client) : data.jobs, [data.jobs, client]);
+    const pendingJobs = useMemo(() => jobs.filter(isPendingJob).sort((a, b) => {
+        const priorityDiff = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
+        return priorityDiff || timestamp(a.datePosted) - timestamp(b.datePosted);
+    }), [jobs]);
+    const completedJobs = useMemo(() => jobs.filter(isCompletedJob).sort((a, b) => timestamp(dateForMonth(b)) - timestamp(dateForMonth(a))), [jobs]);
+    const pendingMonths = useMemo(() => sortedMonthKeys(groupByMonth(pendingJobs, job => job.datePosted)), [pendingJobs]);
+    const completedMonths = useMemo(() => sortedMonthKeys(groupByMonth(completedJobs, dateForMonth)), [completedJobs]);
+    useEffect(() => { if (pendingMonth && !pendingMonths.includes(pendingMonth))
+        setPendingMonth(''); }, [pendingMonth, pendingMonths]);
+    useEffect(() => { if (completedMonth && !completedMonths.includes(completedMonth))
+        setCompletedMonth(''); }, [completedMonth, completedMonths]);
+    const visiblePending = pendingMonth ? pendingJobs.filter(job => monthKey(job.datePosted) === pendingMonth) : pendingJobs;
+    const visibleCompleted = completedMonth ? completedJobs.filter(job => monthKey(dateForMonth(job)) === completedMonth) : completedJobs;
+    const activeClients = data.user.role === 'admin' ? data.clients.filter(client => client.status === 'active').length : data.user.clientId ? 1 : 0;
+    const quickActions = [
+        ['submit', 'plus', 'Submit a Job', 'Create a new job request'],
+        ['jobs', 'jobs', 'View All Jobs', 'Browse all your jobs'],
+        ...(data.user.role === 'admin' ? [['clients', 'users', 'Manage Clients', 'View and manage clients']] : []),
+        ['support', 'support', 'Support Tickets', 'Get help and support']
+    ];
+    const activities = recentActivityItems(data);
     return _jsxs(_Fragment, { children: [
-            data.user.role === 'admin' && _jsx("div", { className: "filters overview-filter", children: _jsxs("select", { value: client, onChange: e => setClient(e.target.value), children: [_jsx("option", { value: "", children: "All clients" }), data.clients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id))] }) }),
-            _jsx("h3", { className: "section-heading", children: "Pending, by month posted" }),
-            _jsx(MonthGroups, { groups: pendingGroups, data: data, empty: "Nothing here yet.", sortDate: job => job.datePosted }),
-            _jsx("h3", { className: "section-heading section-heading-spaced", children: "Completed, by month finished" }),
-            _jsx(MonthGroups, { groups: completedGroups, data: data, empty: "Nothing completed yet.", sortDate: dateForMonth })
+            _jsxs("section", { className: "dashboard-welcome-card", children: [
+                    _jsxs("div", { children: [_jsxs("h2", { children: ["Welcome back, ", data.user.name, "!"] }), _jsx("p", { children: "Here's what's happening with your jobs today." })] }),
+                    _jsxs("div", { className: "dashboard-date-box", children: [_jsx(DashboardIcon, { name: "calendar" }), _jsx("span", { children: dashboardDate(new Date()) })] })
+                ] }),
+            _jsxs("section", { className: "dashboard-stats", "aria-label": "Dashboard statistics", children: [
+                    _jsx(DashboardStat, { tone: "blue", icon: "total", value: data.jobs.length, label: "Total Jobs", support: "All time jobs posted" }),
+                    _jsx(DashboardStat, { tone: "gold", icon: "pending", value: data.jobs.filter(isPendingJob).length, label: "Pending Jobs", support: "Awaiting completion" }),
+                    _jsx(DashboardStat, { tone: "green", icon: "completed", value: data.jobs.filter(isCompletedJob).length, label: "Completed Jobs", support: "Successfully delivered" }),
+                    _jsx(DashboardStat, { tone: "purple", icon: "users", value: activeClients, label: data.user.role === 'admin' ? 'Active Clients' : 'Workspace', support: data.user.role === 'admin' ? 'Active clients' : 'Your client access' })
+                ] }),
+            _jsxs("section", { className: "dashboard-work-grid", children: [
+                    _jsxs("div", { className: "dashboard-work-left", children: [
+                            _jsxs("article", { className: "dashboard-card dashboard-jobs-card", children: [
+                                    _jsxs("div", { className: "dashboard-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pending Jobs" }), _jsx("p", { children: "Jobs awaiting completion, by month posted" })] }), _jsxs("span", { className: "dashboard-count-pill", children: [visiblePending.length, visiblePending.length === 1 ? ' Job' : ' Jobs'] })] }),
+                                    _jsxs("div", { className: "dashboard-filter-row", children: [
+                                            data.user.role === 'admin' && _jsxs("select", { value: client, onChange: e => setClient(e.target.value), "aria-label": "Filter jobs by client", children: [_jsx("option", { value: "", children: "All clients" }), data.clients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id))] }),
+                                            _jsxs("select", { value: pendingMonth, onChange: e => setPendingMonth(e.target.value), "aria-label": "Filter pending jobs by month", children: [_jsx("option", { value: "", children: "All pending months" }), pendingMonths.map(key => _jsx("option", { value: key, children: monthLabel(key) }, key))] })
+                                        ] }),
+                                    visiblePending.length ? _jsx("div", { className: "jobs dashboard-overview-jobs", children: visiblePending.map(job => _jsx(JobCard, { job: job, data: data }, job.id)) }) : _jsx(DashboardEmptyState, { title: "Nothing pending yet.", body: "New active jobs will appear here once submitted." }),
+                                    _jsx("div", { className: "dashboard-card-action", children: _jsxs("button", { type: "button", onClick: () => setTab('jobs'), children: ["View all pending jobs", _jsx(DashboardIcon, { name: "chevron" })] }) })
+                                ] }),
+                            _jsxs("article", { className: "dashboard-card dashboard-jobs-card", children: [
+                                    _jsxs("div", { className: "dashboard-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Completed Jobs" }), _jsx("p", { children: "Jobs completed, by month finished" })] }), _jsxs("span", { className: "dashboard-count-pill", children: [visibleCompleted.length, visibleCompleted.length === 1 ? ' Job' : ' Jobs'] })] }),
+                                    completedJobs.length > 0 && _jsx("div", { className: "dashboard-filter-row", children: _jsxs("select", { value: completedMonth, onChange: e => setCompletedMonth(e.target.value), "aria-label": "Filter completed jobs by month", children: [_jsx("option", { value: "", children: "All completed months" }), completedMonths.map(key => _jsx("option", { value: key, children: monthLabel(key) }, key))] }) }),
+                                    visibleCompleted.length ? _jsx("div", { className: "jobs dashboard-overview-jobs", children: visibleCompleted.map(job => _jsx(JobCard, { job: job, data: data }, job.id)) }) : _jsx(DashboardEmptyState, { title: "Nothing completed yet.", body: "Completed jobs will appear here once finished." })
+                                ] })
+                        ] }),
+                    _jsxs("aside", { className: "dashboard-work-right", children: [
+                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Quick Actions" }), _jsx("div", { className: "dashboard-action-list", children: quickActions.map(([id, icon, title, description]) => _jsxs("button", { type: "button", onClick: () => setTab(id), children: [_jsx("span", { children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("span", { children: [_jsx("b", { children: title }), _jsx("small", { children: description })] }), _jsx(DashboardIcon, { name: "chevron" })] }, id)) })] }),
+                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Recent Activity" }), activities.length ? _jsx("div", { className: "dashboard-activity-list", children: activities.map(item => _jsxs("div", { className: `dashboard-activity ${item.tone}`, children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("div", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Job, ticket, and client updates will appear here." })] })
+                        ] })
+                ] })
         ] });
 }
 function MonthGroups({ groups, data, empty, editable = false, reload, sortDate = dateForMonth }) {
