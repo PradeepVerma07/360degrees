@@ -28,3 +28,7 @@
 
 .dashboard-shell .modal-backdrop{z-index:100;align-items:center}.dashboard-shell .modal-panel{max-height:calc(100dvh - 40px)}.dashboard-shell .toast{z-index:110}
 @media(max-width:720px){.dashboard-shell .modal-backdrop{align-items:start;padding-top:82px}.dashboard-shell .modal-panel{max-height:calc(100dvh - 104px)}}
+
+.support-page.ticket-open>.page-title{display:none}.dashboard-shell .support-page.ticket-open{display:block}.dashboard-shell .ticket-detail-page{width:100%;max-width:none;margin:0;min-height:calc(100dvh - 134px);padding:24px;overflow:visible}.dashboard-shell .ticket-detail-page .ticket-detail-head{align-items:flex-start}.dashboard-shell .ticket-back{margin-bottom:12px}.dashboard-shell .ticket-detail-page .reply-box textarea{min-height:180px}
+@media(max-width:860px){.dashboard-shell .ticket-detail-page{min-height:calc(100dvh - 102px)}}
+@media(max-width:520px){.dashboard-shell .ticket-detail-page{padding:16px}.dashboard-shell .ticket-detail-page .ticket-meta{grid-template-columns:1fr}.dashboard-shell .ticket-detail-page .message-head{display:grid}.dashboard-shell .ticket-detail-page .reply-box textarea{min-height:150px}}
