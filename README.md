@@ -85,7 +85,7 @@ Open:
 
 Demo logins are inserted only when the database has no clients and `SEED_DEMO_DATA=true`:
 
-- Admin: `ci360admin` / `CI360Demo#2026`
+
 - Client: `acme` / `acme123`
 - Client: `beta` / `beta123`
 
