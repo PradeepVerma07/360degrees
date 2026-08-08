@@ -166,7 +166,7 @@ function LoginForm({ onLogin, onMode }) {
             _jsx("div", { className: "auth-kicker", children: "CLIENT WORKSPACE" }),
             _jsx("h2", { children: "Welcome Back" }),
             _jsx("p", { className: "auth-subtitle", children: "Sign in to access your workspace." }),
-            _jsxs("label", { children: ["Email Address", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or admin ID", required: true })] }),
+            _jsxs("label", { children: ["Email or User ID", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or workspace ID", required: true })] }),
             _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
             _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
             error && _jsx("div", { className: "alert error", children: error }),

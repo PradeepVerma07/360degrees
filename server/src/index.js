@@ -263,7 +263,8 @@ app.post('/api/auth/login', async (req, res) => {
     const parsed = z.object({ id: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: 'ID and password are required' });
-    const user = await one("SELECT * FROM users WHERE id=? AND status='active'", [parsed.data.id]);
+    const loginId = parsed.data.id.trim();
+    const user = await one("SELECT * FROM users WHERE (id=? OR email=?) AND status='active' ORDER BY id=? DESC LIMIT 1", [loginId, loginId, loginId]);
     if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash)))
         return res.status(401).json({ error: 'Incorrect ID or password' });
     await query('UPDATE users SET last_login=?,updated_at=? WHERE id=?', [new Date(), new Date(), user.id]);

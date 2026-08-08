@@ -377,12 +377,18 @@ async function mapExistingUsersToRbac() {
 }
 
 async function ensureEnvironmentSuperAdmin() {
-  const id = (process.env.SUPER_ADMIN_ID || '').trim();
-  const password = (process.env.SUPER_ADMIN_PASSWORD || '').trim();
+  const cleanEnvValue = value => {
+    const trimmed = (value || '').trim();
+    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+      return trimmed.slice(1, -1);
+    return trimmed;
+  };
+  const id = cleanEnvValue(process.env.SUPER_ADMIN_ID);
+  const password = cleanEnvValue(process.env.SUPER_ADMIN_PASSWORD);
   if (!id)
     return;
-  const name = (process.env.SUPER_ADMIN_NAME || 'Super Admin').trim();
-  const email = (process.env.SUPER_ADMIN_EMAIL || '').trim() || null;
+  const name = cleanEnvValue(process.env.SUPER_ADMIN_NAME) || 'Super Admin';
+  const email = cleanEnvValue(process.env.SUPER_ADMIN_EMAIL) || null;
   const existing = await one('SELECT id FROM users WHERE id=?', [id]);
   if (existing) {
     if (password) {
