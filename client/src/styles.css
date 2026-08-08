@@ -267,3 +267,24 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 @media(max-width:1320px){.management-stats-users{grid-template-columns:repeat(3,minmax(0,1fr))}.user-filter-bar{grid-template-columns:repeat(3,minmax(0,1fr))}.user-search-field{grid-column:1/-1}}
 @media(max-width:900px){.overview-workload-grid{grid-template-columns:1fr}.management-stats-users{grid-template-columns:repeat(2,minmax(0,1fr))}.user-filter-bar{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.management-stats-users{grid-template-columns:1fr}.user-filter-bar{grid-template-columns:1fr}.dashboard-shell .management-table,.dashboard-shell .management-table tbody,.dashboard-shell .management-table tr,.dashboard-shell .management-table td{display:block;width:100%;min-width:0}.dashboard-shell .management-table thead{display:none}.dashboard-shell .management-table tr{margin:0 0 12px;padding:14px;border:1px solid var(--ci-border);border-radius:14px;background:var(--ci-card);box-shadow:0 4px 16px rgba(16,32,68,.05)}.dashboard-shell .management-table td{display:grid;grid-template-columns:minmax(104px,36%) minmax(0,1fr);gap:10px;align-items:center;padding:9px 0;border:0;overflow-wrap:anywhere}.dashboard-shell .management-table td+td{border-top:1px solid var(--ci-border)}.dashboard-shell .management-table td:before{content:attr(data-label);color:var(--ci-muted);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.row-actions div{position:static;width:100%;margin-top:8px;box-shadow:none}.hierarchy-person{grid-template-columns:34px minmax(0,1fr)}.hierarchy-person em{grid-column:2}.overview-workload-row{grid-template-columns:1fr 38px}.overview-workload-meter{grid-column:1/-1;grid-row:2}}
+
+/* Role-specific portals */
+.auth-portal-switcher{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px;padding:5px;border:1px solid #e4e7ec;border-radius:14px;background:#f7f9fd}
+.auth-portal-switcher button{min-height:38px;border:0;border-radius:10px;background:transparent;color:#667085;font-size:13px;font-weight:900}
+.auth-portal-switcher button.active{background:#0f2346;color:#fff;box-shadow:0 8px 20px rgba(15,35,70,.16)}
+.auth-team .auth-story{background:#0d3f39}.auth-client .auth-story{background:#3d2f12}
+.auth-team .auth-kicker,.auth-team .text-button:hover,.auth-team .auth-footnote a:hover{color:#198754}
+.auth-client .auth-kicker,.auth-client .text-button:hover,.auth-client .auth-footnote a:hover{color:#c58a00}
+.auth-team .auth-primary,.auth-team .password-field button:hover{background:#0d3f39}
+.auth-client .auth-primary,.auth-client .password-field button:hover{background:#3d2f12}
+.dashboard-shell.role-super_admin{--role-accent:#6f42c1}.dashboard-shell.role-admin{--role-accent:#006cff}.dashboard-shell.role-employee{--role-accent:#198754}.dashboard-shell.role-client{--role-accent:#c58a00}
+.dashboard-shell .dashboard-nav button.active{background:var(--role-accent)!important;box-shadow:0 12px 28px color-mix(in srgb,var(--role-accent) 34%,transparent)!important}
+.dashboard-shell .overview-reference-head span{background:var(--role-accent)}
+.dashboard-shell .overview-submit-button{background:var(--role-accent)!important;box-shadow:0 8px 20px color-mix(in srgb,var(--role-accent) 22%,transparent)!important}
+.dashboard-shell .overview-submit-button:hover{filter:brightness(.94)}
+.dashboard-role-card{border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.06);color:#fff;padding:16px;box-shadow:none}
+.dashboard-role-card .dashboard-icon{color:#8bdff0}.dashboard-role-card b{display:block;margin:10px 0 8px}.dashboard-role-card p{margin:0 0 14px;color:#b8c6d8;font-size:13px;line-height:1.5}
+.dashboard-role-card button{width:100%;background:var(--role-accent)!important;color:#fff!important;font-weight:800;min-height:42px}
+.management-header-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.management-header-actions button:not(.overview-submit-button){min-height:44px;padding:0 16px;border:1px solid var(--ci-border)!important;border-radius:8px!important;background:#fff!important;color:var(--ci-primary);font-weight:800}
+@media(max-width:720px){.management-header-actions{width:100%;justify-content:stretch}.management-header-actions button{width:100%;justify-content:center}}

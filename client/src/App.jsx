@@ -63,6 +63,86 @@ const passwordChecks = password => ({
     special: /[^A-Za-z0-9]/.test(password)
 });
 const passwordScore = password => Object.values(passwordChecks(password)).filter(Boolean).length;
+const loginPortalOptions = {
+    admin: {
+        label: 'Admin',
+        storyTitle: 'Admin control center.',
+        storyBody: 'Manage clients, users, departments, and delivery work from one secure console.',
+        kicker: 'ADMIN CONSOLE',
+        title: 'Admin Sign In',
+        subtitle: 'Access client, employee, and role management.',
+        foot: 'Users | Roles | Departments'
+    },
+    team: {
+        label: 'Team',
+        storyTitle: 'Team workdesk.',
+        storyBody: 'Track assigned jobs, deadlines, support tickets, and delivery updates.',
+        kicker: 'EMPLOYEE DESK',
+        title: 'Team Sign In',
+        subtitle: 'Open your assigned jobs and team workspace.',
+        foot: 'Jobs | TAT | Support'
+    },
+    client: {
+        label: 'Client',
+        storyTitle: 'Client workspace.',
+        storyBody: 'Submit jobs, upload asset links, and follow every request from one place.',
+        kicker: 'CLIENT PORTAL',
+        title: 'Client Sign In',
+        subtitle: 'Submit work requests and check live status.',
+        foot: 'Requests | Assets | Updates'
+    }
+};
+const dashboardRoleFor = user => {
+    if (user?.accountType === 'super_admin' || user?.roleSlug === 'super_admin')
+        return 'super_admin';
+    if (user?.accountType === 'admin')
+        return 'admin';
+    if (user?.accountType === 'client')
+        return 'client';
+    return 'employee';
+};
+const dashboardProfileFor = data => {
+    const roleKey = dashboardRoleFor(data.user);
+    const profiles = {
+        super_admin: {
+            roleKey,
+            workspaceTitle: 'Super Admin Console',
+            overviewTitle: 'Super Admin Console',
+            sidebarTitle: 'Platform Control',
+            sidebarBody: 'Users, roles, departments, and audit tools.',
+            sidebarButton: 'Open Users & Roles',
+            sidebarTab: 'users'
+        },
+        admin: {
+            roleKey,
+            workspaceTitle: 'Admin Workspace',
+            overviewTitle: 'Admin Dashboard',
+            sidebarTitle: 'Team Management',
+            sidebarBody: 'Create employees, departments, roles, and assignments.',
+            sidebarButton: 'Manage Users',
+            sidebarTab: 'users'
+        },
+        employee: {
+            roleKey,
+            workspaceTitle: 'Employee Desk',
+            overviewTitle: 'Employee Dashboard',
+            sidebarTitle: 'My Work',
+            sidebarBody: 'Assigned jobs, due dates, and support updates.',
+            sidebarButton: 'Open Jobs',
+            sidebarTab: 'jobs'
+        },
+        client: {
+            roleKey,
+            workspaceTitle: 'Client Portal',
+            overviewTitle: 'Client Dashboard',
+            sidebarTitle: 'Need Help?',
+            sidebarBody: 'Our support team is here to help you.',
+            sidebarButton: 'Create Ticket',
+            sidebarAction: 'support'
+        }
+    };
+    return profiles[roleKey];
+};
 export default function App() {
     const [auth, setAuth] = useState(Boolean(getToken()));
     const [data, setData] = useState(null);
@@ -116,7 +196,7 @@ export default function App() {
                     : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
                         ? _jsx(Clients, { data: data, reload: load })
                         : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
-                            ? _jsx(Employees, { data: data, reload: load })
+                            ? _jsx(Employees, { data: data, setTab: setTab })
                             : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
                                 ? _jsx(UsersRoles, { data: data, reload: load })
                                 : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
@@ -130,21 +210,23 @@ export default function App() {
 }
 function Login({ onLogin }) {
     const [mode, setMode] = useState(initialAuthMode);
+    const [portal, setPortal] = useState('admin');
+    const portalCopy = loginPortalOptions[portal];
     const showMode = next => {
         setMode(next);
         if (next === 'login')
             window.history.replaceState(null, '', window.location.pathname);
     };
-    return _jsxs("div", { className: "auth-shell", children: [
+    return _jsxs("div", { className: `auth-shell auth-${portal}`, children: [
             _jsxs("aside", { className: "auth-story", children: [
                     _jsx(AuthLogo, {}),
-                    _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: "Work requests, organised beautifully." }), _jsx("p", { children: "Submit jobs, follow turnaround times, collaborate with the team, and manage your projects from one secure workspace." })] }),
+                    _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: portalCopy.storyTitle }), _jsx("p", { children: portalCopy.storyBody })] }),
                     _jsx("div", { className: "auth-orbits", "aria-hidden": "true", children: [_jsx("span", {}), _jsx("span", {}), _jsx("span", {})] }),
-                    _jsx("div", { className: "auth-story-foot", children: "Strategy \u2022 Creative \u2022 Technology" })
+                    _jsx("div", { className: "auth-story-foot", children: portalCopy.foot })
                 ] }),
             _jsx("main", { className: "auth-panel", children: _jsxs("div", { className: "auth-card", children: [
                         _jsx("div", { className: "auth-mobile-logo", children: _jsx(AuthLogo, {}) }),
-                        mode === 'login' && _jsx(LoginForm, { onLogin: onLogin, onMode: showMode }),
+                        mode === 'login' && _jsx(LoginForm, { onLogin: onLogin, onMode: showMode, portal: portal, setPortal: setPortal }),
                         mode === 'forgot' && _jsx(ForgotPassword, { onMode: showMode }),
                         mode === 'reset' && _jsx(ResetPassword, { onMode: showMode }),
                         mode === 'signup' && _jsx(AdminSignup, { onMode: showMode })
@@ -157,12 +239,13 @@ function AuthLogo() {
 function GoogleIcon() {
     return _jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06L5.84 9.9C6.71 7.3 9.14 5.38 12 5.38z" })] });
 }
-function LoginForm({ onLogin, onMode }) {
+function LoginForm({ onLogin, onMode, portal, setPortal }) {
     const [id, setId] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [remember, setRemember] = useState(true);
     const [error, setError] = useState('');
+    const portalCopy = loginPortalOptions[portal];
     const submit = async (e) => {
         e.preventDefault();
         try {
@@ -175,9 +258,10 @@ function LoginForm({ onLogin, onMode }) {
         }
     };
     return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
-            _jsx("div", { className: "auth-kicker", children: "CLIENT WORKSPACE" }),
-            _jsx("h2", { children: "Welcome Back" }),
-            _jsx("p", { className: "auth-subtitle", children: "Sign in to access your workspace." }),
+            _jsx("div", { className: "auth-portal-switcher", role: "tablist", "aria-label": "Login area", children: Object.entries(loginPortalOptions).map(([key, option]) => _jsx("button", { type: "button", role: "tab", "aria-selected": portal === key, className: portal === key ? 'active' : '', onClick: () => setPortal(key), children: option.label }, key)) }),
+            _jsx("div", { className: "auth-kicker", children: portalCopy.kicker }),
+            _jsx("h2", { children: portalCopy.title }),
+            _jsx("p", { className: "auth-subtitle", children: portalCopy.subtitle }),
             _jsxs("label", { children: ["Email or User ID", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or workspace ID", required: true })] }),
             _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
             _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
@@ -330,7 +414,8 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
     const notificationCount = Math.min(openTickets + urgentJobs, 99);
     const activities = recentActivityItems(data);
     const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
-    const isSuperAdminUser = data.user.accountType === 'super_admin' || data.user.roleSlug === 'super_admin';
+    const dashboardProfile = dashboardProfileFor(data);
+    const isSuperAdminUser = dashboardProfile.roleKey === 'super_admin';
     const displayName = isSuperAdminUser ? 'Super Admin' : data.user.name;
     const avatarInitials = isSuperAdminUser ? 'SA' : initialsFor(displayName);
     const displayRole = isSuperAdminUser ? 'Super Admin' : (data.user.roleName || data.user.accountType || 'Workspace user');
@@ -356,20 +441,30 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
             goTo('jobs');
         }
     };
-    return _jsxs("main", { className: `dashboard-shell theme-${theme} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+    const runSidebarAction = () => {
+        if (dashboardProfile.sidebarAction === 'support') {
+            setSidebarOpen(false);
+            setUserMenuOpen(false);
+            setNotificationOpen(false);
+            openSupportTicketForm();
+            return;
+        }
+        goTo(dashboardProfile.sidebarTab || 'overview');
+    };
+    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${dashboardProfile.roleKey} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
             _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
                     _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }) }),
                     _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
                     _jsxs("div", { className: "dashboard-sidebar-footer", children: [
-                            !isSuperAdminUser && _jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => { setSidebarOpen(false); setUserMenuOpen(false); setNotificationOpen(false); openSupportTicketForm(); }, children: "Create Ticket" })] }),
+                            _jsxs("div", { className: "dashboard-role-card", children: [_jsx(DashboardIcon, { name: dashboardProfile.sidebarAction === 'support' ? 'support' : 'shield' }), _jsx("b", { children: dashboardProfile.sidebarTitle }), _jsx("p", { children: dashboardProfile.sidebarBody }), _jsx("button", { type: "button", onClick: runSidebarAction, children: dashboardProfile.sidebarButton })] }),
                             _jsxs("div", { className: "dashboard-sidebar-profile", children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("small", { children: displayRole })] })] }),
                             _jsxs("button", { type: "button", className: "dashboard-sidebar-logout", onClick: logout, children: [_jsx(DashboardIcon, { name: "logout" }), _jsx("span", { children: "Logout" })] })
                         ] })
                 ] }),
             _jsxs("section", { className: "dashboard-main", children: [
                     _jsxs("div", { className: "dashboard-topbar", children: [
-                            _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: "Workspace" })] })] }),
+                            _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: dashboardProfile.workspaceTitle })] })] }),
                             _jsxs("form", { className: "dashboard-search", role: "search", onSubmit: submitSearch, children: [_jsx(DashboardIcon, { name: "search" }), _jsx("input", { type: "search", value: searchTerm, onChange: event => setSearchTerm(event.target.value), placeholder: "Search...", "aria-label": "Search jobs" }), _jsx("button", { type: "submit", "aria-label": "Open job search", children: _jsx(DashboardIcon, { name: "search" }) })] }),
                             _jsxs("div", { className: "dashboard-user-area", children: [
                                     _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
@@ -428,6 +523,7 @@ function Overview({ data, setTab }) {
     const canOpenJobs = canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
     const canOpenSupport = canAny(data, ['support.view_all', 'support.view_own', 'support.create']);
     const canOpenAudit = can(data, 'audit.view');
+    const dashboardProfile = dashboardProfileFor(data);
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(0, 0, 0, 0);
@@ -482,10 +578,23 @@ function Overview({ data, setTab }) {
     const activities = recentActivityItems(data);
     const dueLabel = due => validDue(due) ? due.toLocaleString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Date unavailable';
     const activityIcon = item => item.tab === 'support' ? 'support' : item.tab === 'clients' ? 'users' : 'jobs';
+    const primaryAction = (() => {
+        if (['super_admin', 'admin'].includes(dashboardProfile.roleKey)) {
+            if (canAny(data, ['users.create', 'employees.create']))
+                return ['Add User', 'users', 'plus'];
+            if (can(data, 'departments.manage'))
+                return ['Departments', 'users', 'users'];
+        }
+        if (can(data, 'jobs.create'))
+            return ['Submit a Job', 'submit', 'plus'];
+        if (canOpenJobs)
+            return ['Open Jobs', 'jobs', 'jobs'];
+        return null;
+    })();
     return _jsx("section", { className: "overview-reference", children: _jsxs(_Fragment, { children: [
                 _jsxs("div", { className: "overview-reference-head", children: [
-                        _jsxs("div", { children: [_jsx("h2", { children: "Overview" }), _jsx("span", { "aria-hidden": "true" })] }),
-                        can(data, 'jobs.create') && _jsxs("button", { type: "button", className: "overview-submit-button", onClick: () => setTab('submit'), children: [_jsx(DashboardIcon, { name: "plus" }), "Submit a Job"] })
+                        _jsxs("div", { children: [_jsx("h2", { children: dashboardProfile.overviewTitle }), _jsx("span", { "aria-hidden": "true" })] }),
+                        primaryAction && _jsxs("button", { type: "button", className: "overview-submit-button", onClick: () => setTab(primaryAction[1]), children: [_jsx(DashboardIcon, { name: primaryAction[2] }), primaryAction[0]] })
                     ] }),
                 _jsx("section", { className: "overview-metric-row", "aria-label": "Workspace metrics", children: metricCards.map(([tone, icon, value, label, action, target]) => _jsxs("button", { type: "button", className: `overview-metric-card ${tone}`, onClick: () => setTab(target), children: [_jsx("span", { className: "overview-metric-icon", children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("span", { className: "overview-metric-copy", children: [_jsx("small", { children: label }), _jsx("strong", { children: value }), _jsx("em", { children: action })] })] }, label)) }),
                 _jsxs("section", { className: "overview-analytics-grid", children: [
@@ -1001,7 +1110,7 @@ function ManagementTable({ columns, rows, empty }) {
     );
 }
 
-function Employees({ data }) {
+function Employees({ data, setTab }) {
     const [users, setUsers] = useState([]);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
@@ -1020,6 +1129,15 @@ function Employees({ data }) {
     }, []);
     const employees = users.filter(user => user.accountType !== 'client');
     const activeEmployees = employees.filter(user => user.status === 'active').length;
+    const openUserManager = (intent, panel = 'users') => {
+        try {
+            sessionStorage.setItem('ci360-users-panel', panel);
+            if (intent)
+                sessionStorage.setItem('ci360-open-user-modal', intent);
+        }
+        catch { }
+        setTab('users');
+    };
     return (
         <section className="management-page">
             <div className="management-header">
@@ -1027,6 +1145,10 @@ function Employees({ data }) {
                     <span>Employee Management</span>
                     <h2>Employees</h2>
                     <p>Internal users, reporting-ready roles, and access status.</p>
+                </div>
+                <div className="management-header-actions">
+                    {canAny(data, ['users.create', 'employees.create']) && <button type="button" className="overview-submit-button" onClick={() => openUserManager('employee')}><DashboardIcon name="plus" />Add Employee</button>}
+                    {can(data, 'departments.manage') && <button type="button" onClick={() => openUserManager('', 'departments')}>Departments</button>}
                 </div>
             </div>
             {error && <div className="alert error">{error}</div>}
@@ -1291,6 +1413,31 @@ function UsersRoles({ data, reload }) {
         setEditingUser(null);
         setForm({ ...blankUserForm, roleId: roleOptions[0]?.id || '' });
     };
+    useEffect(() => {
+        if (!roleOptions.length || userModalOpen)
+            return;
+        let requestedPanel = '';
+        let requestedModal = '';
+        try {
+            requestedPanel = sessionStorage.getItem('ci360-users-panel') || '';
+            requestedModal = sessionStorage.getItem('ci360-open-user-modal') || '';
+            sessionStorage.removeItem('ci360-users-panel');
+            sessionStorage.removeItem('ci360-open-user-modal');
+        }
+        catch { }
+        if (requestedPanel && managementTabs.some(([id]) => id === requestedPanel))
+            setActivePanel(requestedPanel);
+        if (requestedModal === 'employee') {
+            setEditingUser(null);
+            setForm({
+                ...blankUserForm,
+                accountType: 'employee',
+                roleId: roleOptions.find(role => role.id === 'employee')?.id || roleOptions[0]?.id || ''
+            });
+            setActivePanel('users');
+            setUserModalOpen(true);
+        }
+    }, [managementTabs, roleOptions, userModalOpen]);
     const saveUser = async event => {
         event.preventDefault();
         try {
