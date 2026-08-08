@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     asset_link TEXT NOT NULL,
     calculated_hours DECIMAL(10,2) NOT NULL,
     team_override_hours DECIMAL(10,2) NULL,
-    team_override_note TEXT NOT NULL,
+    team_override_note TEXT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'submitted',
     date_posted VARCHAR(40) NOT NULL,
     date_completed VARCHAR(40) NULL,

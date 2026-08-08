@@ -593,8 +593,8 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
     const calculatedHours = calculateHours(await settings(), await categoryLoad(), parsed.data.category, parsed.data.priority);
     await transaction(async connection => {
         await query(`INSERT INTO jobs
-            (id,client_id,title,description,category,priority,posted_by,created_by_user_id,assigned_to_user_id,assigned_by_user_id,department_id,assignment_date,assignment_note,asset_link,calculated_hours,status,date_posted,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`,
+            (id,client_id,title,description,category,priority,posted_by,created_by_user_id,assigned_to_user_id,assigned_by_user_id,department_id,assignment_date,assignment_note,asset_link,calculated_hours,team_override_hours,team_override_note,status,date_posted,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`,
             [
                 id,
                 clientId,
@@ -611,6 +611,8 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
                 assignmentNote,
                 parsed.data.assetLink,
                 calculatedHours,
+                null,
+                '',
                 now,
                 now
             ],

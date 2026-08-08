@@ -166,7 +166,7 @@ export async function initialiseDatabase() {
     asset_link TEXT NOT NULL,
     calculated_hours DECIMAL(10,2) NOT NULL,
     team_override_hours DECIMAL(10,2) NULL,
-    team_override_note TEXT NOT NULL,
+    team_override_note TEXT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'submitted',
     date_posted VARCHAR(40) NOT NULL,
     date_completed VARCHAR(40) NULL,
@@ -341,6 +341,7 @@ async function initialiseRbacSchema() {
 
   await query("ALTER TABLE users MODIFY role ENUM('super_admin','admin','employee','client') NOT NULL DEFAULT 'client'");
   await query('ALTER TABLE support_ticket_messages MODIFY author_role VARCHAR(50) NOT NULL');
+  await query('ALTER TABLE jobs MODIFY team_override_note TEXT NULL');
 
   await addColumnIfMissing('users', 'account_type', "ENUM('super_admin','admin','employee','client') NULL AFTER role");
   await addColumnIfMissing('users', 'role_id', 'VARCHAR(50) NULL AFTER account_type');
