@@ -658,7 +658,7 @@ app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireA
     res.send(bytes);
 });
 
-app.get('/api/users', requireAuth, requirePermission('users.view'), async (_req, res) => {
+app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), async (_req, res) => {
     const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,
         u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
         u.status,u.created_at createdAt,u.created_by createdBy,u.last_login lastLogin,

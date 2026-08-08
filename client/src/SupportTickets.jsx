@@ -18,6 +18,12 @@ const maxAttachmentBytes = 10 * 1024 * 1024;
 const fmt = value => new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
+const scrollDashboardToTop = () => {
+  window.requestAnimationFrame(() => {
+    document.querySelector('.dashboard-main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+};
 
 function bytesToBase64(bytes) {
   let binary = '';
@@ -83,6 +89,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
     if (!openCreateSignal) return;
     setSelected(null);
     setShowForm(true);
+    scrollDashboardToTop();
   }, [openCreateSignal]);
 
   useEffect(() => {
@@ -174,6 +181,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
       const result = await api.getSupportTicket(ticketNumber);
       setSelected(result.ticket);
       setReply('');
+      scrollDashboardToTop();
     } catch (error) {
       setDetailError(error.message);
     } finally {
@@ -282,6 +290,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
           onClose={() => {
             setSelected(null);
             setDetailError('');
+            scrollDashboardToTop();
           }}
           onReply={sendReply}
           onUpdate={updateTicket}

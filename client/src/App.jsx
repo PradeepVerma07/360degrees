@@ -316,6 +316,10 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         setSidebarOpen(false);
         setUserMenuOpen(false);
         setNotificationOpen(false);
+        window.requestAnimationFrame(() => {
+            document.querySelector('.dashboard-main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
     };
     return _jsxs("main", { className: `dashboard-shell theme-${theme} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
