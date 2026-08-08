@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement for CI360.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should the user be able to do?
+      placeholder: Describe the workflow or outcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: user_type
+    attributes:
+      label: Primary user
+      options:
+        - Admin
+        - Client
+        - Support team
+        - Developer/operator
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Add fields, statuses, rules, screens, or edge cases.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - Given ...
+        - When ...
+        - Then ...

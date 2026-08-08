@@ -1,0 +1,10 @@
+# Replace @PradeepVerma07 with @your-org/ci360-web-team after this repo
+# is moved to a GitHub organization with a real team.
+
+* @PradeepVerma07
+
+/client/ @PradeepVerma07
+/server/ @PradeepVerma07
+/database/ @PradeepVerma07
+/android/ @PradeepVerma07
+/.github/workflows/ @PradeepVerma07

@@ -179,4 +179,6 @@ server/src/db.js           MySQL pool, schema, transactions and seed data
 database/mysql-schema.sql  Optional phpMyAdmin schema import
 server/.env.example        Localhost environment template
 hostinger.env.example      Hostinger environment template
+CONTRIBUTING.md            Developer workflow for branches, builds and PRs
+docs/github-team-setup.md  GitHub team, review and branch protection checklist
 ```
