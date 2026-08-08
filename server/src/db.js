@@ -76,7 +76,7 @@ const cleanEnvValue = value => {
 
 const envFlagEnabled = value => ['1', 'true', 'yes', 'on'].includes(cleanEnvValue(value).toLowerCase());
 const demoClientIds = Array.from({ length: 12 }, (_, index) => `client${index + 1}`);
-const demoInternalIds = ['superdemo', 'admindemo', 'employeedemo'];
+const demoInternalIds = ['ci360admin', 'superdemo', 'admindemo', 'employeedemo'];
 const demoLoginIds = new Set([
   ...demoInternalIds,
   ...demoInternalIds.map(id => `${id}@ci360demo.local`),
@@ -481,6 +481,20 @@ export async function seedDemoUsers() {
     const department = await one("SELECT id FROM departments WHERE code='OPS'", [], connection);
     const designation = await one("SELECT id FROM designations WHERE code='TEAM_MEMBER'", [], connection);
     const demoUsers = [
+      {
+        id: 'ci360admin',
+        name: 'CI360 Team',
+        email: 'ci360admin@ci360demo.local',
+        phone: '9000000000',
+        role: 'super_admin',
+        accountType: 'super_admin',
+        roleId: 'super_admin',
+        clientId: null,
+        departmentId: department?.id || null,
+        designationId: designation?.id || null,
+        managerUserId: null,
+        createdBy: null
+      },
       {
         id: 'superdemo',
         name: 'Demo Super Admin',
