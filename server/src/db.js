@@ -74,6 +74,8 @@ const cleanEnvValue = value => {
   return trimmed;
 };
 
+const envFlagEnabled = value => ['1', 'true', 'yes', 'on'].includes(cleanEnvValue(value).toLowerCase());
+
 export const environmentSuperAdminCredentials = () => ({
   id: cleanEnvValue(process.env.SUPER_ADMIN_ID),
   password: cleanEnvValue(process.env.SUPER_ADMIN_PASSWORD),
@@ -226,8 +228,10 @@ export async function initialiseDatabase() {
   await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
   await ensureEnvironmentSuperAdmin();
   const row = await one('SELECT COUNT(*) AS count FROM clients');
-  if (process.env.SEED_DEMO_DATA === 'true' && Number(row.count) === 0)
+  if (envFlagEnabled(process.env.SEED_DEMO_DATA) && Number(row.count) === 0)
     await seed();
+  if (envFlagEnabled(process.env.SEED_DEMO_USERS))
+    await seedDemoUsers();
   await mapExistingUsersToRbac();
 }
 
@@ -436,6 +440,153 @@ async function seed() {
         (id,client_id,title,description,category,priority,posted_by,asset_link,calculated_hours,team_override_hours,team_override_note,status,date_posted,date_completed,updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, job, connection);
     }
+  });
+}
+
+async function seedDemoUsers() {
+  const now = new Date();
+  const passwordHash = await bcrypt.hash(cleanEnvValue(process.env.DEMO_USER_PASSWORD) || 'CI360Demo#2026', 12);
+  const demoClients = Array.from({ length: 12 }, (_, index) => {
+    const number = index + 1;
+    return {
+      id: `client${number}`,
+      name: `Demo Client ${number}`,
+      contactName: `Demo Client ${number}`,
+      email: `client${number}@ci360demo.local`,
+      phone: `90000000${String(number).padStart(2, '0')}`,
+      industry: 'Demo Workspace'
+    };
+  });
+
+  await transaction(async connection => {
+    const department = await one("SELECT id FROM departments WHERE code='OPS'", [], connection);
+    const designation = await one("SELECT id FROM designations WHERE code='TEAM_MEMBER'", [], connection);
+    const demoUsers = [
+      {
+        id: 'superdemo',
+        name: 'Demo Super Admin',
+        email: 'superdemo@ci360demo.local',
+        phone: '9000000001',
+        role: 'super_admin',
+        accountType: 'super_admin',
+        roleId: 'super_admin',
+        clientId: null,
+        departmentId: department?.id || null,
+        designationId: designation?.id || null,
+        managerUserId: null,
+        createdBy: null
+      },
+      {
+        id: 'admindemo',
+        name: 'Demo Admin',
+        email: 'admindemo@ci360demo.local',
+        phone: '9000000002',
+        role: 'admin',
+        accountType: 'admin',
+        roleId: 'admin',
+        clientId: null,
+        departmentId: department?.id || null,
+        designationId: designation?.id || null,
+        managerUserId: 'superdemo',
+        createdBy: 'superdemo'
+      },
+      {
+        id: 'employeedemo',
+        name: 'Demo Employee',
+        email: 'employeedemo@ci360demo.local',
+        phone: '9000000003',
+        role: 'employee',
+        accountType: 'employee',
+        roleId: 'employee',
+        clientId: null,
+        departmentId: department?.id || null,
+        designationId: designation?.id || null,
+        managerUserId: 'admindemo',
+        createdBy: 'superdemo'
+      },
+      ...demoClients.map(client => ({
+        id: client.id,
+        name: client.name,
+        email: client.email,
+        phone: client.phone,
+        role: 'client',
+        accountType: 'client',
+        roleId: 'client',
+        clientId: client.id,
+        departmentId: null,
+        designationId: null,
+        managerUserId: null,
+        createdBy: 'admindemo'
+      }))
+    ];
+
+    for (const client of demoClients) {
+      await query(
+        `INSERT INTO clients (id,name,contact_name,email,phone,industry,password_hash,status,account_owner_user_id,created_by,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          ON DUPLICATE KEY UPDATE
+            name=VALUES(name),
+            contact_name=VALUES(contact_name),
+            email=VALUES(email),
+            phone=VALUES(phone),
+            industry=VALUES(industry),
+            password_hash=VALUES(password_hash),
+            status='active',
+            account_owner_user_id=VALUES(account_owner_user_id),
+            updated_at=VALUES(updated_at)`,
+        [client.id, client.name, client.contactName, client.email, client.phone, client.industry, passwordHash, 'active', 'admindemo', 'superdemo', now],
+        connection
+      );
+    }
+
+    for (const user of demoUsers) {
+      await query(
+        `INSERT INTO users
+          (id,name,email,phone,password_hash,role,account_type,role_id,client_id,department_id,designation_id,manager_user_id,status,created_by,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          ON DUPLICATE KEY UPDATE
+            name=VALUES(name),
+            email=VALUES(email),
+            phone=VALUES(phone),
+            password_hash=VALUES(password_hash),
+            role=VALUES(role),
+            account_type=VALUES(account_type),
+            role_id=VALUES(role_id),
+            client_id=VALUES(client_id),
+            department_id=VALUES(department_id),
+            designation_id=VALUES(designation_id),
+            manager_user_id=VALUES(manager_user_id),
+            status='active',
+            created_by=COALESCE(created_by,VALUES(created_by)),
+            updated_at=VALUES(updated_at)`,
+        [
+          user.id,
+          user.name,
+          user.email,
+          user.phone,
+          passwordHash,
+          user.role,
+          user.accountType,
+          user.roleId,
+          user.clientId,
+          user.departmentId,
+          user.designationId,
+          user.managerUserId,
+          'active',
+          user.createdBy,
+          now
+        ],
+        connection
+      );
+    }
+
+    await query(
+      `INSERT INTO employee_profiles (user_id,employee_id,joining_date)
+        VALUES ('employeedemo','DEMO-EMP-001',CURDATE())
+        ON DUPLICATE KEY UPDATE employee_id=VALUES(employee_id),updated_at=?`,
+      [now],
+      connection
+    );
   });
 }
 
