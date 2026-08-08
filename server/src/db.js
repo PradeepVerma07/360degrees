@@ -385,7 +385,13 @@ async function ensureEnvironmentSuperAdmin() {
   const email = (process.env.SUPER_ADMIN_EMAIL || '').trim() || null;
   const existing = await one('SELECT id FROM users WHERE id=?', [id]);
   if (existing) {
-    await query("UPDATE users SET role='super_admin',account_type='super_admin',role_id='super_admin',client_id=NULL,email=COALESCE(?,email),status='active' WHERE id=?", [email, id]);
+    if (password) {
+      const passwordHash = await bcrypt.hash(password, 12);
+      await query("UPDATE users SET role='super_admin',account_type='super_admin',role_id='super_admin',client_id=NULL,email=COALESCE(?,email),password_hash=?,status='active',updated_at=? WHERE id=?", [email, passwordHash, new Date(), id]);
+    }
+    else {
+      await query("UPDATE users SET role='super_admin',account_type='super_admin',role_id='super_admin',client_id=NULL,email=COALESCE(?,email),status='active',updated_at=? WHERE id=?", [email, new Date(), id]);
+    }
     return;
   }
   if (!password)

@@ -477,18 +477,41 @@ function JobCard({ job, data, editable = false, reload }) {
     const [status, setStatus] = useState(job.status);
     const [hours, setHours] = useState(job.teamOverrideHours ?? job.calculatedHours);
     const [note, setNote] = useState(job.teamOverrideNote || '');
+    const [assignee, setAssignee] = useState(job.assignedToUserId || '');
+    const [department, setDepartment] = useState(job.departmentId || '');
+    const [assignmentNote, setAssignmentNote] = useState(job.assignmentNote || '');
     const effectiveHours = job.teamOverrideHours ?? job.calculatedHours;
     const due = addWorkingHours(new Date(job.datePosted), effectiveHours, data.settings);
     const completed = isCompletedJob(job);
     const teamSet = job.teamOverrideHours != null;
     const overdue = isPendingJob(job) && due < new Date();
     const client = clientNameFor(data, job.clientId);
-    const save = async () => { await api.updateJob(job.id, { status, teamOverrideHours: Number(hours), teamOverrideNote: note }); await reload?.(); };
+    const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
+    const canChangeStatus = canAny(data, ['jobs.edit', 'jobs.update_status']);
+    const canOverrideTat = can(data, 'jobs.override_tat');
+    const save = async () => {
+        const patch = {};
+        if (canChangeStatus)
+            patch.status = status;
+        if (canOverrideTat) {
+            patch.teamOverrideHours = Number(hours);
+            patch.teamOverrideNote = note;
+        }
+        if (canAssign) {
+            patch.assignedToUserId = assignee;
+            patch.departmentId = department;
+            patch.assignmentNote = assignmentNote;
+        }
+        await api.updateJob(job.id, patch);
+        await reload?.();
+    };
     return _jsxs("article", { className: `job priority-${job.priority} ${completed ? 'completed' : ''}`, children: [
             _jsxs("div", { className: "job-head", children: [
                     _jsxs("div", { children: [_jsx("h3", { children: job.title }), _jsxs("p", { children: ["Posted by ", _jsx("b", { children: job.postedBy }), " on ", fmt(job.datePosted)] })] }),
                     _jsxs("div", { className: "badges", children: [
                             can(data, 'jobs.view_all') && _jsx("span", { className: "badge client", children: client }),
+                            job.assignedToName && _jsx("span", { className: "badge team", children: job.assignedToName }),
+                            job.departmentName && _jsx("span", { className: "badge category", children: job.departmentName }),
                             _jsx("span", { className: "badge category", children: job.category }),
                             _jsx("span", { className: `badge ${job.priority}`, children: job.priority }),
                             teamSet && _jsx("span", { className: "badge team", children: "Team-set TAT" }),
@@ -499,7 +522,16 @@ function JobCard({ job, data, editable = false, reload }) {
             job.assetLink && _jsx("a", { href: job.assetLink, target: "_blank", rel: "noreferrer", children: "View assets \u2197" }),
             completed ? _jsxs("p", { className: "due", children: ["Completed on ", _jsx("b", { children: fmt(dateForMonth(job)) })] }) : _jsxs("p", { className: "due", children: [teamSet ? "Team TAT: " : "System TAT: ", _jsxs("b", { children: [effectiveHours, " hrs"] }), " - due by ", _jsx("b", { children: fmt(due) }), overdue && _jsx("span", { className: "overdue", children: " (overdue)" })] }),
             job.teamOverrideNote && _jsxs("div", { className: "team-note", children: ["Team note: ", job.teamOverrideNote] }),
-            editable && canAny(data, ['jobs.edit', 'jobs.update_status', 'jobs.override_tat']) && _jsxs("div", { className: "editbar", children: [_jsx("select", { value: status, onChange: e => setStatus(e.target.value), children: Object.entries(statusLabels).map(([v, l]) => _jsx("option", { value: v, children: l }, v)) }), _jsx("input", { type: "number", min: "1", value: hours, onChange: e => setHours(Number(e.target.value)) }), _jsx("input", { value: note, onChange: e => setNote(e.target.value), placeholder: "Team TAT note" }), _jsx("button", { onClick: save, children: "Save" })] })
+            job.assignmentNote && _jsxs("div", { className: "team-note", children: ["Assignment note: ", job.assignmentNote] }),
+            editable && canAny(data, ['jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign']) && _jsxs("div", { className: "editbar job-editbar", children: [
+                    canChangeStatus && _jsx("select", { value: status, onChange: e => setStatus(e.target.value), children: Object.entries(statusLabels).map(([v, l]) => _jsx("option", { value: v, children: l }, v)) }),
+                    canOverrideTat && _jsx("input", { type: "number", min: "1", value: hours, onChange: e => setHours(Number(e.target.value)), "aria-label": "TAT hours" }),
+                    canOverrideTat && _jsx("input", { value: note, onChange: e => setNote(e.target.value), placeholder: "Team TAT note" }),
+                    canAssign && _jsxs("select", { value: assignee, onChange: e => setAssignee(e.target.value), "aria-label": "Assigned employee", children: [_jsx("option", { value: "", children: "Unassigned" }), (data.assignees || []).map(user => _jsx("option", { value: user.id, children: user.departmentName ? `${user.name} - ${user.departmentName}` : user.name }, user.id))] }),
+                    canAssign && _jsxs("select", { value: department, onChange: e => setDepartment(e.target.value), "aria-label": "Job department", children: [_jsx("option", { value: "", children: "No department" }), (data.departments || []).map(item => _jsx("option", { value: item.id, children: item.name }, item.id))] }),
+                    canAssign && _jsx("input", { value: assignmentNote, onChange: e => setAssignmentNote(e.target.value), placeholder: "Assignment note" }),
+                    _jsx("button", { onClick: save, children: "Save" })
+                ] })
         ] });
 }
 function SettingsPanel({ initial, reload }) { const [s, setS] = useState(initial); const save = async () => { await api.saveSettings(s); await reload(); alert('TAT standards saved.'); }; return _jsxs("section", { className: "card", children: [_jsx("h2", { children: "TAT standards" }), s.categories.map((c, i) => _jsxs("div", { className: "setting-row", children: [_jsx("input", { value: c.name, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, name: e.target.value } : x) }) }), _jsx("input", { type: "number", min: "1", value: c.baseHours, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, baseHours: Number(e.target.value) } : x) }) }), _jsx("button", { onClick: () => setS({ ...s, categories: s.categories.filter((_, n) => n !== i) }), children: "Remove" })] }, i)), _jsx("button", { onClick: () => setS({ ...s, categories: [...s.categories, { name: 'New category', baseHours: 24 }] }), children: "+ Add category" }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category capacity", _jsx("input", { type: "number", value: s.capacityPerCategory, onChange: e => setS({ ...s, capacityPerCategory: Number(e.target.value) }) })] }), _jsxs("label", { children: ["Extra hours over capacity", _jsx("input", { type: "number", value: s.bufferHoursPerExtraJob, onChange: e => setS({ ...s, bufferHoursPerExtraJob: Number(e.target.value) }) })] })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Start hour", _jsx("input", { type: "number", step: "0.5", value: s.startHour, onChange: e => setS({ ...s, startHour: Number(e.target.value) }) })] }), _jsxs("label", { children: ["End hour", _jsx("input", { type: "number", step: "0.5", value: s.endHour, onChange: e => setS({ ...s, endHour: Number(e.target.value) }) })] })] }), _jsx("button", { className: "primary", onClick: save, children: "Save standards" })] }); }
@@ -831,6 +863,7 @@ function UsersRoles({ data, reload }) {
     const managementTabs = useMemo(() => [
         can(data, 'users.view') && ['users', 'Users'],
         can(data, 'roles.view') && ['roles', 'Roles'],
+        can(data, 'roles.manage_permissions') && ['permissions', 'Permissions'],
         can(data, 'departments.manage') && ['departments', 'Departments'],
         can(data, 'designations.manage') && ['designations', 'Designations'],
         can(data, 'users.view') && ['hierarchy', 'Hierarchy']
@@ -1099,10 +1132,110 @@ function UsersRoles({ data, reload }) {
                     ) : <DashboardEmptyState title="No roles available." body="Roles will appear here after the RBAC catalog is seeded." />}
                 </article>
             )}
+            {activePanel === 'permissions' && <UserPermissionsPanel users={users} permissions={permissions} currentUser={data.user} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'departments' && <DepartmentsPanel departments={departments} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'designations' && <DesignationsPanel designations={designations} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'hierarchy' && <HierarchyPanel users={internalUsers} />}
         </section>
+    );
+}
+
+function UserPermissionsPanel({ users, permissions, currentUser, reloadManagement, setMessage, setError }) {
+    const editableUsers = useMemo(() => users.filter(user => user.accountType !== 'super_admin'), [users]);
+    const [selectedUserId, setSelectedUserId] = useState('');
+    const [overrideMap, setOverrideMap] = useState({});
+    const [loading, setLoading] = useState(false);
+    useEffect(() => {
+        if (selectedUserId || !editableUsers.length)
+            return;
+        const first = editableUsers.find(user => user.id !== currentUser.id) || editableUsers[0];
+        setSelectedUserId(first?.id || '');
+    }, [editableUsers, selectedUserId, currentUser.id]);
+    useEffect(() => {
+        if (!selectedUserId)
+            return;
+        let active = true;
+        setLoading(true);
+        api.userPermissionOverrides(selectedUserId)
+            .then(result => {
+                if (!active)
+                    return;
+                setOverrideMap((result.overrides || []).reduce((map, override) => ({ ...map, [override.permissionId]: override.effect }), {}));
+            })
+            .catch(err => active && setError(err.message))
+            .finally(() => active && setLoading(false));
+        return () => { active = false; };
+    }, [selectedUserId, setError]);
+    const selectedUser = users.find(user => user.id === selectedUserId);
+    const permissionGroups = useMemo(() => permissions.reduce((groups, permission) => {
+        groups[permission.module] = [...(groups[permission.module] || []), permission];
+        return groups;
+    }, {}), [permissions]);
+    const setOverride = (permissionId, effect) => {
+        setOverrideMap(current => {
+            const next = { ...current };
+            if (!effect)
+                delete next[permissionId];
+            else
+                next[permissionId] = effect;
+            return next;
+        });
+    };
+    const save = async () => {
+        if (!selectedUser || selectedUser.id === currentUser.id)
+            return;
+        const grants = Object.entries(overrideMap).filter(([, effect]) => effect === 'grant').map(([permissionId]) => permissionId);
+        const revokes = Object.entries(overrideMap).filter(([, effect]) => effect === 'revoke').map(([permissionId]) => permissionId);
+        try {
+            await api.updateUserPermissionOverrides(selectedUser.id, { grants, revokes });
+            setMessage('User permission overrides saved.');
+            await reloadManagement();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    return (
+        <article className="dashboard-card management-card">
+            <div className="dashboard-card-head">
+                <div>
+                    <h3>User Permission Overrides</h3>
+                    <p>Grant or revoke individual permissions without changing the user's role.</p>
+                </div>
+            </div>
+            {editableUsers.length ? (
+                <>
+                    <label className="management-select">User
+                        <select value={selectedUserId} onChange={event => setSelectedUserId(event.target.value)}>
+                            {editableUsers.map(user => <option value={user.id} key={user.id}>{user.name} - {user.roleName || user.accountType}</option>)}
+                        </select>
+                    </label>
+                    {selectedUser?.id === currentUser.id && <div className="alert error">You cannot change your own permission overrides.</div>}
+                    {loading ? <div className="dashboard-empty management-empty"><b>Loading overrides...</b></div> : (
+                        <div className="permission-groups override-groups">
+                            {Object.entries(permissionGroups).map(([module, items]) => (
+                                <section className="permission-group" key={module}>
+                                    <h4>{module.replace(/_/g, ' ')}</h4>
+                                    <div>
+                                        {items.map(permission => (
+                                            <label className="permission-check permission-override" key={permission.id}>
+                                                <span>{permission.label}</span>
+                                                <select value={overrideMap[permission.id] || ''} onChange={event => setOverride(permission.id, event.target.value)}>
+                                                    <option value="">Inherit</option>
+                                                    <option value="grant">Grant</option>
+                                                    <option value="revoke">Revoke</option>
+                                                </select>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </section>
+                            ))}
+                        </div>
+                    )}
+                    <button type="button" className="primary" onClick={save} disabled={!selectedUser || selectedUser.id === currentUser.id}>Save User Overrides</button>
+                </>
+            ) : <DashboardEmptyState title="No editable users." body="Create a non-Super Admin user before assigning individual overrides." />}
+        </article>
     );
 }
 

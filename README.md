@@ -62,6 +62,10 @@ DB_USER=root
 DB_PASSWORD=your-local-mysql-password
 DB_CONNECTION_LIMIT=10
 SEED_DEMO_DATA=true
+SUPER_ADMIN_ID=superadmin
+SUPER_ADMIN_PASSWORD="replace-with-a-strong-super-admin-password"
+SUPER_ADMIN_NAME=Super Admin
+SUPER_ADMIN_EMAIL=owner@example.com
 ```
 
 ### 3. Install packages
@@ -134,9 +138,13 @@ DB_USER=u123456789_ci360user
 DB_PASSWORD=your-hostinger-mysql-password
 DB_CONNECTION_LIMIT=10
 SEED_DEMO_DATA=false
+SUPER_ADMIN_ID=your-super-admin-login-id
+SUPER_ADMIN_PASSWORD="replace-with-a-strong-super-admin-password"
+SUPER_ADMIN_NAME=Super Admin
+SUPER_ADMIN_EMAIL=owner@example.com
 ```
 
-Do not publish your real database password or JWT secret. Hostinger supplies the application port at runtime, so the server reads `process.env.PORT` automatically.
+Do not publish your real database password, JWT secret, or Super Admin password. Hostinger supplies the application port at runtime, so the server reads `process.env.PORT` automatically.
 
 ### 5. Database schema
 
@@ -150,9 +158,9 @@ database/mysql-schema.sql
 
 ### 6. First production administrator
 
-For a temporary demo installation, set `SEED_DEMO_DATA=true`, deploy once, log in with the demo administrator, create your real clients, and then set it back to `false` and redeploy.
+For production, keep `SEED_DEMO_DATA=false` and set `SUPER_ADMIN_ID`, `SUPER_ADMIN_PASSWORD`, `SUPER_ADMIN_NAME`, and `SUPER_ADMIN_EMAIL`. On startup, the backend creates that account if it does not exist, or upgrades the existing matching user ID to the protected Super Admin role. If `SUPER_ADMIN_PASSWORD` is set, the matching account password is reset to that value on startup.
 
-For a clean production database, keep `SEED_DEMO_DATA=false` and insert an administrator directly using a securely generated bcrypt password hash. Never store a plain password in MySQL.
+If the password contains `#`, `&`, `%`, or spaces, wrap it in quotes in `.env` files. In Hostinger's environment variable UI, enter the raw value exactly once, without adding extra quote characters unless hPanel explicitly asks for dotenv-style content.
 
 ### 7. Verify deployment
 

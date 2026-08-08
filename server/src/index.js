@@ -65,11 +65,33 @@ const categoryLoad = async () => {
     const rows = await query("SELECT category,COUNT(*) count FROM jobs WHERE status!='completed' AND status!='cancelled' GROUP BY category");
     return Object.fromEntries(rows.map(row => [row.category, row.count]));
 };
-const mapJob = (row) => ({
+const jobSelect = `SELECT j.*,
+    assigned.name assigned_to_name,
+    assigned_by.name assigned_by_name,
+    creator.name created_by_name,
+    department.name department_name
+  FROM jobs j
+  LEFT JOIN users assigned ON assigned.id=j.assigned_to_user_id
+  LEFT JOIN users assigned_by ON assigned_by.id=j.assigned_by_user_id
+  LEFT JOIN users creator ON creator.id=j.created_by_user_id
+  LEFT JOIN departments department ON department.id=j.department_id`;
+const mapJob = (row, includeInternal = true) => ({
     id: row.id, clientId: row.client_id, title: row.title, description: row.description, category: row.category,
     priority: row.priority, postedBy: row.posted_by, assetLink: row.asset_link, calculatedHours: row.calculated_hours,
     teamOverrideHours: row.team_override_hours, teamOverrideNote: row.team_override_note, status: row.status,
-    datePosted: row.date_posted, dateCompleted: row.date_completed, updatedAt: row.updated_at
+    datePosted: row.date_posted, dateCompleted: row.date_completed, updatedAt: row.updated_at,
+    ...(includeInternal ? {
+        createdByUserId: row.created_by_user_id,
+        createdByName: row.created_by_name,
+        assignedToUserId: row.assigned_to_user_id,
+        assignedToName: row.assigned_to_name,
+        assignedByUserId: row.assigned_by_user_id,
+        assignedByName: row.assigned_by_name,
+        departmentId: row.department_id,
+        departmentName: row.department_name,
+        assignmentDate: row.assignment_date,
+        assignmentNote: row.assignment_note
+    } : {})
 });
 const ticketCategories = ['Technical Issue', 'Account Issue', 'Job Posting Issue', 'Candidate Issue', 'Client Issue', 'Billing Issue', 'Feature Request', 'General Support'];
 const ticketPriorities = ['Low', 'Medium', 'High', 'Urgent'];
@@ -83,6 +105,8 @@ const mapTicket = (row) => ({
     createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at
 });
 const canViewAllJobs = user => hasPermission(user, 'jobs.view_all');
+const canViewDepartmentJobs = user => hasPermission(user, 'jobs.view_department');
+const canAssignJobs = user => hasAnyPermission(user, ['jobs.assign', 'jobs.reassign']);
 const canViewAllClients = user => hasPermission(user, 'clients.view_all');
 const canManageSupport = user => hasPermission(user, 'support.manage') || hasPermission(user, 'support.view_all');
 const cleanCode = value => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
@@ -129,6 +153,36 @@ const prepareAttachment = (attachment) => {
 };
 const getTicketRow = ticketNumber => one('SELECT * FROM support_tickets WHERE ticket_number=?', [ticketNumber]);
 const canAccessTicket = (user, ticket) => canManageSupport(user) || ticket.user_id === user.id || (user.clientId && ticket.client_id === user.clientId);
+const canAccessJob = (user, job) => canViewAllJobs(user)
+    || (user.clientId && job.client_id === user.clientId)
+    || job.created_by_user_id === user.id
+    || job.assigned_to_user_id === user.id
+    || (canViewDepartmentJobs(user) && user.departmentId && job.department_id === user.departmentId);
+const loadVisibleJobs = user => {
+    if (canViewAllJobs(user))
+        return query(`${jobSelect} ORDER BY j.date_posted DESC`);
+    const clauses = ['j.client_id=?', 'j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
+    const params = [user.clientId || '', user.id, user.id];
+    if (canViewDepartmentJobs(user) && user.departmentId) {
+        clauses.push('j.department_id=?');
+        params.push(user.departmentId);
+    }
+    return query(`${jobSelect} WHERE ${clauses.join(' OR ')} ORDER BY j.date_posted DESC`, params);
+};
+const categoryLoadForUser = async user => {
+    if (canViewAllJobs(user))
+        return categoryLoad();
+    const clauses = ['client_id=?', 'created_by_user_id=?', 'assigned_to_user_id=?'];
+    const params = [user.clientId || '', user.id, user.id];
+    if (canViewDepartmentJobs(user) && user.departmentId) {
+        clauses.push('department_id=?');
+        params.push(user.departmentId);
+    }
+    const rows = await query(`SELECT category,COUNT(*) count FROM jobs
+      WHERE status!='completed' AND status!='cancelled' AND (${clauses.join(' OR ')})
+      GROUP BY category`, params);
+    return Object.fromEntries(rows.map(row => [row.category, row.count]));
+};
 const managerCreatesCycle = async (userId, managerUserId) => {
     if (!managerUserId)
         return false;
@@ -218,11 +272,8 @@ app.post('/api/auth/login', async (req, res) => {
 });
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
-    const jobRows = canViewAllJobs(user)
-        ? await query('SELECT * FROM jobs ORDER BY date_posted DESC')
-        : await query(`SELECT * FROM jobs
-            WHERE client_id=? OR created_by_user_id=? OR assigned_to_user_id=?
-            ORDER BY date_posted DESC`, [user.clientId || '', user.id, user.id]);
+    const includeInternalJobFields = user.accountType !== 'client';
+    const jobRows = await loadVisibleJobs(user);
     const clients = canViewAllClients(user)
         ? await query("SELECT id,name,status,contact_name contactName,email,phone,industry,account_owner_user_id accountOwnerUserId,created_at createdAt FROM clients ORDER BY name")
         : user.clientId
@@ -231,7 +282,29 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const ticketRows = canManageSupport(user)
         ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
         : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    res.json({ user, permissions: user.permissions, modules: user.modules, jobs: jobRows.map(mapJob), clients, supportTickets: ticketRows.map(mapTicket), settings: await settings(), categoryLoad: await categoryLoad() });
+    const assignees = canAssignJobs(user)
+        ? await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
+            FROM users u
+            LEFT JOIN departments d ON d.id=u.department_id
+            LEFT JOIN designations ds ON ds.id=u.designation_id
+            WHERE u.status='active' AND COALESCE(u.account_type,u.role)<>'client'
+            ORDER BY u.name`)
+        : [];
+    const departments = canAssignJobs(user) || canViewDepartmentJobs(user)
+        ? await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name")
+        : [];
+    res.json({
+        user,
+        permissions: user.permissions,
+        modules: user.modules,
+        jobs: jobRows.map(row => mapJob(row, includeInternalJobFields)),
+        clients,
+        supportTickets: ticketRows.map(mapTicket),
+        settings: await settings(),
+        categoryLoad: await categoryLoadForUser(user),
+        assignees,
+        departments
+    });
 });
 app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req, res) => {
     const schema = z.object({ clientId: z.string().optional(), title: z.string().min(2), description: z.string().default(''), category: z.string().min(1), priority: z.enum(['Low', 'Medium', 'High', 'Urgent']), postedBy: z.string().min(2), assetLink: z.string().default('') });
@@ -253,16 +326,66 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
     emitRefresh();
     res.status(201).json({ job: mapJob(await one('SELECT * FROM jobs WHERE id=?', [id])) });
 });
-app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat'), async (req, res) => {
-    const schema = z.object({ title: z.string().min(2).optional(), description: z.string().optional(), category: z.string().optional(), priority: z.enum(['Low', 'Medium', 'High', 'Urgent']).optional(), status: z.enum(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold', 'completed', 'cancelled']).optional(), assetLink: z.string().optional(), teamOverrideHours: z.number().positive().nullable().optional(), teamOverrideNote: z.string().optional() });
+app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), async (req, res) => {
+    const schema = z.object({
+        title: z.string().min(2).optional(),
+        description: z.string().optional(),
+        category: z.string().optional(),
+        priority: z.enum(['Low', 'Medium', 'High', 'Urgent']).optional(),
+        status: z.enum(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold', 'completed', 'cancelled']).optional(),
+        assetLink: z.string().optional(),
+        teamOverrideHours: z.number().positive().nullable().optional(),
+        teamOverrideNote: z.string().optional(),
+        assignedToUserId: z.string().trim().optional().or(z.literal('')),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        assignmentNote: z.string().trim().max(1000).optional().or(z.literal(''))
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
     const current = await one('SELECT * FROM jobs WHERE id=?', [req.params.id]);
     if (!current)
         return res.status(404).json({ error: 'Job not found' });
-    const map = { title: 'title', description: 'description', category: 'category', priority: 'priority', status: 'status', assetLink: 'asset_link', teamOverrideHours: 'team_override_hours', teamOverrideNote: 'team_override_note' };
-    const entries = Object.entries(parsed.data);
+    if (!canAccessJob(req.user, current))
+        return res.status(403).json({ error: 'Job access denied' });
+    const editRequested = ['title', 'description', 'category', 'priority', 'assetLink'].some(key => parsed.data[key] !== undefined);
+    if (editRequested && !hasPermission(req.user, 'jobs.edit'))
+        return res.status(403).json({ error: 'Job edit permission required' });
+    if (parsed.data.status !== undefined && !hasAnyPermission(req.user, ['jobs.update_status', 'jobs.edit']))
+        return res.status(403).json({ error: 'Job status permission required' });
+    const tatRequested = parsed.data.teamOverrideHours !== undefined || parsed.data.teamOverrideNote !== undefined;
+    if (tatRequested && !hasPermission(req.user, 'jobs.override_tat'))
+        return res.status(403).json({ error: 'Job TAT override permission required' });
+    const assignmentFields = ['assignedToUserId', 'departmentId', 'assignmentNote'];
+    const assignmentRequested = assignmentFields.some(key => parsed.data[key] !== undefined);
+    if (assignmentRequested) {
+        const assigneeChanged = parsed.data.assignedToUserId !== undefined && (parsed.data.assignedToUserId || null) !== current.assigned_to_user_id;
+        if (assigneeChanged && current.assigned_to_user_id && !hasPermission(req.user, 'jobs.reassign'))
+            return res.status(403).json({ error: 'Job reassignment permission required' });
+        if (!hasAnyPermission(req.user, ['jobs.assign', 'jobs.reassign']))
+            return res.status(403).json({ error: 'Job assignment permission required' });
+    }
+    const assignedToUserId = parsed.data.assignedToUserId === undefined ? current.assigned_to_user_id : (parsed.data.assignedToUserId || null);
+    const departmentId = parsed.data.departmentId === undefined ? current.department_id : optionalId(parsed.data.departmentId);
+    if (Number.isNaN(departmentId))
+        return res.status(400).json({ error: 'Department is invalid' });
+    if (assignedToUserId) {
+        const assignee = await one("SELECT id,account_type FROM users WHERE id=? AND status='active'", [assignedToUserId]);
+        if (!assignee || assignee.account_type === 'client')
+            return res.status(400).json({ error: 'Active internal assignee not found' });
+    }
+    if (departmentId) {
+        const department = await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId]);
+        if (!department)
+            return res.status(400).json({ error: 'Active department not found' });
+    }
+    const normalizedData = { ...parsed.data };
+    if (parsed.data.assignedToUserId !== undefined)
+        normalizedData.assignedToUserId = assignedToUserId;
+    if (parsed.data.departmentId !== undefined)
+        normalizedData.departmentId = departmentId;
+    const map = { title: 'title', description: 'description', category: 'category', priority: 'priority', status: 'status', assetLink: 'asset_link', teamOverrideHours: 'team_override_hours', teamOverrideNote: 'team_override_note', assignedToUserId: 'assigned_to_user_id', departmentId: 'department_id', assignmentNote: 'assignment_note' };
+    const entries = Object.entries(normalizedData);
     if (!entries.length)
         return res.status(400).json({ error: 'No changes supplied' });
     const sets = entries.map(([key]) => `${map[key]}=?`);
@@ -276,10 +399,14 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
     if (parsed.data.status && parsed.data.status !== 'completed') {
         sets.push('date_completed=NULL');
     }
+    if (assignmentRequested) {
+        sets.push('assigned_by_user_id=?', 'assignment_date=?');
+        values.push(req.user.id, new Date().toISOString());
+    }
     await query(`UPDATE jobs SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id]);
     await audit(req.user.id, 'update', 'job', req.params.id, parsed.data);
     emitRefresh();
-    res.json({ job: mapJob(await one('SELECT * FROM jobs WHERE id=?', [req.params.id])) });
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client') });
 });
 app.put('/api/settings', requireAuth, requirePermission('settings.edit'), async (req, res) => {
     const schema = z.object({ categories: z.array(z.object({ name: z.string().min(1), baseHours: z.number().positive() })).min(1), capacityPerCategory: z.number().int().positive(), bufferHoursPerExtraJob: z.number().nonnegative(), startHour: z.number().min(0).max(24), endHour: z.number().min(0).max(24), workDays: z.array(z.number().int().min(0).max(6)).min(1) });
@@ -677,6 +804,51 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employ
     });
     emitRefresh();
     res.json({ user: await loadUserContext(current.id) });
+});
+
+app.get('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), async (req, res) => {
+    const target = await one('SELECT id,account_type,role_id FROM users WHERE id=?', [req.params.id]);
+    if (!target)
+        return res.status(404).json({ error: 'User not found' });
+    if (target.account_type === 'super_admin' && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can view Super Admin overrides' });
+    const overrides = await query('SELECT permission_id permissionId,effect FROM user_permission_overrides WHERE user_id=? ORDER BY permission_id', [target.id]);
+    res.json({ overrides });
+});
+
+app.put('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), async (req, res) => {
+    const parsed = z.object({
+        grants: z.array(z.string().trim().min(1)).default([]),
+        revokes: z.array(z.string().trim().min(1)).default([])
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const target = await one('SELECT id,account_type,role_id FROM users WHERE id=?', [req.params.id]);
+    if (!target)
+        return res.status(404).json({ error: 'User not found' });
+    if (target.id === req.user.id)
+        return res.status(403).json({ error: 'You cannot change your own permission overrides' });
+    if (target.account_type === 'super_admin')
+        return res.status(403).json({ error: 'Super Admin overrides are protected' });
+    const grants = [...new Set(parsed.data.grants)];
+    const revokes = [...new Set(parsed.data.revokes)].filter(permission => !grants.includes(permission));
+    const grantValidation = await validatePermissionIds(grants, target.account_type === 'client' ? 'client' : 'internal');
+    if (grantValidation.error)
+        return res.status(400).json({ error: grantValidation.error });
+    const revokeValidation = await validatePermissionIds(revokes, 'internal');
+    if (revokeValidation.error)
+        return res.status(400).json({ error: revokeValidation.error });
+    await transaction(async connection => {
+        await query('DELETE FROM user_permission_overrides WHERE user_id=?', [target.id], connection);
+        for (const permissionId of grantValidation.permissionIds)
+            await query("INSERT INTO user_permission_overrides (user_id,permission_id,effect,created_by) VALUES (?,?, 'grant', ?)", [target.id, permissionId, req.user.id], connection);
+        for (const permissionId of revokeValidation.permissionIds)
+            await query("INSERT INTO user_permission_overrides (user_id,permission_id,effect,created_by) VALUES (?,?, 'revoke', ?)", [target.id, permissionId, req.user.id], connection);
+        await audit(req.user.id, 'update_permission_overrides', 'user', target.id,
+            { grants: grantValidation.permissionIds, revokes: revokeValidation.permissionIds }, connection);
+    });
+    emitRefresh();
+    res.json({ ok: true });
 });
 
 app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'users.view'), async (_req, res) => {
