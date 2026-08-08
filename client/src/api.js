@@ -46,9 +46,20 @@ async function download(path, fileName) {
     link.remove();
     URL.revokeObjectURL(url);
 }
+const queryString = (params = {}) => {
+    const search = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '')
+            search.set(key, String(value));
+    });
+    const text = search.toString();
+    return text ? `?${text}` : '';
+};
 export const api = {
     login: (id, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ id, password }) }),
     bootstrap: () => request('/api/bootstrap'),
+    jobs: (params = {}) => request(`/api/jobs${queryString(params)}`),
+    job: (id) => request(`/api/jobs/${id}`),
     createJob: (data) => request('/api/jobs', { method: 'POST', body: JSON.stringify(data) }),
     updateJob: (id, data) => request(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     saveSettings: (data) => request('/api/settings', { method: 'PUT', body: JSON.stringify(data) }),

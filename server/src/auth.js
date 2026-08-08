@@ -1,7 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { hasAnyPermission, loadUserContext } from './permissions.js';
 
-const secret = () => process.env.JWT_SECRET || 'development-only-secret';
+const secret = () => {
+    const configured = (process.env.JWT_SECRET || '').trim();
+    if (process.env.NODE_ENV === 'production' && configured.length < 32)
+        throw new Error('JWT_SECRET must be set to a strong 32+ character value in production.');
+    return configured || 'development-only-secret';
+};
 export const signToken = (user) => jwt.sign(user, secret(), { expiresIn: '12h' });
 export async function requireAuth(req, res, next) {
     const header = req.headers.authorization;

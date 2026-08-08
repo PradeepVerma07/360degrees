@@ -368,12 +368,31 @@ async function initialiseRbacSchema() {
   await addColumnIfMissing('jobs', 'assignment_date', 'VARCHAR(40) NULL AFTER department_id');
   await addColumnIfMissing('jobs', 'assignment_note', 'TEXT NULL AFTER assignment_date');
 
+  await query(`CREATE TABLE IF NOT EXISTS job_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id VARCHAR(100) NOT NULL,
+    previous_assignee_user_id VARCHAR(100) NULL,
+    assigned_to_user_id VARCHAR(100) NULL,
+    assigned_by_user_id VARCHAR(100) NULL,
+    previous_department_id BIGINT UNSIGNED NULL,
+    department_id BIGINT UNSIGNED NULL,
+    note TEXT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_job_assignments_job (job_id),
+    INDEX idx_job_assignments_assignee (assigned_to_user_id),
+    CONSTRAINT fk_job_assignments_job FOREIGN KEY (job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
   await addIndexIfMissing('users', 'idx_users_role_id', '(role_id)');
   await addIndexIfMissing('users', 'idx_users_account_type', '(account_type)');
   await addIndexIfMissing('users', 'idx_users_client_id', '(client_id)');
   await addIndexIfMissing('clients', 'idx_clients_owner', '(account_owner_user_id)');
+  await addIndexIfMissing('clients', 'idx_clients_created_by', '(created_by)');
   await addIndexIfMissing('jobs', 'idx_jobs_assigned_to', '(assigned_to_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_created_by', '(created_by_user_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_department', '(department_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_updated', '(updated_at)');
 }
 
 async function seedRbacDefaults() {

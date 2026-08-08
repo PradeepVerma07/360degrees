@@ -182,10 +182,10 @@ function ForgotPassword({ onMode }) {
     return _jsxs("form", { className: "auth-form", onSubmit: e => { e.preventDefault(); setSent(true); }, children: [
             _jsx("div", { className: "auth-kicker", children: "PASSWORD RECOVERY" }),
             _jsx("h2", { children: "Forgot your password?" }),
-            _jsx("p", { className: "auth-subtitle", children: "Enter your email address. If it matches a workspace account, reset instructions will be sent." }),
+            _jsx("p", { className: "auth-subtitle", children: "Password reset email is not enabled for this workspace yet. Contact your workspace administrator to reset access securely." }),
             _jsxs("label", { children: ["Email", _jsx("input", { type: "email", value: email, onChange: e => setEmail(e.target.value), autoComplete: "email", required: true })] }),
-            sent && _jsxs("div", { className: "alert success", children: [_jsx("b", { children: "Check your inbox." }), _jsx("br", {}), "Password reset instructions will arrive if email delivery is configured for this workspace."] }),
-            _jsx("button", { className: "primary auth-primary", children: "Send Reset Link" }),
+            sent && _jsxs("div", { className: "alert success", children: [_jsx("b", { children: "Request noted." }), _jsx("br", {}), "Ask a Super Admin to reset your account from Users & Roles."] }),
+            _jsx("button", { className: "primary auth-primary", children: "Show Reset Instructions" }),
             _jsx("button", { type: "button", className: "text-button back-button", onClick: () => onMode('login'), children: "Back to Login" })
         ] });
 }
@@ -201,7 +201,7 @@ function ResetPassword({ onMode }) {
             return setMessage('Passwords do not match.');
         if (score < 5)
             return setMessage('Password does not meet all strength requirements.');
-        setMessage('Password reset endpoint is ready for integration. Connect the secure reset token API to activate this action.');
+        setMessage('Secure reset links are not enabled yet. Ask a Super Admin to reset your password from Users & Roles.');
     };
     return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
             _jsx("div", { className: "auth-kicker", children: "SECURE RESET" }),
@@ -211,7 +211,7 @@ function ResetPassword({ onMode }) {
             _jsxs("div", { className: "strength-meter", children: [_jsx("span", { style: { width: `${score * 20}%` } }), _jsx("small", { children: score >= 5 ? 'Strong password' : 'Password strength' })] }),
             _jsx("ul", { className: "password-rules", children: [['length', 'Minimum 8 characters'], ['upper', 'Uppercase'], ['lower', 'Lowercase'], ['number', 'Number'], ['special', 'Special character']].map(([key, label]) => _jsx("li", { className: checks[key] ? 'met' : '', children: label }, key)) }),
             _jsxs("label", { children: ["Confirm Password", _jsx("input", { type: "password", value: confirm, onChange: e => setConfirm(e.target.value), autoComplete: "new-password", required: true })] }),
-            message && _jsx("div", { className: message.includes('ready') ? 'alert success' : 'alert error', children: message }),
+            message && _jsx("div", { className: message.includes('Super Admin') ? 'alert success' : 'alert error', children: message }),
             _jsx("button", { className: "primary auth-primary", children: "Update Password" }),
             _jsx("button", { type: "button", className: "text-button back-button", onClick: () => onMode('login'), children: "Go to Login" })
         ] });
@@ -222,7 +222,7 @@ function AdminSignup({ onMode }) {
     const [message, setMessage] = useState('');
     if (!invite || invite.length < 8)
         return _jsxs("div", { className: "auth-form access-denied", children: [_jsx("div", { className: "auth-kicker", children: "403 ACCESS DENIED" }), _jsx("h2", { children: "Restricted Admin Signup" }), _jsx("p", { className: "auth-subtitle", children: "Only a Super Admin can create new Admin accounts. A valid invitation token or secret admin access code is required." }), _jsx("button", { type: "button", className: "primary auth-primary", onClick: () => onMode('login'), children: "Return to Login" })] });
-    return _jsxs("form", { className: "auth-form", onSubmit: e => { e.preventDefault(); setMessage('Admin invitation UI is ready. Connect the invitation validation endpoint before enabling account creation.'); }, children: [
+    return _jsxs("form", { className: "auth-form", onSubmit: e => { e.preventDefault(); setMessage('Admin signup is disabled here. Create Admin accounts from Users & Roles as a Super Admin.'); }, children: [
             _jsx("div", { className: "auth-kicker", children: "ADMIN INVITATION" }),
             _jsx("h2", { children: "Create Admin Account" }),
             _jsx("p", { className: "auth-subtitle", children: "Restricted workspace setup for invited administrators." }),
@@ -431,7 +431,7 @@ function MonthGroups({ groups, data, empty, editable = false, reload, sortDate =
         }) });
 }
 function Metric({ label, value }) { return _jsxs("div", { className: "metric", children: [_jsx("span", { children: label }), _jsx("strong", { children: value })] }); }
-function Submit({ data, reload }) { const first = data.settings.categories[0]?.name || ''; const [form, setForm] = useState({ clientId: data.clients.find(c => c.status === 'active')?.id || '', title: '', description: '', category: first, priority: 'Medium', postedBy: '', assetLink: '' }); const [message, setMessage] = useState(''); const submit = async (e) => { e.preventDefault(); try {
+function Submit({ data, reload }) { const first = data.settings.categories[0]?.name || ''; const activeClients = useMemo(() => data.clients.filter(c => c.status === 'active'), [data.clients]); const showClientSelector = data.user.accountType !== 'client' && activeClients.length > 0; const [form, setForm] = useState({ clientId: data.user.clientId || activeClients[0]?.id || '', title: '', description: '', category: first, priority: 'Medium', postedBy: '', assetLink: '' }); const [message, setMessage] = useState(''); const submit = async (e) => { e.preventDefault(); try {
     await api.createJob(form);
     setMessage('Job submitted successfully. All logged-in users will receive the update instantly.');
     setForm({ ...form, title: '', description: '', postedBy: '', assetLink: '' });
@@ -439,7 +439,7 @@ function Submit({ data, reload }) { const first = data.settings.categories[0]?.n
 }
 catch (err) {
     setMessage(err.message);
-} }; return _jsxs("form", { className: "card form", onSubmit: submit, children: [_jsx("h2", { children: "New job request" }), message && _jsx("div", { className: "alert", children: message }), can(data, 'clients.view_all') && _jsxs("label", { children: ["Client", _jsx("select", { value: form.clientId, onChange: e => setForm({ ...form, clientId: e.target.value }), children: data.clients.filter(c => c.status === 'active').map(c => _jsx("option", { value: c.id, children: c.name }, c.id)) })] }), _jsxs("label", { children: ["Job title", _jsx("input", { required: true, value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) })] }), _jsxs("label", { children: ["Description", _jsx("textarea", { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }) })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category", _jsx("select", { value: form.category, onChange: e => setForm({ ...form, category: e.target.value }), children: data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name)) })] }), _jsxs("label", { children: ["Priority", _jsxs("select", { value: form.priority, onChange: e => setForm({ ...form, priority: e.target.value }), children: [_jsx("option", { children: "Low" }), _jsx("option", { children: "Medium" }), _jsx("option", { children: "High" }), _jsx("option", { children: "Urgent" })] })] })] }), _jsxs("label", { children: ["Asset link", _jsx("input", { value: form.assetLink, onChange: e => setForm({ ...form, assetLink: e.target.value }), placeholder: "Google Drive, Dropbox or another secure URL" })] }), _jsxs("label", { children: ["Posted by", _jsx("input", { required: true, value: form.postedBy, onChange: e => setForm({ ...form, postedBy: e.target.value }) })] }), _jsx("button", { className: "primary", children: "Submit job" })] }); }
+} }; return _jsxs("form", { className: "card form", onSubmit: submit, children: [_jsx("h2", { children: "New job request" }), message && _jsx("div", { className: "alert", children: message }), showClientSelector && _jsxs("label", { children: ["Client", _jsx("select", { value: form.clientId, onChange: e => setForm({ ...form, clientId: e.target.value }), children: activeClients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id)) })] }), _jsxs("label", { children: ["Job title", _jsx("input", { required: true, value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) })] }), _jsxs("label", { children: ["Description", _jsx("textarea", { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }) })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category", _jsx("select", { value: form.category, onChange: e => setForm({ ...form, category: e.target.value }), children: data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name)) })] }), _jsxs("label", { children: ["Priority", _jsxs("select", { value: form.priority, onChange: e => setForm({ ...form, priority: e.target.value }), children: [_jsx("option", { children: "Low" }), _jsx("option", { children: "Medium" }), _jsx("option", { children: "High" }), _jsx("option", { children: "Urgent" })] })] })] }), _jsxs("label", { children: ["Asset link", _jsx("input", { value: form.assetLink, onChange: e => setForm({ ...form, assetLink: e.target.value }), placeholder: "Google Drive, Dropbox or another secure URL" })] }), _jsxs("label", { children: ["Posted by", _jsx("input", { required: true, value: form.postedBy, onChange: e => setForm({ ...form, postedBy: e.target.value }) })] }), _jsx("button", { className: "primary", children: "Submit job" })] }); }
 function Jobs({ data, reload }) {
     const [category, setCategory] = useState('');
     const [priority, setPriority] = useState('');
@@ -543,6 +543,9 @@ function Clients({ data, reload }) {
     const [form, setForm] = useState({ id: '', name: '', password: '' });
     const [passwords, setPasswords] = useState({});
     const [message, setMessage] = useState('');
+    const canCreateClient = can(data, 'clients.create');
+    const canEditClient = can(data, 'clients.edit');
+    const canDeleteClient = can(data, 'clients.delete');
     const create = async () => {
         try {
             await api.createClient(form);
@@ -612,8 +615,8 @@ function Clients({ data, reload }) {
                             <th>Client ID</th>
                             <th>Name</th>
                             <th>Status</th>
-                            <th>New Password</th>
-                            <th>Actions</th>
+                            {canEditClient && <th>New Password</th>}
+                            {(canEditClient || canDeleteClient) && <th>Actions</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -622,46 +625,56 @@ function Clients({ data, reload }) {
                                 <td data-label="Client ID"><b>{client.id}</b></td>
                                 <td data-label="Name">{client.name}</td>
                                 <td data-label="Status"><span className={`status-pill ${client.status}`}>{client.status}</span></td>
-                                <td data-label="New Password">
-                                    <input
-                                        type="password"
-                                        value={passwords[client.id] || ''}
-                                        onChange={event => setPasswords(current => ({ ...current, [client.id]: event.target.value }))}
-                                        onKeyDown={event => {
-                                            if (event.key === 'Enter')
-                                                resetPassword(client.id);
-                                        }}
-                                        placeholder="minimum 6 characters"
-                                        aria-label={`New password for ${client.name}`}
-                                    />
-                                </td>
-                                <td data-label="Actions">
-                                    <div className="client-actions">
-                                        <button type="button" className="primary small" onClick={() => resetPassword(client.id)}>Reset Password</button>
-                                        <button type="button" className={client.status === 'active' ? 'danger small' : 'small'} onClick={() => toggleClient(client.id, client.status)}>
-                                            {client.status === 'active' ? 'Archive' : 'Restore'}
-                                        </button>
-                                        <button type="button" className="danger small" onClick={() => deleteClient(client)}>Delete</button>
-                                    </div>
-                                </td>
+                                {canEditClient && (
+                                    <td data-label="New Password">
+                                        <input
+                                            type="password"
+                                            value={passwords[client.id] || ''}
+                                            onChange={event => setPasswords(current => ({ ...current, [client.id]: event.target.value }))}
+                                            onKeyDown={event => {
+                                                if (event.key === 'Enter')
+                                                    resetPassword(client.id);
+                                            }}
+                                            placeholder="minimum 6 characters"
+                                            aria-label={`New password for ${client.name}`}
+                                        />
+                                    </td>
+                                )}
+                                {(canEditClient || canDeleteClient) && (
+                                    <td data-label="Actions">
+                                        <div className="client-actions">
+                                            {canEditClient && <button type="button" className="primary small" onClick={() => resetPassword(client.id)}>Reset Password</button>}
+                                            {canEditClient && (
+                                                <button type="button" className={client.status === 'active' ? 'danger small' : 'small'} onClick={() => toggleClient(client.id, client.status)}>
+                                                    {client.status === 'active' ? 'Archive' : 'Restore'}
+                                                </button>
+                                            )}
+                                            {canDeleteClient && <button type="button" className="danger small" onClick={() => deleteClient(client)}>Delete</button>}
+                                        </div>
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
-            <h3>Add client</h3>
-            <div className="row">
-                <label>Client ID
-                    <input value={form.id} onChange={event => setForm({ ...form, id: event.target.value.toLowerCase() })} />
-                </label>
-                <label>Name
-                    <input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} />
-                </label>
-                <label>Temporary password
-                    <input value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} />
-                </label>
-            </div>
-            <button type="button" className="primary" onClick={create}>+ Add client</button>
+            {canCreateClient && (
+                <>
+                    <h3>Add client</h3>
+                    <div className="row">
+                        <label>Client ID
+                            <input value={form.id} onChange={event => setForm({ ...form, id: event.target.value.toLowerCase() })} />
+                        </label>
+                        <label>Name
+                            <input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} />
+                        </label>
+                        <label>Temporary password
+                            <input value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} />
+                        </label>
+                    </div>
+                    <button type="button" className="primary" onClick={create}>+ Add client</button>
+                </>
+            )}
         </section>
     );
 }

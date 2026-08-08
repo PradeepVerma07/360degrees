@@ -25,6 +25,7 @@ import { requireAuth, signToken } from './auth.js';
 import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
 import { calculateHours } from './tat.js';
 const app = express();
+app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -32,6 +33,8 @@ const io = new Server(httpServer, { cors: { origin } });
 let databaseReady = false;
 let databaseInitError = null;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const loginAttempts = new Map();
+const loginRateLimit = { windowMs: 15 * 60 * 1000, maxAttempts: 8 };
 const initialiseDatabaseWithRetry = async () => {
     let attempt = 0;
     while (!databaseReady) {
@@ -71,6 +74,32 @@ app.use(helmet());
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
+const loginRateKey = req => `${req.ip || req.socket.remoteAddress || 'unknown'}:${String(req.body?.id || '').trim().toLowerCase().slice(0, 120)}`;
+const checkLoginRateLimit = (req, res, next) => {
+    const key = loginRateKey(req);
+    const now = Date.now();
+    const current = loginAttempts.get(key);
+    if (current?.blockedUntil && current.blockedUntil > now) {
+        const retryAfter = Math.ceil((current.blockedUntil - now) / 1000);
+        res.setHeader('Retry-After', String(retryAfter));
+        return res.status(429).json({ error: `Too many login attempts. Try again in ${retryAfter} seconds.` });
+    }
+    if (current && current.resetAt <= now)
+        loginAttempts.delete(key);
+    next();
+};
+const recordLoginFailure = req => {
+    const key = loginRateKey(req);
+    const now = Date.now();
+    const current = loginAttempts.get(key);
+    const attempts = current && current.resetAt > now ? current.attempts + 1 : 1;
+    loginAttempts.set(key, {
+        attempts,
+        resetAt: now + loginRateLimit.windowMs,
+        blockedUntil: attempts >= loginRateLimit.maxAttempts ? now + loginRateLimit.windowMs : 0
+    });
+};
+const recordLoginSuccess = req => loginAttempts.delete(loginRateKey(req));
 const settings = async () => JSON.parse((await one('SELECT json FROM settings WHERE id=1')).json);
 const categoryLoad = async () => {
     const rows = await query("SELECT category,COUNT(*) count FROM jobs WHERE status!='completed' AND status!='cancelled' GROUP BY category");
@@ -80,12 +109,15 @@ const jobSelect = `SELECT j.*,
     assigned.name assigned_to_name,
     assigned_by.name assigned_by_name,
     creator.name created_by_name,
-    department.name department_name
+    department.name department_name,
+    client.account_owner_user_id client_owner_user_id,
+    client.created_by client_created_by
   FROM jobs j
   LEFT JOIN users assigned ON assigned.id=j.assigned_to_user_id
   LEFT JOIN users assigned_by ON assigned_by.id=j.assigned_by_user_id
   LEFT JOIN users creator ON creator.id=j.created_by_user_id
-  LEFT JOIN departments department ON department.id=j.department_id`;
+  LEFT JOIN departments department ON department.id=j.department_id
+  LEFT JOIN clients client ON client.id=j.client_id`;
 const mapJob = (row, includeInternal = true) => ({
     id: row.id, clientId: row.client_id, title: row.title, description: row.description, category: row.category,
     priority: row.priority, postedBy: row.posted_by, assetLink: row.asset_link, calculatedHours: row.calculated_hours,
@@ -119,7 +151,9 @@ const canViewAllJobs = user => hasPermission(user, 'jobs.view_all');
 const canViewDepartmentJobs = user => hasPermission(user, 'jobs.view_department');
 const canAssignJobs = user => hasAnyPermission(user, ['jobs.assign', 'jobs.reassign']);
 const canViewAllClients = user => hasPermission(user, 'clients.view_all');
+const canViewOwnedClients = user => hasAnyPermission(user, ['clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.assign_owner']);
 const canManageSupport = user => hasPermission(user, 'support.manage') || hasPermission(user, 'support.view_all');
+const clientSelectFields = 'id,name,status,contact_name contactName,email,phone,industry,account_owner_user_id accountOwnerUserId,created_by createdBy,created_at createdAt';
 const cleanCode = value => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
 const cleanSlug = value => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);
 const optionalId = value => {
@@ -168,12 +202,39 @@ const canAccessJob = (user, job) => canViewAllJobs(user)
     || (user.clientId && job.client_id === user.clientId)
     || job.created_by_user_id === user.id
     || job.assigned_to_user_id === user.id
+    || (canViewOwnedClients(user) && (job.client_owner_user_id === user.id || job.client_created_by === user.id))
     || (canViewDepartmentJobs(user) && user.departmentId && job.department_id === user.departmentId);
+const canAccessClientRecord = (user, client) => canViewAllClients(user)
+    || (user.clientId && client.id === user.clientId)
+    || (canViewOwnedClients(user) && (client.account_owner_user_id === user.id || client.created_by === user.id));
+const loadVisibleClients = user => {
+    if (canViewAllClients(user))
+        return query(`SELECT ${clientSelectFields} FROM clients ORDER BY name`);
+    if (user.clientId)
+        return query(`SELECT ${clientSelectFields} FROM clients WHERE id=?`, [user.clientId]);
+    if (canViewOwnedClients(user))
+        return query(`SELECT ${clientSelectFields} FROM clients WHERE account_owner_user_id=? OR created_by=? ORDER BY name`, [user.id, user.id]);
+    return [];
+};
+const canUseClientForJob = async (user, clientId) => {
+    if (!clientId)
+        return false;
+    const client = await one('SELECT * FROM clients WHERE id=? AND status=?', [clientId, 'active']);
+    return Boolean(client && canAccessClientRecord(user, client));
+};
 const loadVisibleJobs = user => {
     if (canViewAllJobs(user))
         return query(`${jobSelect} ORDER BY j.date_posted DESC`);
-    const clauses = ['j.client_id=?', 'j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
-    const params = [user.clientId || '', user.id, user.id];
+    const clauses = ['j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
+    const params = [user.id, user.id];
+    if (user.clientId) {
+        clauses.push('j.client_id=?');
+        params.push(user.clientId);
+    }
+    if (canViewOwnedClients(user)) {
+        clauses.push('client.account_owner_user_id=?', 'client.created_by=?');
+        params.push(user.id, user.id);
+    }
     if (canViewDepartmentJobs(user) && user.departmentId) {
         clauses.push('j.department_id=?');
         params.push(user.departmentId);
@@ -183,15 +244,24 @@ const loadVisibleJobs = user => {
 const categoryLoadForUser = async user => {
     if (canViewAllJobs(user))
         return categoryLoad();
-    const clauses = ['client_id=?', 'created_by_user_id=?', 'assigned_to_user_id=?'];
-    const params = [user.clientId || '', user.id, user.id];
+    const clauses = ['j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
+    const params = [user.id, user.id];
+    if (user.clientId) {
+        clauses.push('j.client_id=?');
+        params.push(user.clientId);
+    }
+    if (canViewOwnedClients(user)) {
+        clauses.push('client.account_owner_user_id=?', 'client.created_by=?');
+        params.push(user.id, user.id);
+    }
     if (canViewDepartmentJobs(user) && user.departmentId) {
-        clauses.push('department_id=?');
+        clauses.push('j.department_id=?');
         params.push(user.departmentId);
     }
-    const rows = await query(`SELECT category,COUNT(*) count FROM jobs
-      WHERE status!='completed' AND status!='cancelled' AND (${clauses.join(' OR ')})
-      GROUP BY category`, params);
+    const rows = await query(`SELECT j.category,COUNT(*) count FROM jobs j
+      LEFT JOIN clients client ON client.id=j.client_id
+      WHERE j.status!='completed' AND j.status!='cancelled' AND (${clauses.join(' OR ')})
+      GROUP BY j.category`, params);
     return Object.fromEntries(rows.map(row => [row.category, row.count]));
 };
 const managerCreatesCycle = async (userId, managerUserId) => {
@@ -270,10 +340,12 @@ app.use('/api', (_req, res, next) => {
         return next();
     res.status(503).json({ error: 'Database is not ready' });
 });
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
     const parsed = z.object({ id: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
-    if (!parsed.success)
+    if (!parsed.success) {
+        recordLoginFailure(req);
         return res.status(400).json({ error: 'ID and password are required' });
+    }
     const loginId = parsed.data.id.trim();
     const envSuperAdmin = environmentSuperAdminCredentials();
     if (envSuperAdmin.id
@@ -286,8 +358,11 @@ app.post('/api/auth/login', async (req, res) => {
         await seedDemoUsers();
     }
     const user = await one("SELECT * FROM users WHERE (id=? OR email=?) AND status='active' ORDER BY id=? DESC LIMIT 1", [loginId, loginId, loginId]);
-    if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash)))
+    if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash))) {
+        recordLoginFailure(req);
         return res.status(401).json({ error: 'Incorrect ID or password' });
+    }
+    recordLoginSuccess(req);
     await query('UPDATE users SET last_login=?,updated_at=? WHERE id=?', [new Date(), new Date(), user.id]);
     const authUser = await loadUserContext(user.id);
     res.json({ token: signToken({ id: authUser.id }), user: authUser, permissions: authUser.permissions, modules: authUser.modules });
@@ -296,11 +371,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
     const includeInternalJobFields = user.accountType !== 'client';
     const jobRows = await loadVisibleJobs(user);
-    const clients = canViewAllClients(user)
-        ? await query("SELECT id,name,status,contact_name contactName,email,phone,industry,account_owner_user_id accountOwnerUserId,created_at createdAt FROM clients ORDER BY name")
-        : user.clientId
-            ? await query("SELECT id,name,status,contact_name contactName,email,phone,industry,account_owner_user_id accountOwnerUserId,created_at createdAt FROM clients WHERE id=?", [user.clientId])
-            : [];
+    const clients = await loadVisibleClients(user);
     const ticketRows = canManageSupport(user)
         ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
         : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
@@ -328,18 +399,91 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         departments
     });
 });
+app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), async (req, res) => {
+    const schema = z.object({
+        search: z.string().trim().optional().default(''),
+        clientId: z.string().trim().optional().default(''),
+        assignedToUserId: z.string().trim().optional().default(''),
+        departmentId: z.string().trim().optional().default(''),
+        category: z.string().trim().optional().default(''),
+        priority: z.string().trim().optional().default(''),
+        status: z.string().trim().optional().default(''),
+        page: z.coerce.number().int().min(1).default(1),
+        pageSize: z.coerce.number().int().min(1).max(100).default(25),
+        sort: z.enum(['newest', 'oldest', 'updated']).optional().default('newest')
+    }).safeParse(req.query);
+    if (!schema.success)
+        return res.status(400).json({ error: schema.error.issues[0].message });
+    const filters = schema.data;
+    const includeInternalJobFields = req.user.accountType !== 'client';
+    let jobs = (await loadVisibleJobs(req.user)).map(row => mapJob(row, includeInternalJobFields));
+    if (filters.search) {
+        const needle = filters.search.toLowerCase();
+        jobs = jobs.filter(job => [job.id, job.title, job.description, job.postedBy].some(value => String(value || '').toLowerCase().includes(needle)));
+    }
+    if (filters.clientId)
+        jobs = jobs.filter(job => job.clientId === filters.clientId);
+    if (filters.assignedToUserId)
+        jobs = jobs.filter(job => job.assignedToUserId === filters.assignedToUserId);
+    if (filters.departmentId)
+        jobs = jobs.filter(job => String(job.departmentId || '') === filters.departmentId);
+    if (filters.category)
+        jobs = jobs.filter(job => job.category === filters.category);
+    if (filters.priority)
+        jobs = jobs.filter(job => job.priority === filters.priority);
+    if (filters.status)
+        jobs = jobs.filter(job => job.status === filters.status);
+    const sortDate = job => new Date(filters.sort === 'updated' ? job.updatedAt : job.datePosted).getTime() || 0;
+    jobs.sort((a, b) => filters.sort === 'oldest' ? sortDate(a) - sortDate(b) : sortDate(b) - sortDate(a));
+    const total = jobs.length;
+    const start = (filters.page - 1) * filters.pageSize;
+    res.json({
+        jobs: jobs.slice(start, start + filters.pageSize),
+        pagination: { total, page: filters.page, pageSize: filters.pageSize, pages: Math.max(1, Math.ceil(total / filters.pageSize)) }
+    });
+});
+app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), async (req, res) => {
+    const row = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    if (!row)
+        return res.status(404).json({ error: 'Job not found' });
+    if (!canAccessJob(req.user, row))
+        return res.status(403).json({ error: 'Job access denied' });
+    const includeInternalJobFields = req.user.accountType !== 'client';
+    const job = mapJob(row, includeInternalJobFields);
+    const assignmentHistory = includeInternalJobFields
+        ? await query(`SELECT ja.id,ja.job_id jobId,ja.previous_assignee_user_id previousAssigneeUserId,
+            previous_user.name previousAssigneeName,
+            ja.assigned_to_user_id assignedToUserId,
+            assigned_user.name assignedToName,
+            ja.assigned_by_user_id assignedByUserId,
+            assigned_by.name assignedByName,
+            ja.previous_department_id previousDepartmentId,
+            previous_department.name previousDepartmentName,
+            ja.department_id departmentId,
+            department.name departmentName,
+            ja.note,ja.created_at createdAt
+          FROM job_assignments ja
+          LEFT JOIN users previous_user ON previous_user.id=ja.previous_assignee_user_id
+          LEFT JOIN users assigned_user ON assigned_user.id=ja.assigned_to_user_id
+          LEFT JOIN users assigned_by ON assigned_by.id=ja.assigned_by_user_id
+          LEFT JOIN departments previous_department ON previous_department.id=ja.previous_department_id
+          LEFT JOIN departments department ON department.id=ja.department_id
+          WHERE ja.job_id=?
+          ORDER BY ja.created_at DESC,ja.id DESC`, [req.params.id])
+        : [];
+    res.json({ job, assignmentHistory });
+});
 app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req, res) => {
     const schema = z.object({ clientId: z.string().optional(), title: z.string().min(2), description: z.string().default(''), category: z.string().min(1), priority: z.enum(['Low', 'Medium', 'High', 'Urgent']), postedBy: z.string().min(2), assetLink: z.string().default('') });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
     const user = req.user;
-    const clientId = canViewAllClients(user) ? parsed.data.clientId : user.clientId;
+    const clientId = user.accountType === 'client' ? user.clientId : parsed.data.clientId;
     if (!clientId)
         return res.status(400).json({ error: 'Client is required' });
-    const client = await one("SELECT id FROM clients WHERE id=? AND status='active'", [clientId]);
-    if (!client)
-        return res.status(400).json({ error: 'Active client not found' });
+    if (!(await canUseClientForJob(user, clientId)))
+        return res.status(403).json({ error: 'You are not allowed to create jobs for this client' });
     const id = 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const now = new Date().toISOString();
     const calculatedHours = calculateHours(await settings(), await categoryLoad(), parsed.data.category, parsed.data.priority);
@@ -365,7 +509,7 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
-    const current = await one('SELECT * FROM jobs WHERE id=?', [req.params.id]);
+    const current = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
     if (!current)
         return res.status(404).json({ error: 'Job not found' });
     if (!canAccessJob(req.user, current))
@@ -389,6 +533,10 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
     }
     const assignedToUserId = parsed.data.assignedToUserId === undefined ? current.assigned_to_user_id : (parsed.data.assignedToUserId || null);
     const departmentId = parsed.data.departmentId === undefined ? current.department_id : optionalId(parsed.data.departmentId);
+    const assignmentChanged = assignmentRequested
+        && ((assignedToUserId || null) !== (current.assigned_to_user_id || null)
+            || Number(departmentId || 0) !== Number(current.department_id || 0)
+            || parsed.data.assignmentNote !== undefined);
     if (Number.isNaN(departmentId))
         return res.status(400).json({ error: 'Department is invalid' });
     if (assignedToUserId) {
@@ -412,21 +560,41 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
         return res.status(400).json({ error: 'No changes supplied' });
     const sets = entries.map(([key]) => `${map[key]}=?`);
     const values = entries.map(([, value]) => value);
+    const now = new Date().toISOString();
     sets.push('updated_at=?');
-    values.push(new Date().toISOString());
+    values.push(now);
     if (parsed.data.status === 'completed') {
         sets.push('date_completed=?');
-        values.push(new Date().toISOString());
+        values.push(now);
     }
     if (parsed.data.status && parsed.data.status !== 'completed') {
         sets.push('date_completed=NULL');
     }
     if (assignmentRequested) {
         sets.push('assigned_by_user_id=?', 'assignment_date=?');
-        values.push(req.user.id, new Date().toISOString());
+        values.push(req.user.id, now);
     }
-    await query(`UPDATE jobs SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id]);
-    await audit(req.user.id, 'update', 'job', req.params.id, parsed.data);
+    await transaction(async connection => {
+        await query(`UPDATE jobs SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id], connection);
+        if (assignmentChanged) {
+            await query(`INSERT INTO job_assignments
+                (job_id,previous_assignee_user_id,assigned_to_user_id,assigned_by_user_id,previous_department_id,department_id,note,created_at)
+                VALUES (?,?,?,?,?,?,?,?)`,
+                [
+                    req.params.id,
+                    current.assigned_to_user_id || null,
+                    assignedToUserId || null,
+                    req.user.id,
+                    current.department_id || null,
+                    departmentId || null,
+                    parsed.data.assignmentNote || '',
+                    new Date()
+                ],
+                connection
+            );
+        }
+        await audit(req.user.id, 'update', 'job', req.params.id, parsed.data, connection);
+    });
     emitRefresh();
     res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client') });
 });
@@ -446,6 +614,8 @@ app.post('/api/clients', requireAuth, requirePermission('clients.create'), async
         return res.status(400).json({ error: parsed.error.issues[0].message });
     if (await one('SELECT id FROM clients WHERE id=?', [parsed.data.id]))
         return res.status(409).json({ error: 'Client ID already exists' });
+    if (await one('SELECT id FROM users WHERE id=?', [parsed.data.id]))
+        return res.status(409).json({ error: 'A user with this Client ID already exists' });
     const hash = await bcrypt.hash(parsed.data.password, 12);
     await transaction(async connection => {
         await query('INSERT INTO clients (id,name,password_hash,created_by,account_owner_user_id) VALUES (?,?,?,?,?)', [parsed.data.id, parsed.data.name, hash, req.user.id, req.user.id], connection);
@@ -462,6 +632,8 @@ app.patch('/api/clients/:id', requireAuth, requirePermission('clients.edit'), as
     const client = await one('SELECT * FROM clients WHERE id=?', [req.params.id]);
     if (!client)
         return res.status(404).json({ error: 'Client not found' });
+    if (!canAccessClientRecord(req.user, client))
+        return res.status(403).json({ error: 'Client access denied' });
     if (parsed.data.name) {
         await query('UPDATE clients SET name=? WHERE id=?', [parsed.data.name, req.params.id]);
         await query('UPDATE users SET name=? WHERE client_id=?', [parsed.data.name, req.params.id]);
@@ -483,6 +655,8 @@ app.delete('/api/clients/:id', requireAuth, requirePermission('clients.delete'),
     const client = await one('SELECT * FROM clients WHERE id=?', [req.params.id]);
     if (!client)
         return res.status(404).json({ error: 'Client not found' });
+    if (!canAccessClientRecord(req.user, client))
+        return res.status(403).json({ error: 'Client access denied' });
     const jobs = await one('SELECT COUNT(*) AS count FROM jobs WHERE client_id=?', [req.params.id]);
     if (Number(jobs.count) > 0)
         return res.status(409).json({ error: 'This client has job history. Archive the client instead, or remove/reassign jobs before deleting.' });
@@ -658,7 +832,8 @@ app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireA
     res.send(bytes);
 });
 
-app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), async (_req, res) => {
+app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), async (req, res) => {
+    const scopeWhere = hasPermission(req.user, 'users.view') ? '' : "WHERE COALESCE(u.account_type,u.role)<>'client'";
     const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,
         u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
         u.status,u.created_at createdAt,u.created_by createdBy,u.last_login lastLogin,
@@ -670,6 +845,7 @@ app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.vi
       LEFT JOIN designations ds ON ds.id=u.designation_id
       LEFT JOIN users m ON m.id=u.manager_user_id
       LEFT JOIN employee_profiles ep ON ep.user_id=u.id
+      ${scopeWhere}
       ORDER BY FIELD(u.account_type,'super_admin','admin','employee','client'),u.name`);
     res.json({ users: rows });
 });
@@ -699,6 +875,8 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
         return res.status(403).json({ error: 'Only Super Admin can create Admin accounts' });
     if (await one('SELECT id FROM users WHERE id=?', [input.id]))
         return res.status(409).json({ error: 'User ID already exists' });
+    if (input.email && await one('SELECT id FROM users WHERE email=?', [input.email]))
+        return res.status(409).json({ error: 'Email already exists' });
     const role = await one("SELECT * FROM roles WHERE id=? AND status='active'", [input.roleId]);
     if (!role)
         return res.status(400).json({ error: 'Active role not found' });
@@ -779,6 +957,15 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employ
         return res.status(404).json({ error: 'User not found' });
     if (current.account_type === 'super_admin' && !isSuperAdmin(req.user))
         return res.status(403).json({ error: 'Only Super Admin can modify Super Admin accounts' });
+    if (parsed.data.email && parsed.data.email !== current.email && await one('SELECT id FROM users WHERE email=? AND id<>?', [parsed.data.email, current.id]))
+        return res.status(409).json({ error: 'Email already exists' });
+    if (current.id === req.user.id && parsed.data.status && parsed.data.status !== 'active')
+        return res.status(403).json({ error: 'You cannot deactivate your own account' });
+    if (current.account_type === 'super_admin' && parsed.data.status && parsed.data.status !== 'active') {
+        const remaining = await one("SELECT COUNT(*) count FROM users WHERE id<>? AND status='active' AND COALESCE(account_type,role)='super_admin'", [current.id]);
+        if (Number(remaining?.count || 0) === 0)
+            return res.status(403).json({ error: 'At least one active Super Admin is required' });
+    }
     if (parsed.data.roleId && !hasPermission(req.user, 'users.assign_role'))
         return res.status(403).json({ error: 'Role assignment permission required' });
     if (parsed.data.roleId) {
@@ -1053,6 +1240,10 @@ app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), a
         return res.status(403).json({ error: 'Super Admin role is protected' });
     if (role.is_system && !isSuperAdmin(req.user))
         return res.status(403).json({ error: 'Only Super Admin can edit protected system roles' });
+    if (!isSuperAdmin(req.user) && Number(role.level || 0) >= 80)
+        return res.status(403).json({ error: 'Only Super Admin can edit high-level roles' });
+    if (!isSuperAdmin(req.user) && parsed.data.level !== undefined && Number(parsed.data.level || 0) >= 80)
+        return res.status(403).json({ error: 'Only Super Admin can assign high role levels' });
     if (role.is_system && (parsed.data.roleType || parsed.data.status === 'inactive'))
         return res.status(403).json({ error: 'System role type and active status are protected' });
     const nextRoleType = parsed.data.roleType || role.role_type;
@@ -1103,8 +1294,12 @@ app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles
         return res.status(404).json({ error: 'Role not found' });
     if (role.id === 'super_admin')
         return res.status(403).json({ error: 'Super Admin permissions are protected' });
+    if (!isSuperAdmin(req.user) && role.id === req.user.roleId)
+        return res.status(403).json({ error: 'You cannot modify permissions for your own role' });
     if (role.is_system && !isSuperAdmin(req.user))
         return res.status(403).json({ error: 'Only Super Admin can edit protected system role permissions' });
+    if (!isSuperAdmin(req.user) && Number(role.level || 0) >= 80)
+        return res.status(403).json({ error: 'Only Super Admin can edit high-level role permissions' });
     const validation = await validatePermissionIds(parsed.data.permissions, role.role_type);
     if (validation.error)
         return res.status(400).json({ error: validation.error });

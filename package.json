@@ -20,5 +20,8 @@
   "dependencies": {
     "@capacitor/android": "^8.4.2",
     "@capacitor/core": "^8.4.2"
+  },
+  "overrides": {
+    "nanoid": "^3.3.11"
   }
 }
