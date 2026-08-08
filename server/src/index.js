@@ -9,7 +9,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { z } from 'zod';
-import { pool, query, one, transaction, initialiseDatabase, audit, ensureEnvironmentSuperAdmin, environmentSuperAdminCredentials } from './db.js';
+import {
+    pool,
+    query,
+    one,
+    transaction,
+    initialiseDatabase,
+    audit,
+    ensureEnvironmentSuperAdmin,
+    environmentSuperAdminCredentials,
+    seedDemoUsers,
+    shouldRepairDemoLogin
+} from './db.js';
 import { requireAuth, signToken } from './auth.js';
 import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
 import { calculateHours } from './tat.js';
@@ -270,6 +281,9 @@ app.post('/api/auth/login', async (req, res) => {
         && [envSuperAdmin.id, envSuperAdmin.email].filter(Boolean).includes(loginId)
         && parsed.data.password === envSuperAdmin.password) {
         await ensureEnvironmentSuperAdmin();
+    }
+    if (shouldRepairDemoLogin(loginId, parsed.data.password)) {
+        await seedDemoUsers();
     }
     const user = await one("SELECT * FROM users WHERE (id=? OR email=?) AND status='active' ORDER BY id=? DESC LIMIT 1", [loginId, loginId, loginId]);
     if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash)))

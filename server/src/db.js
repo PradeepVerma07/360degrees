@@ -75,6 +75,14 @@ const cleanEnvValue = value => {
 };
 
 const envFlagEnabled = value => ['1', 'true', 'yes', 'on'].includes(cleanEnvValue(value).toLowerCase());
+const demoClientIds = Array.from({ length: 12 }, (_, index) => `client${index + 1}`);
+const demoInternalIds = ['superdemo', 'admindemo', 'employeedemo'];
+const demoLoginIds = new Set([
+  ...demoInternalIds,
+  ...demoInternalIds.map(id => `${id}@ci360demo.local`),
+  ...demoClientIds,
+  ...demoClientIds.map(id => `${id}@ci360demo.local`)
+]);
 
 export const environmentSuperAdminCredentials = () => ({
   id: cleanEnvValue(process.env.SUPER_ADMIN_ID),
@@ -82,6 +90,17 @@ export const environmentSuperAdminCredentials = () => ({
   name: cleanEnvValue(process.env.SUPER_ADMIN_NAME) || 'Super Admin',
   email: cleanEnvValue(process.env.SUPER_ADMIN_EMAIL) || null
 });
+
+export const demoUserCredentials = () => ({
+  enabled: envFlagEnabled(process.env.SEED_DEMO_USERS),
+  password: cleanEnvValue(process.env.DEMO_USER_PASSWORD) || 'CI360Demo#2026',
+  loginIds: demoLoginIds
+});
+
+export const shouldRepairDemoLogin = (loginId, password) => {
+  const demo = demoUserCredentials();
+  return demo.enabled && demo.password === password && demo.loginIds.has(cleanEnvValue(loginId).toLowerCase());
+};
 
 async function columnExists(tableName, columnName) {
   const row = await one(
@@ -443,13 +462,13 @@ async function seed() {
   });
 }
 
-async function seedDemoUsers() {
+export async function seedDemoUsers() {
   const now = new Date();
-  const passwordHash = await bcrypt.hash(cleanEnvValue(process.env.DEMO_USER_PASSWORD) || 'CI360Demo#2026', 12);
-  const demoClients = Array.from({ length: 12 }, (_, index) => {
+  const passwordHash = await bcrypt.hash(demoUserCredentials().password, 12);
+  const demoClients = demoClientIds.map((id, index) => {
     const number = index + 1;
     return {
-      id: `client${number}`,
+      id,
       name: `Demo Client ${number}`,
       contactName: `Demo Client ${number}`,
       email: `client${number}@ci360demo.local`,
