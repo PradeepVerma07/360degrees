@@ -11,7 +11,7 @@ import { Server } from 'socket.io';
 import { z } from 'zod';
 import { pool, query, one, transaction, initialiseDatabase, audit } from './db.js';
 import { requireAuth, signToken } from './auth.js';
-import { hasPermission, hasAnyPermission, loadUserContext, requirePermission } from './permissions.js';
+import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
 import { calculateHours } from './tat.js';
 const app = express();
 const httpServer = createServer(app);
@@ -454,6 +454,72 @@ app.get('/api/users', requireAuth, requirePermission('users.view'), async (_req,
       LEFT JOIN users m ON m.id=u.manager_user_id
       ORDER BY FIELD(u.account_type,'super_admin','admin','employee','client'),u.name`);
     res.json({ users: rows });
+});
+
+app.post('/api/users', requireAuth, requirePermission('users.create'), async (req, res) => {
+    const parsed = z.object({
+        id: z.string().trim().regex(/^[a-zA-Z0-9._-]+$/),
+        name: z.string().trim().min(2),
+        email: z.string().trim().email().optional().or(z.literal('')),
+        phone: z.string().trim().max(60).optional().or(z.literal('')),
+        password: z.string().min(8),
+        accountType: z.enum(['super_admin', 'admin', 'employee', 'client']),
+        roleId: z.string().trim().min(1),
+        clientId: z.string().trim().optional().or(z.literal('')),
+        employeeId: z.string().trim().max(80).optional().or(z.literal('')),
+        joiningDate: z.string().trim().optional().or(z.literal(''))
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const input = parsed.data;
+    if (input.accountType === 'super_admin' && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can create another Super Admin' });
+    if (await one('SELECT id FROM users WHERE id=?', [input.id]))
+        return res.status(409).json({ error: 'User ID already exists' });
+    const role = await one("SELECT * FROM roles WHERE id=? AND status='active'", [input.roleId]);
+    if (!role)
+        return res.status(400).json({ error: 'Active role not found' });
+    if (input.accountType === 'client' && role.role_type !== 'client')
+        return res.status(400).json({ error: 'Client users must use a client role' });
+    if (input.accountType !== 'client' && role.role_type === 'client')
+        return res.status(400).json({ error: 'Internal users cannot use a client role' });
+    if (input.accountType === 'client' && !input.clientId)
+        return res.status(400).json({ error: 'Client organization is required for client users' });
+    if (input.clientId) {
+        const client = await one("SELECT id FROM clients WHERE id=? AND status='active'", [input.clientId]);
+        if (!client)
+            return res.status(400).json({ error: 'Active client not found' });
+    }
+    const hash = await bcrypt.hash(input.password, 12);
+    await transaction(async connection => {
+        await query(`INSERT INTO users
+            (id,name,email,phone,password_hash,role,account_type,role_id,client_id,status,created_by,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            [
+                input.id,
+                input.name,
+                input.email || null,
+                input.phone || null,
+                hash,
+                input.accountType,
+                input.accountType,
+                input.roleId,
+                input.accountType === 'client' ? input.clientId : null,
+                'active',
+                req.user.id,
+                new Date()
+            ],
+            connection
+        );
+        if (input.accountType !== 'client') {
+            await query('INSERT INTO employee_profiles (user_id,employee_id,joining_date) VALUES (?,?,?)',
+                [input.id, input.employeeId || null, input.joiningDate || null], connection);
+        }
+        await audit(req.user.id, 'create', 'user', input.id,
+            { accountType: input.accountType, roleId: input.roleId, clientId: input.clientId || null }, connection);
+    });
+    emitRefresh();
+    res.status(201).json({ user: await loadUserContext(input.id) });
 });
 
 app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view'), async (_req, res) => {

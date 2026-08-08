@@ -56,6 +56,7 @@ export const api = {
     updateClient: (id, data) => request(`/api/clients/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     deleteClient: (id) => request(`/api/clients/${id}`, { method: 'DELETE' }),
     users: () => request('/api/users'),
+    createUser: (data) => request('/api/users', { method: 'POST', body: JSON.stringify(data) }),
     roles: () => request('/api/rbac/roles'),
     permissions: () => request('/api/rbac/permissions'),
     updateRolePermissions: (id, permissions) => request(`/api/rbac/roles/${id}/permissions`, { method: 'PUT', body: JSON.stringify({ permissions }) }),
