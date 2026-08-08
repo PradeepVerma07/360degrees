@@ -39,7 +39,8 @@ const knownDashboardTabs = {
     clients: 'Manage Clients',
     employees: 'Employees',
     users: 'Users & Roles',
-    support: 'Support Tickets'
+    support: 'Support Tickets',
+    audit: 'Audit Logs'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
     ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']]
@@ -110,7 +111,9 @@ export default function App() {
                                 ? _jsx(UsersRoles, { data: data, reload: load })
                                 : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
                                     ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
-                                    : _jsx(Overview, { data: data, setTab: setTab });
+                                    : activeTab === 'audit' && can(data, 'audit.view')
+                                        ? _jsx(AuditLogs, {})
+                                        : _jsx(Overview, { data: data, setTab: setTab });
     return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
@@ -233,7 +236,7 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support', audit: 'document' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
@@ -242,7 +245,8 @@ const dashboardTabDescriptions = {
     clients: 'Client access',
     employees: 'Internal team',
     users: 'Roles and access',
-    support: 'Help and tickets'
+    support: 'Help and tickets',
+    audit: 'Activity history'
 };
 const dashboardDate = value => {
     const date = new Date(value);
@@ -709,28 +713,92 @@ function Employees({ data }) {
     );
 }
 
+const summarizeAuditDetails = details => {
+    const entries = Object.entries(details || {}).filter(([, value]) => value !== undefined && value !== null && value !== '');
+    if (!entries.length)
+        return '-';
+    return entries.slice(0, 4).map(([key, value]) => {
+        const text = Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}` : String(value);
+        return `${key}: ${text.length > 80 ? `${text.slice(0, 77)}...` : text}`;
+    }).join(' | ');
+};
+
+function AuditLogs() {
+    const [logs, setLogs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    useEffect(() => {
+        let active = true;
+        api.auditLogs()
+            .then(result => { if (active) setLogs(result.logs || []); })
+            .catch(err => { if (active) setError(err.message); })
+            .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
+    }, []);
+    return (
+        <section className="management-page">
+            <div className="management-header">
+                <div>
+                    <span>Security</span>
+                    <h2>Audit Logs</h2>
+                    <p>Recent administrative and workflow events recorded by the system.</p>
+                </div>
+            </div>
+            {error && <div className="alert error">{error}</div>}
+            <article className="dashboard-card management-card">
+                <div className="dashboard-card-head">
+                    <div>
+                        <h3>Recent Activity</h3>
+                        <p>{loading ? 'Loading audit history...' : `${logs.length} recent event${logs.length === 1 ? '' : 's'}.`}</p>
+                    </div>
+                </div>
+                <ManagementTable
+                    empty="No audit logs found."
+                    rows={logs}
+                    columns={[
+                        { key: 'createdAt', label: 'Time', render: log => shortDateTime(log.createdAt) },
+                        { key: 'actorId', label: 'Actor' },
+                        { key: 'action', label: 'Action', render: log => <span className="status-pill active">{log.action}</span> },
+                        { key: 'entityType', label: 'Entity' },
+                        { key: 'entityId', label: 'Entity ID' },
+                        { key: 'details', label: 'Details', render: log => summarizeAuditDetails(log.details) }
+                    ]}
+                />
+            </article>
+        </section>
+    );
+}
+
 function UsersRoles({ data, reload }) {
+    const [activePanel, setActivePanel] = useState('users');
     const [users, setUsers] = useState([]);
     const [roles, setRoles] = useState([]);
     const [permissions, setPermissions] = useState([]);
+    const [departments, setDepartments] = useState([]);
+    const [designations, setDesignations] = useState([]);
     const [selectedRoleId, setSelectedRoleId] = useState('');
     const [draftPermissions, setDraftPermissions] = useState([]);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
-    const [form, setForm] = useState({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: '', clientId: '', employeeId: '', joiningDate: '' });
+    const [form, setForm] = useState({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
+    const [roleForm, setRoleForm] = useState({ name: '', description: '', roleType: 'internal', level: 40 });
     const loadManagement = useCallback(async () => {
         setLoading(true);
         setError('');
         try {
-            const [usersResult, rolesResult, permissionsResult] = await Promise.all([
+            const [usersResult, rolesResult, permissionsResult, departmentsResult, designationsResult] = await Promise.all([
                 can(data, 'users.view') ? api.users() : Promise.resolve({ users: [] }),
                 can(data, 'roles.view') ? api.roles() : Promise.resolve({ roles: [] }),
-                canAny(data, ['roles.view', 'roles.manage_permissions']) ? api.permissions() : Promise.resolve({ permissions: [] })
+                canAny(data, ['roles.view', 'roles.manage_permissions']) ? api.permissions() : Promise.resolve({ permissions: [] }),
+                canAny(data, ['departments.manage', 'users.view', 'employees.view']) ? api.departments() : Promise.resolve({ departments: [] }),
+                canAny(data, ['designations.manage', 'users.view', 'employees.view']) ? api.designations() : Promise.resolve({ designations: [] })
             ]);
             setUsers(usersResult.users || []);
             setRoles(rolesResult.roles || []);
             setPermissions(permissionsResult.permissions || []);
+            setDepartments(departmentsResult.departments || []);
+            setDesignations(designationsResult.designations || []);
         }
         catch (err) {
             setError(err.message);
@@ -748,7 +816,29 @@ function UsersRoles({ data, reload }) {
     useEffect(() => {
         setDraftPermissions(selectedRole?.permissions || []);
     }, [selectedRoleId, selectedRole]);
-    const roleOptions = roles.filter(role => form.accountType === 'client' ? role.roleType === 'client' : role.roleType !== 'client');
+    const canManageSuperAdmin = data.user.accountType === 'super_admin' || data.user.roleSlug === 'super_admin';
+    const roleOptions = useMemo(() => roles.filter(role => {
+        const typeMatches = form.accountType === 'client' ? role.roleType === 'client' : role.roleType !== 'client';
+        if (!typeMatches)
+            return false;
+        if (!canManageSuperAdmin && Number(role.level || 0) >= 80)
+            return false;
+        return role.id !== 'super_admin' || (canManageSuperAdmin && form.accountType === 'super_admin');
+    }), [roles, form.accountType, canManageSuperAdmin]);
+    const internalUsers = useMemo(() => users.filter(user => user.accountType !== 'client'), [users]);
+    const canEditUsers = canAny(data, ['users.edit', 'employees.edit']);
+    const canEditRoles = can(data, 'roles.edit');
+    const managementTabs = useMemo(() => [
+        can(data, 'users.view') && ['users', 'Users'],
+        can(data, 'roles.view') && ['roles', 'Roles'],
+        can(data, 'departments.manage') && ['departments', 'Departments'],
+        can(data, 'designations.manage') && ['designations', 'Designations'],
+        can(data, 'users.view') && ['hierarchy', 'Hierarchy']
+    ].filter(Boolean), [data]);
+    useEffect(() => {
+        if (managementTabs.length && !managementTabs.some(([id]) => id === activePanel))
+            setActivePanel(managementTabs[0][0]);
+    }, [activePanel, managementTabs]);
     useEffect(() => {
         if (roleOptions.some(role => role.id === form.roleId)) return;
         setForm(current => ({ ...current, roleId: roleOptions[0]?.id || '' }));
@@ -780,7 +870,45 @@ function UsersRoles({ data, reload }) {
         try {
             await api.createUser(form);
             setMessage('User created successfully.');
-            setForm({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: roleOptions[0]?.id || '', clientId: '', employeeId: '', joiningDate: '' });
+            setForm({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: roleOptions[0]?.id || '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
+            setActivePanel('users');
+            await loadManagement();
+            await reload?.();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const createRole = async event => {
+        event.preventDefault();
+        setMessage('');
+        setError('');
+        try {
+            await api.createRole({ ...roleForm, level: Number(roleForm.level), permissions: [] });
+            setRoleForm({ name: '', description: '', roleType: 'internal', level: 40 });
+            setMessage('Role created. Select it below to configure permissions.');
+            await loadManagement();
+            await reload?.();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const updateRole = async (role, patch) => {
+        try {
+            await api.updateRole(role.id, patch);
+            setMessage('Role updated.');
+            await loadManagement();
+            await reload?.();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const updateUser = async (user, patch) => {
+        try {
+            await api.updateUser(user.id, patch);
+            setMessage('User updated.');
             await loadManagement();
             await reload?.();
         }
@@ -799,57 +927,111 @@ function UsersRoles({ data, reload }) {
             </div>
             {message && <div className="alert success">{message}</div>}
             {error && <div className="alert error">{error}</div>}
-            <div className="management-grid">
-                {can(data, 'users.create') && (
+            <div className="management-tabs" role="tablist" aria-label="Users and roles sections">
+                {managementTabs.map(([id, label]) => (
+                    <button type="button" className={activePanel === id ? 'active' : ''} onClick={() => setActivePanel(id)} key={id}>{label}</button>
+                ))}
+            </div>
+            {activePanel === 'users' && (
+                <>
+                    {can(data, 'users.create') && (
+                        <article className="dashboard-card management-card">
+                            <div className="dashboard-card-head">
+                                <div>
+                                    <h3>Add User</h3>
+                                    <p>Create Admin, Employee, or Client accounts with a protected role.</p>
+                                </div>
+                            </div>
+                            <form className="management-form" onSubmit={createUser}>
+                                <div className="row">
+                                    <label>User ID<input required value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
+                                    <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                                </div>
+                                <div className="row">
+                                    <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
+                                    <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
+                                </div>
+                                <div className="row">
+                                    <label>Account Type
+                                        <select value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
+                                            <option value="employee">Employee</option>
+                                            {canManageSuperAdmin && <option value="admin">Admin</option>}
+                                            <option value="client">Client</option>
+                                            {canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
+                                        </select>
+                                    </label>
+                                    <label>Role
+                                        <select required value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>
+                                            {roleOptions.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
+                                        </select>
+                                    </label>
+                                </div>
+                                {form.accountType === 'client' ? (
+                                    <label>Client Organization
+                                        <select required value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
+                                            <option value="">Select client</option>
+                                            {data.clients.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}
+                                        </select>
+                                    </label>
+                                ) : (
+                                    <>
+                                        <div className="row">
+                                            <label>Department
+                                                <select value={form.departmentId} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
+                                                    <option value="">No department</option>
+                                                    {departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                                                </select>
+                                            </label>
+                                            <label>Designation
+                                                <select value={form.designationId} onChange={event => setForm({ ...form, designationId: event.target.value })}>
+                                                    <option value="">No designation</option>
+                                                    {designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div className="row">
+                                            <label>Reporting Manager
+                                                <select value={form.managerUserId} onChange={event => setForm({ ...form, managerUserId: event.target.value })}>
+                                                    <option value="">No manager</option>
+                                                    {internalUsers.map(user => <option value={user.id} key={user.id}>{user.name}</option>)}
+                                                </select>
+                                            </label>
+                                            <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
+                                            <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
+                                        </div>
+                                    </>
+                                )}
+                                <label>Temporary Password<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
+                                <button className="primary">Create User</button>
+                            </form>
+                        </article>
+                    )}
                     <article className="dashboard-card management-card">
                         <div className="dashboard-card-head">
                             <div>
-                                <h3>Add User</h3>
-                                <p>Create Admin, Employee, or Client accounts with a protected role.</p>
+                                <h3>Users</h3>
+                                <p>{loading ? 'Loading users...' : `${users.length} account${users.length === 1 ? '' : 's'} in the workspace.`}</p>
                             </div>
                         </div>
-                        <form className="management-form" onSubmit={createUser}>
-                            <div className="row">
-                                <label>User ID<input required value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
-                                <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                            </div>
-                            <div className="row">
-                                <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-                                <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-                            </div>
-                            <div className="row">
-                                <label>Account Type
-                                    <select value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '' })}>
-                                        <option value="employee">Employee</option>
-                                        <option value="admin">Admin</option>
-                                        <option value="client">Client</option>
-                                        {data.user.accountType === 'super_admin' && <option value="super_admin">Super Admin</option>}
-                                    </select>
-                                </label>
-                                <label>Role
-                                    <select required value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>
-                                        {roleOptions.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
-                                    </select>
-                                </label>
-                            </div>
-                            {form.accountType === 'client' ? (
-                                <label>Client Organization
-                                    <select required value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
-                                        <option value="">Select client</option>
-                                        {data.clients.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}
-                                    </select>
-                                </label>
-                            ) : (
-                                <div className="row">
-                                    <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
-                                    <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
-                                </div>
-                            )}
-                            <label>Temporary Password<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
-                            <button className="primary">Create User</button>
-                        </form>
+                        <ManagementTable
+                            empty="No users found."
+                            rows={users}
+                            columns={[
+                                { key: 'name', label: 'Name', render: user => <b>{user.name}</b> },
+                                { key: 'id', label: 'User ID' },
+                                { key: 'email', label: 'Email', render: user => user.email || '-' },
+                                { key: 'accountType', label: 'Type', render: user => <span className={`status-pill ${user.accountType}`}>{user.accountType}</span> },
+                                { key: 'roleName', label: 'Role', render: user => can(data, 'users.assign_role') && user.accountType !== 'client' && user.id !== data.user.id ? <select value={user.roleId || ''} onChange={event => updateUser(user, { roleId: event.target.value })}>{roles.filter(role => role.roleType !== 'client' && (canManageSuperAdmin || Number(role.level || 0) < 80) && (user.accountType === 'super_admin' ? role.id === 'super_admin' : role.id !== 'super_admin')).map(role => <option value={role.id} key={role.id}>{role.name}</option>)}</select> : user.roleName },
+                                { key: 'departmentName', label: 'Department', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.departmentId || ''} onChange={event => updateUser(user, { departmentId: event.target.value })}><option value="">None</option>{departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.departmentName || '-' },
+                                { key: 'designationName', label: 'Designation', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.designationId || ''} onChange={event => updateUser(user, { designationId: event.target.value })}><option value="">None</option>{designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.designationName || '-' },
+                                { key: 'managerName', label: 'Manager', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.managerUserId || ''} onChange={event => updateUser(user, { managerUserId: event.target.value })}><option value="">None</option>{internalUsers.filter(manager => manager.id !== user.id).map(manager => <option value={manager.id} key={manager.id}>{manager.name}</option>)}</select> : user.managerName || '-' },
+                                { key: 'status', label: 'Status', render: user => canEditUsers ? <select value={user.status} onChange={event => updateUser(user, { status: event.target.value })}><option value="active">active</option><option value="archived">archived</option></select> : <span className={`status-pill ${user.status}`}>{user.status}</span> }
+                            ]}
+                        />
                     </article>
-                )}
+                </>
+            )}
+            {activePanel === 'roles' && (
                 <article className="dashboard-card management-card">
                     <div className="dashboard-card-head">
                         <div>
@@ -857,8 +1039,35 @@ function UsersRoles({ data, reload }) {
                             <p>{loading ? 'Loading permission catalog...' : 'Select a role and control module access.'}</p>
                         </div>
                     </div>
+                    {can(data, 'roles.create') && (
+                        <form className="management-form compact" onSubmit={createRole}>
+                            <div className="row">
+                                <label>Role Name<input required value={roleForm.name} onChange={event => setRoleForm({ ...roleForm, name: event.target.value })} /></label>
+                                <label>Role Type
+                                    <select value={roleForm.roleType} onChange={event => setRoleForm({ ...roleForm, roleType: event.target.value })}>
+                                        <option value="internal">Internal</option>
+                                        <option value="client">Client</option>
+                                    </select>
+                                </label>
+                                <label>Level<input type="number" min="0" max={canManageSuperAdmin ? "100" : "79"} value={roleForm.level} onChange={event => setRoleForm({ ...roleForm, level: event.target.value })} /></label>
+                            </div>
+                            <label>Description<input value={roleForm.description} onChange={event => setRoleForm({ ...roleForm, description: event.target.value })} /></label>
+                            <button className="primary">Create Role</button>
+                        </form>
+                    )}
                     {roles.length ? (
                         <>
+                            <ManagementTable
+                                empty="No roles available."
+                                rows={roles}
+                                columns={[
+                                    { key: 'name', label: 'Role', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.name} onBlur={event => event.target.value.trim() && event.target.value.trim() !== role.name && updateRole(role, { name: event.target.value.trim() })} /> : <b>{role.name}</b> },
+                                    { key: 'description', label: 'Description', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.description || ''} onBlur={event => event.target.value !== (role.description || '') && updateRole(role, { description: event.target.value })} /> : role.description || '-' },
+                                    { key: 'roleType', label: 'Type', render: role => canEditRoles && !role.isSystem ? <select value={role.roleType} onChange={event => updateRole(role, { roleType: event.target.value })}><option value="internal">internal</option><option value="client">client</option></select> : <span className={`status-pill ${role.roleType}`}>{role.roleType}</span> },
+                                    { key: 'level', label: 'Level', render: role => canEditRoles && role.id !== 'super_admin' ? <input type="number" min="0" max="100" defaultValue={role.level} onBlur={event => Number(event.target.value) !== Number(role.level) && updateRole(role, { level: Number(event.target.value) })} /> : role.level },
+                                    { key: 'status', label: 'Status', render: role => canEditRoles && !role.isSystem ? <select value={role.status} onChange={event => updateRole(role, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> : <span className={`status-pill ${role.status}`}>{role.status}</span> }
+                                ]}
+                            />
                             <label className="management-select">Role
                                 <select value={selectedRoleId} onChange={event => setSelectedRoleId(event.target.value)}>
                                     {roles.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
@@ -889,29 +1098,151 @@ function UsersRoles({ data, reload }) {
                         </>
                     ) : <DashboardEmptyState title="No roles available." body="Roles will appear here after the RBAC catalog is seeded." />}
                 </article>
-            </div>
-            <article className="dashboard-card management-card">
-                <div className="dashboard-card-head">
-                    <div>
-                        <h3>Users</h3>
-                        <p>{loading ? 'Loading users...' : `${users.length} account${users.length === 1 ? '' : 's'} in the workspace.`}</p>
-                    </div>
-                </div>
-                <ManagementTable
-                    empty="No users found."
-                    rows={users}
-                    columns={[
-                        { key: 'name', label: 'Name', render: user => <b>{user.name}</b> },
-                        { key: 'id', label: 'User ID' },
-                        { key: 'email', label: 'Email', render: user => user.email || '-' },
-                        { key: 'accountType', label: 'Type', render: user => <span className={`status-pill ${user.accountType}`}>{user.accountType}</span> },
-                        { key: 'roleName', label: 'Role' },
-                        { key: 'clientId', label: 'Client', render: user => user.clientId || '-' },
-                        { key: 'status', label: 'Status', render: user => <span className={`status-pill ${user.status}`}>{user.status}</span> },
-                        { key: 'lastLogin', label: 'Last Login', render: user => user.lastLogin ? shortDateTime(user.lastLogin) : '-' }
-                    ]}
-                />
-            </article>
+            )}
+            {activePanel === 'departments' && <DepartmentsPanel departments={departments} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'designations' && <DesignationsPanel designations={designations} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'hierarchy' && <HierarchyPanel users={internalUsers} />}
         </section>
+    );
+}
+
+function DepartmentsPanel({ departments, reloadManagement, setMessage, setError }) {
+    const [form, setForm] = useState({ name: '', code: '', description: '' });
+    const create = async event => {
+        event.preventDefault();
+        try {
+            await api.createDepartment(form);
+            setForm({ name: '', code: '', description: '' });
+            setMessage('Department created.');
+            await reloadManagement();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const update = async (department, patch) => {
+        try {
+            await api.updateDepartment(department.id, patch);
+            setMessage('Department updated.');
+            await reloadManagement();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    return (
+        <article className="dashboard-card management-card">
+            <div className="dashboard-card-head">
+                <div>
+                    <h3>Departments</h3>
+                    <p>Create and manage internal departments used by employees and assignments.</p>
+                </div>
+            </div>
+            <form className="management-form compact" onSubmit={create}>
+                <div className="row">
+                    <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                    <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
+                    <label>Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
+                </div>
+                <button className="primary">Add Department</button>
+            </form>
+            <ManagementTable
+                empty="No departments found."
+                rows={departments}
+                columns={[
+                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
+                    { key: 'code', label: 'Code' },
+                    { key: 'description', label: 'Description', render: item => item.description || '-' },
+                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> },
+                    { key: 'updatedAt', label: 'Updated', render: item => item.updatedAt ? shortDateTime(item.updatedAt) : '-' }
+                ]}
+            />
+        </article>
+    );
+}
+
+function DesignationsPanel({ designations, reloadManagement, setMessage, setError }) {
+    const [form, setForm] = useState({ name: '', code: '', description: '', hierarchyLevel: 10 });
+    const create = async event => {
+        event.preventDefault();
+        try {
+            await api.createDesignation({ ...form, hierarchyLevel: Number(form.hierarchyLevel) });
+            setForm({ name: '', code: '', description: '', hierarchyLevel: 10 });
+            setMessage('Designation created.');
+            await reloadManagement();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const update = async (designation, patch) => {
+        try {
+            await api.updateDesignation(designation.id, patch);
+            setMessage('Designation updated.');
+            await reloadManagement();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    return (
+        <article className="dashboard-card management-card">
+            <div className="dashboard-card-head">
+                <div>
+                    <h3>Designations</h3>
+                    <p>Configure organization levels without hard-coding your company structure.</p>
+                </div>
+            </div>
+            <form className="management-form compact" onSubmit={create}>
+                <div className="row">
+                    <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                    <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
+                    <label>Hierarchy Level<input type="number" min="0" max="999" value={form.hierarchyLevel} onChange={event => setForm({ ...form, hierarchyLevel: event.target.value })} /></label>
+                </div>
+                <label>Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
+                <button className="primary">Add Designation</button>
+            </form>
+            <ManagementTable
+                empty="No designations found."
+                rows={designations}
+                columns={[
+                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
+                    { key: 'code', label: 'Code' },
+                    { key: 'hierarchyLevel', label: 'Level', render: item => <input type="number" min="0" max="999" value={item.hierarchyLevel} onChange={event => update(item, { hierarchyLevel: Number(event.target.value) })} /> },
+                    { key: 'description', label: 'Description', render: item => item.description || '-' },
+                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> }
+                ]}
+            />
+        </article>
+    );
+}
+
+function HierarchyPanel({ users }) {
+    const byManager = useMemo(() => users.reduce((groups, user) => {
+        const key = user.managerUserId || 'root';
+        groups[key] = [...(groups[key] || []), user];
+        return groups;
+    }, {}), [users]);
+    const roots = byManager.root || [];
+    const renderNode = (user, depth = 0) => (
+        <div className="hierarchy-node" style={{ marginLeft: `${Math.min(depth, 5) * 18}px` }} key={user.id}>
+            <div>
+                <b>{user.name}</b>
+                <span>{user.designationName || user.roleName || user.accountType}</span>
+            </div>
+            <small>{user.departmentName || 'No department'}</small>
+            {(byManager[user.id] || []).map(child => renderNode(child, depth + 1))}
+        </div>
+    );
+    return (
+        <article className="dashboard-card management-card">
+            <div className="dashboard-card-head">
+                <div>
+                    <h3>Hierarchy</h3>
+                    <p>Reporting structure based on each user's manager assignment.</p>
+                </div>
+            </div>
+            {roots.length ? <div className="hierarchy-tree">{roots.map(user => renderNode(user))}</div> : <DashboardEmptyState title="No hierarchy yet." body="Assign reporting managers to build the organization tree." />}
+        </article>
     );
 }

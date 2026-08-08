@@ -46,6 +46,7 @@ export async function loadUserContext(userId) {
   const row = await one(
     `SELECT u.*,
       r.name role_name,r.slug role_slug,r.level role_level,r.role_type,
+      r.status role_status,
       d.name department_name,
       ds.name designation_name,ds.hierarchy_level designation_level
     FROM users u
@@ -60,13 +61,14 @@ export async function loadUserContext(userId) {
 
   const fallbackType = row.account_type || row.role || 'client';
   const roleId = row.role_id || fallbackType;
-  const permissionRows = await query(
+  const roleActive = !row.role_id || row.role_status === 'active';
+  const permissionRows = roleActive ? await query(
     `SELECT permission_id FROM role_permissions WHERE role_id=?`,
     [roleId]
-  );
+  ) : [];
   const permissions = new Set(permissionRows.map(item => item.permission_id));
 
-  if (!permissions.size) {
+  if (!permissions.size && !row.role_id) {
     for (const permission of legacyPermissionFallback[fallbackType] || [])
       permissions.add(permission);
   }

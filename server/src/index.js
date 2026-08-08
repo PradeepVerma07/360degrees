@@ -85,6 +85,17 @@ const mapTicket = (row) => ({
 const canViewAllJobs = user => hasPermission(user, 'jobs.view_all');
 const canViewAllClients = user => hasPermission(user, 'clients.view_all');
 const canManageSupport = user => hasPermission(user, 'support.manage') || hasPermission(user, 'support.view_all');
+const cleanCode = value => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+const cleanSlug = value => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);
+const optionalId = value => {
+    if (value === '' || value == null)
+        return null;
+    const id = Number(value);
+    return Number.isInteger(id) && id > 0 ? id : NaN;
+};
+const entityStatus = ['active', 'inactive'];
+const roleTypes = ['internal', 'client'];
+const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'support.view_own', 'support.create', 'support.reply']);
 const mapAttachment = (row) => ({
     id: String(row.id), ticketNumber: row.ticket_number, fileName: row.file_name,
     mimeType: row.mime_type, sizeBytes: row.size_bytes, messageId: row.message_id ? String(row.message_id) : null, createdAt: row.created_at
@@ -118,6 +129,60 @@ const prepareAttachment = (attachment) => {
 };
 const getTicketRow = ticketNumber => one('SELECT * FROM support_tickets WHERE ticket_number=?', [ticketNumber]);
 const canAccessTicket = (user, ticket) => canManageSupport(user) || ticket.user_id === user.id || (user.clientId && ticket.client_id === user.clientId);
+const managerCreatesCycle = async (userId, managerUserId) => {
+    if (!managerUserId)
+        return false;
+    let current = managerUserId;
+    let depth = 0;
+    while (current && depth < 100) {
+        if (current === userId)
+            return true;
+        const row = await one('SELECT manager_user_id FROM users WHERE id=?', [current]);
+        current = row?.manager_user_id;
+        depth += 1;
+    }
+    return false;
+};
+const validateOrgReferences = async ({ departmentId, designationId, managerUserId, userId }) => {
+    if (Number.isNaN(departmentId))
+        return 'Department is invalid';
+    if (Number.isNaN(designationId))
+        return 'Designation is invalid';
+    if (departmentId) {
+        const department = await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId]);
+        if (!department)
+            return 'Active department not found';
+    }
+    if (designationId) {
+        const designation = await one("SELECT id FROM designations WHERE id=? AND status='active'", [designationId]);
+        if (!designation)
+            return 'Active designation not found';
+    }
+    if (managerUserId) {
+        if (managerUserId === userId)
+            return 'A user cannot report to themselves';
+        const manager = await one("SELECT id,account_type FROM users WHERE id=? AND status='active'", [managerUserId]);
+        if (!manager || manager.account_type === 'client')
+            return 'Active internal reporting manager not found';
+        if (await managerCreatesCycle(userId, managerUserId))
+            return 'Reporting manager would create a circular hierarchy';
+    }
+    return '';
+};
+const validatePermissionIds = async (permissionIds, roleType) => {
+    const uniqueIds = [...new Set(permissionIds || [])];
+    if (!uniqueIds.length)
+        return { permissionIds: uniqueIds };
+    const existing = await query(`SELECT id FROM permissions WHERE id IN (${uniqueIds.map(() => '?').join(',')})`, uniqueIds);
+    if (existing.length !== uniqueIds.length)
+        return { error: 'One or more permissions are invalid' };
+    if (roleType === 'client') {
+        const unsafe = uniqueIds.find(permission => !clientSafePermissions.has(permission));
+        if (unsafe)
+            return { error: 'Client roles cannot receive internal administrative permissions' };
+    }
+    return { permissionIds: uniqueIds };
+};
 const ticketDetail = async ticket => {
     const messages = (await query('SELECT * FROM support_ticket_messages WHERE ticket_id=? ORDER BY created_at ASC,id ASC', [ticket.id])).map(mapMessage);
     const attachments = (await query('SELECT a.*,t.ticket_number FROM support_ticket_attachments a JOIN support_tickets t ON t.id=a.ticket_id WHERE a.ticket_id=? ORDER BY a.created_at ASC,a.id ASC', [ticket.id])).map(mapAttachment);
@@ -445,13 +510,17 @@ app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireA
 });
 
 app.get('/api/users', requireAuth, requirePermission('users.view'), async (_req, res) => {
-    const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,u.status,u.created_at createdAt,u.last_login lastLogin,
-        r.name roleName,d.name departmentName,ds.name designationName,m.name managerName
+    const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,
+        u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
+        u.status,u.created_at createdAt,u.created_by createdBy,u.last_login lastLogin,
+        r.name roleName,d.name departmentName,ds.name designationName,m.name managerName,
+        ep.employee_id employeeId,ep.joining_date joiningDate
       FROM users u
       LEFT JOIN roles r ON r.id=u.role_id
       LEFT JOIN departments d ON d.id=u.department_id
       LEFT JOIN designations ds ON ds.id=u.designation_id
       LEFT JOIN users m ON m.id=u.manager_user_id
+      LEFT JOIN employee_profiles ep ON ep.user_id=u.id
       ORDER BY FIELD(u.account_type,'super_admin','admin','employee','client'),u.name`);
     res.json({ users: rows });
 });
@@ -466,6 +535,9 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
         accountType: z.enum(['super_admin', 'admin', 'employee', 'client']),
         roleId: z.string().trim().min(1),
         clientId: z.string().trim().optional().or(z.literal('')),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        designationId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        managerUserId: z.string().trim().optional().or(z.literal('')),
         employeeId: z.string().trim().max(80).optional().or(z.literal('')),
         joiningDate: z.string().trim().optional().or(z.literal(''))
     }).safeParse(req.body);
@@ -474,11 +546,19 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
     const input = parsed.data;
     if (input.accountType === 'super_admin' && !isSuperAdmin(req.user))
         return res.status(403).json({ error: 'Only Super Admin can create another Super Admin' });
+    if (input.accountType === 'admin' && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can create Admin accounts' });
     if (await one('SELECT id FROM users WHERE id=?', [input.id]))
         return res.status(409).json({ error: 'User ID already exists' });
     const role = await one("SELECT * FROM roles WHERE id=? AND status='active'", [input.roleId]);
     if (!role)
         return res.status(400).json({ error: 'Active role not found' });
+    if (role.id === 'super_admin' && input.accountType !== 'super_admin')
+        return res.status(400).json({ error: 'Super Admin role requires a Super Admin account' });
+    if (input.accountType === 'super_admin' && role.id !== 'super_admin')
+        return res.status(400).json({ error: 'Super Admin accounts must use the Super Admin role' });
+    if (!isSuperAdmin(req.user) && Number(role.level || 0) >= 80)
+        return res.status(403).json({ error: 'Only Super Admin can assign high-level admin roles' });
     if (input.accountType === 'client' && role.role_type !== 'client')
         return res.status(400).json({ error: 'Client users must use a client role' });
     if (input.accountType !== 'client' && role.role_type === 'client')
@@ -490,11 +570,17 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
         if (!client)
             return res.status(400).json({ error: 'Active client not found' });
     }
+    const departmentId = input.accountType === 'client' ? null : optionalId(input.departmentId);
+    const designationId = input.accountType === 'client' ? null : optionalId(input.designationId);
+    const managerUserId = input.accountType === 'client' ? null : input.managerUserId || null;
+    const orgError = await validateOrgReferences({ departmentId, designationId, managerUserId, userId: input.id });
+    if (orgError)
+        return res.status(400).json({ error: orgError });
     const hash = await bcrypt.hash(input.password, 12);
     await transaction(async connection => {
         await query(`INSERT INTO users
-            (id,name,email,phone,password_hash,role,account_type,role_id,client_id,status,created_by,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+            (id,name,email,phone,password_hash,role,account_type,role_id,client_id,department_id,designation_id,manager_user_id,status,created_by,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
                 input.id,
                 input.name,
@@ -505,6 +591,9 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
                 input.accountType,
                 input.roleId,
                 input.accountType === 'client' ? input.clientId : null,
+                departmentId,
+                designationId,
+                managerUserId,
                 'active',
                 req.user.id,
                 new Date()
@@ -520,6 +609,279 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
     });
     emitRefresh();
     res.status(201).json({ user: await loadUserContext(input.id) });
+});
+
+app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employees.edit'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2).optional(),
+        email: z.string().trim().email().optional().or(z.literal('')),
+        phone: z.string().trim().max(60).optional().or(z.literal('')),
+        roleId: z.string().trim().min(1).optional(),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        designationId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        managerUserId: z.string().trim().optional().or(z.literal('')),
+        status: z.enum(['active', 'archived']).optional(),
+        password: z.string().min(8).optional().or(z.literal(''))
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const current = await one('SELECT * FROM users WHERE id=?', [req.params.id]);
+    if (!current)
+        return res.status(404).json({ error: 'User not found' });
+    if (current.account_type === 'super_admin' && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can modify Super Admin accounts' });
+    if (parsed.data.roleId && !hasPermission(req.user, 'users.assign_role'))
+        return res.status(403).json({ error: 'Role assignment permission required' });
+    if (parsed.data.roleId) {
+        const role = await one("SELECT * FROM roles WHERE id=? AND status='active'", [parsed.data.roleId]);
+        if (!role)
+            return res.status(400).json({ error: 'Active role not found' });
+        if (current.id === req.user.id && role.id !== current.role_id)
+            return res.status(403).json({ error: 'You cannot change your own role' });
+        if (role.id === 'super_admin' && current.account_type !== 'super_admin')
+            return res.status(400).json({ error: 'Super Admin role requires a Super Admin account' });
+        if (current.account_type === 'super_admin' && role.id !== 'super_admin')
+            return res.status(400).json({ error: 'Super Admin accounts must keep the Super Admin role' });
+        if (!isSuperAdmin(req.user) && Number(role.level || 0) >= 80)
+            return res.status(403).json({ error: 'Only Super Admin can assign high-level admin roles' });
+        if ((current.account_type || current.role) === 'client' && role.role_type !== 'client')
+            return res.status(400).json({ error: 'Client users must use a client role' });
+        if ((current.account_type || current.role) !== 'client' && role.role_type === 'client')
+            return res.status(400).json({ error: 'Internal users cannot use a client role' });
+    }
+    const departmentId = parsed.data.departmentId === undefined ? current.department_id : optionalId(parsed.data.departmentId);
+    const designationId = parsed.data.designationId === undefined ? current.designation_id : optionalId(parsed.data.designationId);
+    const managerUserId = parsed.data.managerUserId === undefined ? current.manager_user_id : (parsed.data.managerUserId || null);
+    const orgError = await validateOrgReferences({ departmentId, designationId, managerUserId, userId: current.id });
+    if (orgError)
+        return res.status(400).json({ error: orgError });
+    const sets = [];
+    const values = [];
+    const assign = (column, value) => { sets.push(`${column}=?`); values.push(value); };
+    if (parsed.data.name !== undefined) assign('name', parsed.data.name);
+    if (parsed.data.email !== undefined) assign('email', parsed.data.email || null);
+    if (parsed.data.phone !== undefined) assign('phone', parsed.data.phone || null);
+    if (parsed.data.roleId !== undefined) assign('role_id', parsed.data.roleId);
+    if (parsed.data.departmentId !== undefined) assign('department_id', departmentId);
+    if (parsed.data.designationId !== undefined) assign('designation_id', designationId);
+    if (parsed.data.managerUserId !== undefined) assign('manager_user_id', managerUserId);
+    if (parsed.data.status !== undefined) assign('status', parsed.data.status);
+    if (parsed.data.password) assign('password_hash', await bcrypt.hash(parsed.data.password, 12));
+    if (!sets.length)
+        return res.status(400).json({ error: 'No changes supplied' });
+    assign('updated_at', new Date());
+    await transaction(async connection => {
+        await query(`UPDATE users SET ${sets.join(',')} WHERE id=?`, [...values, current.id], connection);
+        await audit(req.user.id, 'update', 'user', current.id,
+            { ...parsed.data, password: parsed.data.password ? '[changed]' : undefined }, connection);
+    });
+    emitRefresh();
+    res.json({ user: await loadUserContext(current.id) });
+});
+
+app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'users.view'), async (_req, res) => {
+    const departments = await query('SELECT id,name,code,description,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM departments ORDER BY status,name');
+    res.json({ departments });
+});
+
+app.post('/api/departments', requireAuth, requirePermission('departments.manage'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2),
+        code: z.string().trim().optional().or(z.literal('')),
+        description: z.string().trim().optional().or(z.literal(''))
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const code = cleanCode(parsed.data.code || parsed.data.name);
+    if (!code)
+        return res.status(400).json({ error: 'Department code is required' });
+    if (await one('SELECT id FROM departments WHERE name=? OR code=?', [parsed.data.name, code]))
+        return res.status(409).json({ error: 'Department name or code already exists' });
+    const info = await query('INSERT INTO departments (name,code,description,status,created_by) VALUES (?,?,?,?,?)',
+        [parsed.data.name, code, parsed.data.description || '', 'active', req.user.id]);
+    await audit(req.user.id, 'create', 'department', String(info.insertId), { name: parsed.data.name, code });
+    emitRefresh();
+    res.status(201).json({ ok: true });
+});
+
+app.patch('/api/departments/:id', requireAuth, requirePermission('departments.manage'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2).optional(),
+        code: z.string().trim().optional().or(z.literal('')),
+        description: z.string().trim().optional(),
+        status: z.enum(entityStatus).optional()
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const department = await one('SELECT * FROM departments WHERE id=?', [req.params.id]);
+    if (!department)
+        return res.status(404).json({ error: 'Department not found' });
+    const entries = Object.entries(parsed.data).filter(([, value]) => value !== undefined);
+    if (!entries.length)
+        return res.status(400).json({ error: 'No changes supplied' });
+    const nextName = parsed.data.name || department.name;
+    const nextCode = parsed.data.code !== undefined ? cleanCode(parsed.data.code || department.code) : department.code;
+    if (await one('SELECT id FROM departments WHERE id<>? AND (name=? OR code=?)', [req.params.id, nextName, nextCode]))
+        return res.status(409).json({ error: 'Department name or code already exists' });
+    const sets = [];
+    const values = [];
+    for (const [key, value] of entries) {
+        if (key === 'code') {
+            sets.push('code=?');
+            values.push(cleanCode(value || department.code));
+        }
+        else {
+            sets.push(`${key}=?`);
+            values.push(value);
+        }
+    }
+    await query(`UPDATE departments SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id]);
+    await audit(req.user.id, 'update', 'department', req.params.id, parsed.data);
+    emitRefresh();
+    res.json({ ok: true });
+});
+
+app.get('/api/designations', requireAuth, requirePermission('designations.manage', 'employees.view', 'users.view'), async (_req, res) => {
+    const designations = await query('SELECT id,name,code,description,hierarchy_level hierarchyLevel,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM designations ORDER BY hierarchy_level DESC,name');
+    res.json({ designations });
+});
+
+app.post('/api/designations', requireAuth, requirePermission('designations.manage'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2),
+        code: z.string().trim().optional().or(z.literal('')),
+        description: z.string().trim().optional().or(z.literal('')),
+        hierarchyLevel: z.number().int().min(0).max(999).default(10)
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const code = cleanCode(parsed.data.code || parsed.data.name);
+    if (!code)
+        return res.status(400).json({ error: 'Designation code is required' });
+    if (await one('SELECT id FROM designations WHERE name=? OR code=?', [parsed.data.name, code]))
+        return res.status(409).json({ error: 'Designation name or code already exists' });
+    const info = await query('INSERT INTO designations (name,code,description,hierarchy_level,status,created_by) VALUES (?,?,?,?,?,?)',
+        [parsed.data.name, code, parsed.data.description || '', parsed.data.hierarchyLevel, 'active', req.user.id]);
+    await audit(req.user.id, 'create', 'designation', String(info.insertId), { name: parsed.data.name, code });
+    emitRefresh();
+    res.status(201).json({ ok: true });
+});
+
+app.patch('/api/designations/:id', requireAuth, requirePermission('designations.manage'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2).optional(),
+        code: z.string().trim().optional().or(z.literal('')),
+        description: z.string().trim().optional(),
+        hierarchyLevel: z.number().int().min(0).max(999).optional(),
+        status: z.enum(entityStatus).optional()
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const designation = await one('SELECT * FROM designations WHERE id=?', [req.params.id]);
+    if (!designation)
+        return res.status(404).json({ error: 'Designation not found' });
+    const columnMap = { hierarchyLevel: 'hierarchy_level' };
+    const entries = Object.entries(parsed.data).filter(([, value]) => value !== undefined);
+    if (!entries.length)
+        return res.status(400).json({ error: 'No changes supplied' });
+    const nextName = parsed.data.name || designation.name;
+    const nextCode = parsed.data.code !== undefined ? cleanCode(parsed.data.code || designation.code) : designation.code;
+    if (await one('SELECT id FROM designations WHERE id<>? AND (name=? OR code=?)', [req.params.id, nextName, nextCode]))
+        return res.status(409).json({ error: 'Designation name or code already exists' });
+    const sets = [];
+    const values = [];
+    for (const [key, value] of entries) {
+        if (key === 'code') {
+            sets.push('code=?');
+            values.push(cleanCode(value || designation.code));
+        }
+        else {
+            sets.push(`${columnMap[key] || key}=?`);
+            values.push(value);
+        }
+    }
+    await query(`UPDATE designations SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id]);
+    await audit(req.user.id, 'update', 'designation', req.params.id, parsed.data);
+    emitRefresh();
+    res.json({ ok: true });
+});
+
+app.post('/api/rbac/roles', requireAuth, requirePermission('roles.create'), async (req, res) => {
+    const parsed = z.object({
+        id: z.string().trim().optional().or(z.literal('')),
+        name: z.string().trim().min(2),
+        description: z.string().trim().optional().or(z.literal('')),
+        level: z.number().int().min(0).max(100).default(10),
+        roleType: z.enum(roleTypes).default('internal'),
+        permissions: z.array(z.string().trim().min(1)).default([])
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const id = cleanSlug(parsed.data.id || parsed.data.name);
+    if (!id)
+        return res.status(400).json({ error: 'Role code is required' });
+    if (!isSuperAdmin(req.user) && Number(parsed.data.level || 0) >= 80)
+        return res.status(403).json({ error: 'Only Super Admin can create high-level roles' });
+    if (['super_admin', 'admin', 'employee', 'client'].includes(id))
+        return res.status(409).json({ error: 'Protected system role already exists' });
+    if (await one('SELECT id FROM roles WHERE id=? OR slug=?', [id, id]))
+        return res.status(409).json({ error: 'Role already exists' });
+    const validation = await validatePermissionIds(parsed.data.permissions, parsed.data.roleType);
+    if (validation.error)
+        return res.status(400).json({ error: validation.error });
+    await transaction(async connection => {
+        await query(`INSERT INTO roles (id,name,slug,description,level,role_type,is_system,status)
+            VALUES (?,?,?,?,?,?,0,'active')`,
+            [id, parsed.data.name, id, parsed.data.description || '', parsed.data.level, parsed.data.roleType], connection);
+        for (const permissionId of validation.permissionIds)
+            await query('INSERT INTO role_permissions (role_id,permission_id) VALUES (?,?)', [id, permissionId], connection);
+        await audit(req.user.id, 'create', 'role', id,
+            { name: parsed.data.name, roleType: parsed.data.roleType, permissions: validation.permissionIds }, connection);
+    });
+    emitRefresh();
+    res.status(201).json({ ok: true });
+});
+
+app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2).optional(),
+        description: z.string().trim().optional(),
+        level: z.number().int().min(0).max(100).optional(),
+        roleType: z.enum(roleTypes).optional(),
+        status: z.enum(entityStatus).optional()
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const role = await one('SELECT * FROM roles WHERE id=?', [req.params.id]);
+    if (!role)
+        return res.status(404).json({ error: 'Role not found' });
+    if (role.id === 'super_admin')
+        return res.status(403).json({ error: 'Super Admin role is protected' });
+    if (role.is_system && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can edit protected system roles' });
+    if (role.is_system && (parsed.data.roleType || parsed.data.status === 'inactive'))
+        return res.status(403).json({ error: 'System role type and active status are protected' });
+    const nextRoleType = parsed.data.roleType || role.role_type;
+    if (nextRoleType === 'client') {
+        const currentPermissions = await query('SELECT permission_id FROM role_permissions WHERE role_id=?', [role.id]);
+        const validation = await validatePermissionIds(currentPermissions.map(item => item.permission_id), 'client');
+        if (validation.error)
+            return res.status(400).json({ error: validation.error });
+    }
+    const entries = Object.entries(parsed.data).filter(([, value]) => value !== undefined);
+    if (!entries.length)
+        return res.status(400).json({ error: 'No changes supplied' });
+    const columnMap = { roleType: 'role_type' };
+    const sets = [];
+    const values = [];
+    for (const [key, value] of entries) {
+        sets.push(`${columnMap[key] || key}=?`);
+        values.push(value);
+    }
+    await query(`UPDATE roles SET ${sets.join(',')} WHERE id=?`, [...values, role.id]);
+    await audit(req.user.id, 'update', 'role', role.id, parsed.data);
+    emitRefresh();
+    res.json({ ok: true });
 });
 
 app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view'), async (_req, res) => {
@@ -547,12 +909,12 @@ app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles
         return res.status(404).json({ error: 'Role not found' });
     if (role.id === 'super_admin')
         return res.status(403).json({ error: 'Super Admin permissions are protected' });
-    const permissionIds = [...new Set(parsed.data.permissions)];
-    if (permissionIds.length) {
-        const existing = await query(`SELECT id FROM permissions WHERE id IN (${permissionIds.map(() => '?').join(',')})`, permissionIds);
-        if (existing.length !== permissionIds.length)
-            return res.status(400).json({ error: 'One or more permissions are invalid' });
-    }
+    if (role.is_system && !isSuperAdmin(req.user))
+        return res.status(403).json({ error: 'Only Super Admin can edit protected system role permissions' });
+    const validation = await validatePermissionIds(parsed.data.permissions, role.role_type);
+    if (validation.error)
+        return res.status(400).json({ error: validation.error });
+    const permissionIds = validation.permissionIds;
     await transaction(async connection => {
         await query('DELETE FROM role_permissions WHERE role_id=?', [role.id], connection);
         for (const permissionId of permissionIds)
@@ -561,6 +923,23 @@ app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles
     });
     emitRefresh();
     res.json({ ok: true });
+});
+
+app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (_req, res) => {
+    const rows = await query(`SELECT id,actor_id actorId,action,entity_type entityType,entity_id entityId,details,created_at createdAt
+      FROM audit_logs ORDER BY created_at DESC,id DESC LIMIT 150`);
+    res.json({
+        logs: rows.map(row => {
+            let details = {};
+            try {
+                details = JSON.parse(row.details || '{}');
+            }
+            catch {
+                details = {};
+            }
+            return { ...row, details };
+        })
+    });
 });
 const publicDir = [
     path.resolve(__dirname, 'public'),
