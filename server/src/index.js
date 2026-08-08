@@ -858,13 +858,14 @@ app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.vi
     const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,
         u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
         u.status,u.created_at createdAt,u.created_by createdBy,u.last_login lastLogin,
-        r.name roleName,d.name departmentName,ds.name designationName,m.name managerName,
+        r.name roleName,r.level roleLevel,d.name departmentName,ds.name designationName,ds.hierarchy_level designationLevel,m.name managerName,c.name clientName,
         ep.employee_id employeeId,ep.joining_date joiningDate
       FROM users u
       LEFT JOIN roles r ON r.id=u.role_id
       LEFT JOIN departments d ON d.id=u.department_id
       LEFT JOIN designations ds ON ds.id=u.designation_id
       LEFT JOIN users m ON m.id=u.manager_user_id
+      LEFT JOIN clients c ON c.id=u.client_id
       LEFT JOIN employee_profiles ep ON ep.user_id=u.id
       ${scopeWhere}
       ORDER BY FIELD(u.account_type,'super_admin','admin','employee','client'),u.name`);
@@ -880,6 +881,7 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
         password: z.string().min(8),
         accountType: z.enum(['super_admin', 'admin', 'employee', 'client']),
         roleId: z.string().trim().min(1),
+        status: z.enum(['active', 'archived']).optional().default('active'),
         clientId: z.string().trim().optional().or(z.literal('')),
         departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
         designationId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
@@ -942,7 +944,7 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
                 departmentId,
                 designationId,
                 managerUserId,
-                'active',
+                input.status,
                 req.user.id,
                 new Date()
             ],

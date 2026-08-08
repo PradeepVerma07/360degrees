@@ -34,16 +34,17 @@ const canAny = (data, permissions) => permissions.some(permission => can(data, p
 const knownDashboardTabs = {
     overview: 'Overview',
     submit: 'Submit a Job',
-    jobs: 'Job Board',
+    jobs: 'By Category',
     settings: 'TAT Standards',
-    clients: 'Clients',
+    clients: 'Manage Clients',
     employees: 'Employees',
     users: 'Users & Roles',
     support: 'Support Tickets',
-    audit: 'Audit Logs'
+    audit: 'Audit Logs',
+    app_settings: 'Settings'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'Job Board'], ['settings', 'TAT Standards'], ['clients', 'Clients'], ['support', 'Support Tickets']]
+    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
     : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'My Jobs'], ['support', 'Support Tickets']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
@@ -89,9 +90,9 @@ export default function App() {
         .filter(module => knownDashboardTabs[module.id])
         .map(module => {
         if (module.id === 'jobs')
-            return [module.id, can(data, 'jobs.view_all') ? 'Job Board' : 'My Jobs'];
+            return [module.id, can(data, 'jobs.view_all') ? 'By Category' : 'My Jobs'];
         if (module.id === 'clients')
-            return [module.id, 'Clients'];
+            return [module.id, 'Manage Clients'];
         return [module.id, module.label || knownDashboardTabs[module.id]];
     });
     const tabs = Array.isArray(data.modules) ? moduleTabs : fallbackModulesFor(data);
@@ -121,7 +122,9 @@ export default function App() {
                                     ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
                                     : activeTab === 'audit' && can(data, 'audit.view')
                                         ? _jsx(AuditLogs, {})
-                                        : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
+                                        : activeTab === 'app_settings' && canAny(data, ['settings.view', 'settings.edit'])
+                                            ? _jsx(SystemSettings, { data: data })
+                                            : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
     return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
@@ -244,7 +247,7 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support', audit: 'document' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', support: 'support', audit: 'document', app_settings: 'settings' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
@@ -254,7 +257,8 @@ const dashboardTabDescriptions = {
     employees: 'Internal team',
     users: 'Roles and access',
     support: 'Help and tickets',
-    audit: 'Activity history'
+    audit: 'Activity history',
+    app_settings: 'System controls'
 };
 const dashboardDate = value => {
     const date = new Date(value);
@@ -294,6 +298,8 @@ function DashboardIcon({ name }) {
         pending: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v6l4 2'],
         completed: ['M20 6L9 17l-5-5', 'M21 12a9 9 0 1 1-3.2-6.9'],
         document: ['M7 3h7l5 5v13H7z', 'M14 3v6h5', 'M10 14h6', 'M10 18h4'],
+        settings: ['M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z', 'M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.08A1.7 1.7 0 0 0 4.64 8.94a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.88.34H9a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.88V9c.18.6.74 1 1.36 1H21a2 2 0 1 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15z'],
+        shield: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', 'M9 12l2 2 4-5'],
         moon: ['M21 14.4A8.6 8.6 0 0 1 9.6 3 7 7 0 1 0 21 14.4z'],
         sun: ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 'M12 2v2', 'M12 20v2', 'M4.93 4.93l1.41 1.41', 'M17.66 17.66l1.41 1.41', 'M2 12h2', 'M20 12h2', 'M4.93 19.07l1.41-1.41', 'M17.66 6.34l1.41-1.41']
     };
@@ -323,6 +329,10 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
     const notificationCount = Math.min(openTickets + urgentJobs, 99);
     const activities = recentActivityItems(data);
     const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
+    const isSuperAdminUser = data.user.accountType === 'super_admin' || data.user.roleSlug === 'super_admin';
+    const displayName = isSuperAdminUser ? 'Super Admin' : data.user.name;
+    const avatarInitials = isSuperAdminUser ? 'SA' : initialsFor(displayName);
+    const displayRole = isSuperAdminUser ? 'Super Admin' : (data.user.roleName || data.user.accountType || 'Workspace user');
     const goTo = id => {
         setTab(id);
         setSidebarOpen(false);
@@ -348,9 +358,13 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
     return _jsxs("main", { className: `dashboard-shell theme-${theme} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
             _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
-                    _jsxs("div", { className: "dashboard-brand dashboard-brand-reference dashboard-brand-icon-only", children: [_jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }), _jsx("strong", { children: "360" })] }),
+                    _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }) }),
                     _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
-                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [_jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => { setSidebarOpen(false); setUserMenuOpen(false); setNotificationOpen(false); openSupportTicketForm(); }, children: "Create Ticket" })] }), _jsxs("button", { type: "button", className: "dashboard-sidebar-logout", onClick: logout, children: [_jsx(DashboardIcon, { name: "logout" }), _jsx("span", { children: "Logout" })] }), _jsxs("p", { className: "dashboard-copyright", children: ["\u00A9 ", new Date().getFullYear(), _jsx("span", { children: "All rights reserved." })] })] })
+                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [
+                            !isSuperAdminUser && _jsxs("div", { className: "dashboard-support-card", children: [_jsx(DashboardIcon, { name: "support" }), _jsx("b", { children: "Need Help?" }), _jsx("p", { children: "Our support team is here to help you." }), _jsx("button", { type: "button", onClick: () => { setSidebarOpen(false); setUserMenuOpen(false); setNotificationOpen(false); openSupportTicketForm(); }, children: "Create Ticket" })] }),
+                            _jsxs("div", { className: "dashboard-sidebar-profile", children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("small", { children: displayRole })] })] }),
+                            _jsxs("button", { type: "button", className: "dashboard-sidebar-logout", onClick: logout, children: [_jsx(DashboardIcon, { name: "logout" }), _jsx("span", { children: "Logout" })] })
+                        ] })
                 ] }),
             _jsxs("section", { className: "dashboard-main", children: [
                     _jsxs("div", { className: "dashboard-topbar", children: [
@@ -359,7 +373,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
                             _jsxs("div", { className: "dashboard-user-area", children: [
                                     _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
                                     _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Latest activity", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Latest Activity" }), _jsxs("span", { children: [notificationCount, " open notice", notificationCount === 1 ? '' : 's'] })] }), activities.length ? _jsx("div", { className: "dashboard-activity-list compact", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Latest job, ticket, and client updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo('overview'), children: "Open Dashboard" })] })] }),
-                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.roleName || data.user.accountType || 'Workspace user' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
+                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsx("span", { children: displayName }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("span", { children: displayRole })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
                                 ] })
                         ] }),
                     error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
@@ -439,11 +453,29 @@ function Overview({ data, setTab }) {
     const priorityColors = { Low: '#12b76a', Medium: '#0d6efd', High: '#ff8a00', Urgent: '#ef233c' };
     const priorityRows = ['Low', 'Medium', 'High', 'Urgent'].map(label => ({ label, count: jobs.filter(job => job.priority === label).length, color: priorityColors[label] }));
     const maxPriority = Math.max(1, ...priorityRows.map(row => row.count));
+    const activeEmployees = (data.clientOwners || data.assignees || []).filter(user => user.accountType !== 'client').length;
+    const activeClients = (data.clients || []).filter(client => client.status === 'active').length;
+    const buildWorkloadRows = keyFor => {
+        const grouped = pendingJobs.reduce((map, job) => {
+            const key = keyFor(job) || 'Unassigned';
+            const existing = map.get(key) || { label: key, count: 0, urgent: 0 };
+            existing.count += 1;
+            if (job.priority === 'Urgent')
+                existing.urgent += 1;
+            map.set(key, existing);
+            return map;
+        }, new Map());
+        return [...grouped.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)).slice(0, 6);
+    };
+    const departmentWorkload = buildWorkloadRows(job => job.departmentName);
+    const employeeWorkload = buildWorkloadRows(job => job.assignedToName);
     const metricCards = [
         ['blue', 'jobs', pendingJobs.length, 'Total Active Jobs', 'View all jobs \u2192', canOpenJobs ? 'jobs' : 'overview'],
         ['orange', 'clock', dueTodayJobs.length, 'Due Today', 'View all jobs \u2192', canOpenJobs ? 'jobs' : 'overview'],
         ['red', 'alert', overdueJobs.length, 'Overdue Jobs', 'View all jobs \u2192', canOpenJobs ? 'jobs' : 'overview'],
         ['green', 'completed', completedJobs.length, 'Completed Jobs', 'View all jobs \u2192', canOpenJobs ? 'jobs' : 'overview'],
+        ['blue', 'users', activeEmployees, 'Active Employees', 'Manage team \u2192', can(data, 'employees.view') ? 'employees' : 'overview'],
+        ['purple', 'users', activeClients, 'Active Clients', 'Manage clients \u2192', canAny(data, ['clients.view_all', 'clients.view']) ? 'clients' : 'overview'],
         ['purple', 'support', openTickets, 'Open Tickets', 'View all tickets \u2192', canOpenSupport ? 'support' : 'overview']
     ];
     const activities = recentActivityItems(data);
@@ -468,6 +500,10 @@ function Overview({ data, setTab }) {
                                 _jsx("div", { className: "overview-priority-chart", children: priorityRows.map(row => _jsxs("button", { type: "button", className: "overview-priority-item", onClick: () => setTab(canOpenJobs ? 'jobs' : 'overview'), children: [_jsx("span", { className: "overview-priority-value", children: row.count }), _jsx("span", { className: "overview-priority-bar", style: { height: `${row.count ? Math.max(12, row.count / maxPriority * 100) : 0}%`, background: row.color } }), _jsx("span", { className: "overview-priority-label", children: row.label })] }, row.label)) })
                             ] })
                     ] }),
+                _jsxs("section", { className: "overview-workload-grid", children: [
+                        _jsx(WorkloadPanel, { title: "Department Workload", rows: departmentWorkload, emptyTitle: "No department workload.", emptyBody: "Department assignments will appear here once active jobs are assigned." }),
+                        _jsx(WorkloadPanel, { title: "Employee Workload", rows: employeeWorkload, emptyTitle: "No employee workload.", emptyBody: "Assigned employee workload will appear here once jobs are assigned." })
+                    ] }),
                 _jsxs("section", { className: "overview-lower-grid", children: [
                         _jsxs("article", { className: "overview-list-card", children: [
                                 _jsx("h3", { children: "Jobs Due Soon" }),
@@ -481,6 +517,30 @@ function Overview({ data, setTab }) {
                             ] })
                     ] })
             ] }) });
+}
+function WorkloadPanel({ title, rows, emptyTitle, emptyBody }) {
+    const max = Math.max(1, ...rows.map(row => row.count));
+    return (
+        <article className="overview-list-card overview-workload-card">
+            <h3>{title}</h3>
+            {rows.length ? (
+                <div className="overview-workload-list">
+                    {rows.map(row => (
+                        <div className="overview-workload-row" key={row.label}>
+                            <div>
+                                <b>{row.label}</b>
+                                <small>{row.count} active job{row.count === 1 ? '' : 's'}{row.urgent ? `, ${row.urgent} urgent` : ''}</small>
+                            </div>
+                            <span className="overview-workload-meter" aria-hidden="true">
+                                <i style={{ width: `${Math.max(10, row.count / max * 100)}%` }} />
+                            </span>
+                            <strong>{row.count}</strong>
+                        </div>
+                    ))}
+                </div>
+            ) : <DashboardEmptyState title={emptyTitle} body={emptyBody} />}
+        </article>
+    );
 }
 function MonthGroups({ groups, data, empty, editable = false, reload, sortDate = dateForMonth }) {
     const keys = sortedMonthKeys(groups);
@@ -630,6 +690,44 @@ function JobCard({ job, data, editable = false, reload }) {
         ] });
 }
 function SettingsPanel({ initial, reload }) { const [s, setS] = useState(initial); const save = async () => { await api.saveSettings(s); await reload(); alert('TAT standards saved.'); }; return _jsxs("section", { className: "card", children: [_jsx("h2", { children: "TAT standards" }), s.categories.map((c, i) => _jsxs("div", { className: "setting-row", children: [_jsx("input", { value: c.name, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, name: e.target.value } : x) }) }), _jsx("input", { type: "number", min: "1", value: c.baseHours, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, baseHours: Number(e.target.value) } : x) }) }), _jsx("button", { onClick: () => setS({ ...s, categories: s.categories.filter((_, n) => n !== i) }), children: "Remove" })] }, i)), _jsx("button", { onClick: () => setS({ ...s, categories: [...s.categories, { name: 'New category', baseHours: 24 }] }), children: "+ Add category" }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category capacity", _jsx("input", { type: "number", value: s.capacityPerCategory, onChange: e => setS({ ...s, capacityPerCategory: Number(e.target.value) }) })] }), _jsxs("label", { children: ["Extra hours over capacity", _jsx("input", { type: "number", value: s.bufferHoursPerExtraJob, onChange: e => setS({ ...s, bufferHoursPerExtraJob: Number(e.target.value) }) })] })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Start hour", _jsx("input", { type: "number", step: "0.5", value: s.startHour, onChange: e => setS({ ...s, startHour: Number(e.target.value) }) })] }), _jsxs("label", { children: ["End hour", _jsx("input", { type: "number", step: "0.5", value: s.endHour, onChange: e => setS({ ...s, endHour: Number(e.target.value) }) })] })] }), _jsx("button", { className: "primary", onClick: save, children: "Save standards" })] }); }
+function SystemSettings({ data }) {
+    const enabledModules = data.modules || [];
+    return (
+        <section className="management-page">
+            <div className="management-header">
+                <div>
+                    <span>System Controls</span>
+                    <h2>Settings</h2>
+                    <p>Workspace-level controls available to Super Admin and permitted administrators.</p>
+                </div>
+            </div>
+            <div className="management-stats">
+                <DashboardStat tone="blue" icon="settings" value={enabledModules.length} label="Visible Modules" support="Based on live permissions" />
+                <DashboardStat tone="green" icon="shield" value={(data.permissions || []).length} label="Granted Permissions" support="Current effective access" />
+                <DashboardStat tone="purple" icon="clock" value={data.settings?.categories?.length || 0} label="TAT Categories" support="Managed under TAT Standards" />
+            </div>
+            <article className="dashboard-card management-card">
+                <div className="dashboard-card-head">
+                    <div>
+                        <h3>Workspace Access</h3>
+                        <p>These modules are visible for the current account. Use Users & Roles to change access rules.</p>
+                    </div>
+                </div>
+                <div className="system-settings-grid">
+                    {enabledModules.map(module => (
+                        <div className="system-settings-item" key={module.id}>
+                            <DashboardIcon name={dashboardTabIcons[module.id] || 'overview'} />
+                            <div>
+                                <b>{module.label || knownDashboardTabs[module.id] || module.id}</b>
+                                <small>{dashboardTabDescriptions[module.id] || 'Workspace module'}</small>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </article>
+        </section>
+    );
+}
 function Clients({ data, reload }) {
     const [form, setForm] = useState({ id: '', name: '', password: '' });
     const [passwords, setPasswords] = useState({});
@@ -909,6 +1007,25 @@ function AuditLogs() {
     );
 }
 
+const blankUserForm = {
+    id: '',
+    name: '',
+    email: '',
+    phone: '',
+    password: '',
+    accountType: 'employee',
+    roleId: '',
+    status: 'active',
+    clientId: '',
+    employeeId: '',
+    joiningDate: '',
+    departmentId: '',
+    designationId: '',
+    managerUserId: ''
+};
+const accountTypeLabel = value => ({ super_admin: 'Super Admin', admin: 'Admin', employee: 'Employee', client: 'Client', internal: 'Internal' }[value] || value || '-');
+const statusText = value => value === 'archived' ? 'Inactive' : value === 'inactive' ? 'Inactive' : 'Active';
+
 function UsersRoles({ data, reload }) {
     const [activePanel, setActivePanel] = useState('users');
     const [users, setUsers] = useState([]);
@@ -921,7 +1038,11 @@ function UsersRoles({ data, reload }) {
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(true);
-    const [form, setForm] = useState({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
+    const [form, setForm] = useState(blankUserForm);
+    const [userModalOpen, setUserModalOpen] = useState(false);
+    const [editingUser, setEditingUser] = useState(null);
+    const [userSearch, setUserSearch] = useState('');
+    const [userFilters, setUserFilters] = useState({ accountType: '', roleId: '', departmentId: '', designationId: '', status: '' });
     const [roleForm, setRoleForm] = useState({ name: '', description: '', roleType: 'internal', level: 40 });
     const loadManagement = useCallback(async () => {
         setLoading(true);
@@ -984,6 +1105,26 @@ function UsersRoles({ data, reload }) {
         if (roleOptions.some(role => role.id === form.roleId)) return;
         setForm(current => ({ ...current, roleId: roleOptions[0]?.id || '' }));
     }, [form.accountType, form.roleId, roleOptions]);
+    const userSummaryCards = useMemo(() => [
+        ['blue', 'users', users.length, 'Total Users', 'All workspace accounts'],
+        ['purple', 'shield', users.filter(user => user.accountType === 'super_admin').length, 'Super Admins', 'Full platform access'],
+        ['blue', 'users', users.filter(user => user.accountType === 'admin').length, 'Admins', 'Permission-controlled admins'],
+        ['green', 'users', users.filter(user => user.accountType === 'employee').length, 'Employees', 'Internal delivery team'],
+        ['gold', 'users', users.filter(user => user.accountType === 'client').length, 'Clients', 'External client access']
+    ], [users]);
+    const filteredUsers = useMemo(() => {
+        const term = userSearch.trim().toLowerCase();
+        return users.filter(user => {
+            const matchesSearch = !term || [user.name, user.email, user.id, user.roleName, user.departmentName, user.designationName, user.managerName, user.clientName].filter(Boolean).join(' ').toLowerCase().includes(term);
+            return matchesSearch
+                && (!userFilters.accountType || user.accountType === userFilters.accountType)
+                && (!userFilters.roleId || user.roleId === userFilters.roleId)
+                && (!userFilters.departmentId || String(user.departmentId || '') === String(userFilters.departmentId))
+                && (!userFilters.designationId || String(user.designationId || '') === String(userFilters.designationId))
+                && (!userFilters.status || user.status === userFilters.status);
+        });
+    }, [users, userSearch, userFilters]);
+    const setUserFilter = (key, value) => setUserFilters(current => ({ ...current, [key]: value }));
     const permissionGroups = useMemo(() => permissions.reduce((groups, permission) => {
         groups[permission.module] = [...(groups[permission.module] || []), permission];
         return groups;
@@ -1006,12 +1147,66 @@ function UsersRoles({ data, reload }) {
             setError(err.message);
         }
     };
-    const createUser = async event => {
+    const openUserModal = (user = null) => {
+        setMessage('');
+        setError('');
+        if (user) {
+            setEditingUser(user);
+            setForm({
+                ...blankUserForm,
+                id: user.id || '',
+                name: user.name || '',
+                email: user.email || '',
+                phone: user.phone || '',
+                password: '',
+                accountType: user.accountType || 'employee',
+                roleId: user.roleId || '',
+                status: user.status || 'active',
+                clientId: user.clientId || '',
+                employeeId: user.employeeId || '',
+                joiningDate: user.joiningDate ? String(user.joiningDate).slice(0, 10) : '',
+                departmentId: user.departmentId || '',
+                designationId: user.designationId || '',
+                managerUserId: user.managerUserId || ''
+            });
+        }
+        else {
+            setEditingUser(null);
+            setForm({ ...blankUserForm, roleId: roleOptions[0]?.id || '' });
+        }
+        setUserModalOpen(true);
+    };
+    const closeUserModal = () => {
+        setUserModalOpen(false);
+        setEditingUser(null);
+        setForm({ ...blankUserForm, roleId: roleOptions[0]?.id || '' });
+    };
+    const saveUser = async event => {
         event.preventDefault();
         try {
-            await api.createUser(form);
-            setMessage('User created successfully.');
-            setForm({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: roleOptions[0]?.id || '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
+            if (editingUser) {
+                const patch = {
+                    name: form.name,
+                    email: form.email,
+                    phone: form.phone,
+                    roleId: form.roleId,
+                    status: form.status
+                };
+                if (form.accountType !== 'client') {
+                    patch.departmentId = form.departmentId;
+                    patch.designationId = form.designationId;
+                    patch.managerUserId = form.managerUserId;
+                }
+                if (form.password)
+                    patch.password = form.password;
+                await api.updateUser(editingUser.id, patch);
+                setMessage('User updated successfully.');
+            }
+            else {
+                await api.createUser(form);
+                setMessage('User created successfully.');
+            }
+            closeUserModal();
             setActivePanel('users');
             await loadManagement();
             await reload?.();
@@ -1057,14 +1252,16 @@ function UsersRoles({ data, reload }) {
             setError(err.message);
         }
     };
+    const selectedClient = data.clients.find(client => client.id === form.clientId);
     return (
         <section className="management-page">
             <div className="management-header">
                 <div>
                     <span>Access Control</span>
                     <h2>Users & Roles</h2>
-                    <p>Database-backed roles, permissions, and account access.</p>
+                    <p>Manage users, roles, permissions, departments, designations and organizational access.</p>
                 </div>
+                {can(data, 'users.create') && <button type="button" className="overview-submit-button" onClick={() => openUserModal()}><DashboardIcon name="plus" />Add User</button>}
             </div>
             {message && <div className="alert success">{message}</div>}
             {error && <div className="alert error">{error}</div>}
@@ -1073,100 +1270,178 @@ function UsersRoles({ data, reload }) {
                     <button type="button" className={activePanel === id ? 'active' : ''} onClick={() => setActivePanel(id)} key={id}>{label}</button>
                 ))}
             </div>
-            {activePanel === 'users' && (
-                <>
-                    {can(data, 'users.create') && (
-                        <article className="dashboard-card management-card">
-                            <div className="dashboard-card-head">
-                                <div>
-                                    <h3>Add User</h3>
-                                    <p>Create Admin, Employee, or Client accounts with a protected role.</p>
-                                </div>
+            {userModalOpen && (
+                <div className="modal-backdrop user-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+                    <form className="modal-panel user-modal" onSubmit={saveUser}>
+                        <div className="modal-head">
+                            <div>
+                                <span className="modal-kicker">Workspace Access</span>
+                                <h2 id="user-modal-title">{editingUser ? 'Edit User' : 'Add User'}</h2>
+                                <p>{editingUser ? 'Update account access and organizational placement.' : 'Create a secure workspace account with role-based access.'}</p>
                             </div>
-                            <form className="management-form" onSubmit={createUser}>
+                            <button type="button" className="icon-button" aria-label="Close user form" onClick={closeUserModal}>x</button>
+                        </div>
+                        <div className="modal-section">
+                            <h3>Personal Information</h3>
+                            <div className="row">
+                                <label>User ID<input required disabled={Boolean(editingUser)} value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
+                                <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                            </div>
+                            <div className="row">
+                                <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
+                                <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
+                            </div>
+                        </div>
+                        <div className="modal-section">
+                            <h3>Account</h3>
+                            <div className="row">
+                                <label>Account Type
+                                    <select disabled={Boolean(editingUser)} value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
+                                        <option value="employee">Employee</option>
+                                        {canManageSuperAdmin && <option value="admin">Admin</option>}
+                                        <option value="client">Client</option>
+                                        {canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
+                                    </select>
+                                </label>
+                                <label>Role
+                                    <select required value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>
+                                        {roleOptions.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
+                                    </select>
+                                </label>
+                                <label>Status
+                                    <select value={form.status} onChange={event => setForm({ ...form, status: event.target.value })}>
+                                        <option value="active">Active</option>
+                                        <option value="archived">Inactive</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <label>{editingUser ? 'New Password (optional)' : 'Temporary Password'}<input required={!editingUser} type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
+                        </div>
+                        {form.accountType === 'client' ? (
+                            <div className="modal-section">
+                                <h3>Client Information</h3>
                                 <div className="row">
-                                    <label>User ID<input required value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
-                                    <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                                </div>
-                                <div className="row">
-                                    <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-                                    <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-                                </div>
-                                <div className="row">
-                                    <label>Account Type
-                                        <select value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
-                                            <option value="employee">Employee</option>
-                                            {canManageSuperAdmin && <option value="admin">Admin</option>}
-                                            <option value="client">Client</option>
-                                            {canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
-                                        </select>
-                                    </label>
-                                    <label>Role
-                                        <select required value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>
-                                            {roleOptions.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
-                                        </select>
-                                    </label>
-                                </div>
-                                {form.accountType === 'client' ? (
-                                    <label>Client Organization
+                                    <label>Client / Company
                                         <select required value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
                                             <option value="">Select client</option>
                                             {data.clients.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}
                                         </select>
                                     </label>
-                                ) : (
-                                    <>
-                                        <div className="row">
-                                            <label>Department
-                                                <select value={form.departmentId} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
-                                                    <option value="">No department</option>
-                                                    {departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-                                                </select>
-                                            </label>
-                                            <label>Designation
-                                                <select value={form.designationId} onChange={event => setForm({ ...form, designationId: event.target.value })}>
-                                                    <option value="">No designation</option>
-                                                    {designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-                                                </select>
-                                            </label>
-                                        </div>
-                                        <div className="row">
-                                            <label>Reporting Manager
-                                                <select value={form.managerUserId} onChange={event => setForm({ ...form, managerUserId: event.target.value })}>
-                                                    <option value="">No manager</option>
-                                                    {internalUsers.map(user => <option value={user.id} key={user.id}>{user.name}</option>)}
-                                                </select>
-                                            </label>
-                                            <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
-                                            <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
-                                        </div>
-                                    </>
-                                )}
-                                <label>Temporary Password<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
-                                <button className="primary">Create User</button>
-                            </form>
-                        </article>
-                    )}
+                                    <label>Contact Person<input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                                    <label>Account Owner
+                                        <select value={selectedClient?.accountOwnerUserId || ''} disabled>
+                                            <option value="">Not assigned</option>
+                                            {(data.clientOwners || internalUsers).map(user => <option value={user.id} key={user.id}>{user.name}</option>)}
+                                        </select>
+                                    </label>
+                                </div>
+                                <p className="field-note">Client users are linked to an existing client/company. Manage company owner details in Manage Clients.</p>
+                            </div>
+                        ) : (
+                            <div className="modal-section">
+                                <h3>{form.accountType === 'admin' ? 'Admin Information' : 'Employee Information'}</h3>
+                                <div className="row">
+                                    <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
+                                    <label>Department
+                                        <select value={form.departmentId} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
+                                            <option value="">No department</option>
+                                            {departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                                        </select>
+                                    </label>
+                                    <label>Designation
+                                        <select value={form.designationId} onChange={event => setForm({ ...form, designationId: event.target.value })}>
+                                            <option value="">No designation</option>
+                                            {designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div className="row">
+                                    <label>Reporting Manager
+                                        <select value={form.managerUserId} onChange={event => setForm({ ...form, managerUserId: event.target.value })}>
+                                            <option value="">No manager</option>
+                                            {internalUsers.filter(user => user.id !== form.id).map(user => <option value={user.id} key={user.id}>{user.name}</option>)}
+                                        </select>
+                                    </label>
+                                    <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
+                                </div>
+                            </div>
+                        )}
+                        <div className="modal-actions">
+                            <button type="button" onClick={closeUserModal}>Cancel</button>
+                            <button className="primary">{editingUser ? 'Save Changes' : 'Create User'}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+            {activePanel === 'users' && (
+                <>
+                    <div className="management-stats management-stats-users">
+                        {userSummaryCards.map(([tone, icon, value, label, support]) => (
+                            <DashboardStat tone={tone} icon={icon} value={value} label={label} support={support} key={label} />
+                        ))}
+                    </div>
                     <article className="dashboard-card management-card">
                         <div className="dashboard-card-head">
                             <div>
                                 <h3>Users</h3>
-                                <p>{loading ? 'Loading users...' : `${users.length} account${users.length === 1 ? '' : 's'} in the workspace.`}</p>
+                                <p>{loading ? 'Loading users...' : `${filteredUsers.length} of ${users.length} account${users.length === 1 ? '' : 's'} shown.`}</p>
                             </div>
+                        </div>
+                        <div className="user-filter-bar">
+                            <label className="user-search-field"><DashboardIcon name="search" /><input value={userSearch} onChange={event => setUserSearch(event.target.value)} placeholder="Search users..." aria-label="Search users" /></label>
+                            <select value={userFilters.accountType} onChange={event => setUserFilter('accountType', event.target.value)} aria-label="Filter by account type">
+                                <option value="">Account Type</option>
+                                <option value="super_admin">Super Admin</option>
+                                <option value="admin">Admin</option>
+                                <option value="employee">Employee</option>
+                                <option value="client">Client</option>
+                            </select>
+                            <select value={userFilters.roleId} onChange={event => setUserFilter('roleId', event.target.value)} aria-label="Filter by role">
+                                <option value="">Role</option>
+                                {roles.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
+                            </select>
+                            <select value={userFilters.departmentId} onChange={event => setUserFilter('departmentId', event.target.value)} aria-label="Filter by department">
+                                <option value="">Department</option>
+                                {departments.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                            </select>
+                            <select value={userFilters.designationId} onChange={event => setUserFilter('designationId', event.target.value)} aria-label="Filter by designation">
+                                <option value="">Designation</option>
+                                {designations.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                            </select>
+                            <select value={userFilters.status} onChange={event => setUserFilter('status', event.target.value)} aria-label="Filter by status">
+                                <option value="">Status</option>
+                                <option value="active">Active</option>
+                                <option value="archived">Inactive</option>
+                            </select>
                         </div>
                         <ManagementTable
                             empty="No users found."
-                            rows={users}
+                            rows={filteredUsers}
                             columns={[
-                                { key: 'name', label: 'Name', render: user => <b>{user.name}</b> },
-                                { key: 'id', label: 'User ID' },
+                                { key: 'name', label: 'User', render: user => <span className="user-cell"><span className="dashboard-avatar">{initialsFor(user.name)}</span><span><b>{user.name}</b><small>{user.id}</small></span></span> },
                                 { key: 'email', label: 'Email', render: user => user.email || '-' },
-                                { key: 'accountType', label: 'Type', render: user => <span className={`status-pill ${user.accountType}`}>{user.accountType}</span> },
+                                { key: 'accountType', label: 'Account Type', render: user => <span className={`status-pill ${user.accountType}`}>{accountTypeLabel(user.accountType)}</span> },
                                 { key: 'roleName', label: 'Role', render: user => can(data, 'users.assign_role') && user.accountType !== 'client' && user.id !== data.user.id ? <select value={user.roleId || ''} onChange={event => updateUser(user, { roleId: event.target.value })}>{roles.filter(role => role.roleType !== 'client' && (canManageSuperAdmin || Number(role.level || 0) < 80) && (user.accountType === 'super_admin' ? role.id === 'super_admin' : role.id !== 'super_admin')).map(role => <option value={role.id} key={role.id}>{role.name}</option>)}</select> : user.roleName },
                                 { key: 'departmentName', label: 'Department', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.departmentId || ''} onChange={event => updateUser(user, { departmentId: event.target.value })}><option value="">None</option>{departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.departmentName || '-' },
                                 { key: 'designationName', label: 'Designation', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.designationId || ''} onChange={event => updateUser(user, { designationId: event.target.value })}><option value="">None</option>{designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.designationName || '-' },
-                                { key: 'managerName', label: 'Manager', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.managerUserId || ''} onChange={event => updateUser(user, { managerUserId: event.target.value })}><option value="">None</option>{internalUsers.filter(manager => manager.id !== user.id).map(manager => <option value={manager.id} key={manager.id}>{manager.name}</option>)}</select> : user.managerName || '-' },
-                                { key: 'status', label: 'Status', render: user => canEditUsers ? <select value={user.status} onChange={event => updateUser(user, { status: event.target.value })}><option value="active">active</option><option value="archived">archived</option></select> : <span className={`status-pill ${user.status}`}>{user.status}</span> }
+                                { key: 'managerName', label: 'Reporting Manager', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.managerUserId || ''} onChange={event => updateUser(user, { managerUserId: event.target.value })}><option value="">None</option>{internalUsers.filter(manager => manager.id !== user.id).map(manager => <option value={manager.id} key={manager.id}>{manager.name}</option>)}</select> : user.managerName || '-' },
+                                { key: 'status', label: 'Status', render: user => <span className={`status-pill ${user.status}`}>{statusText(user.status)}</span> },
+                                { key: 'lastLogin', label: 'Last Login', render: user => user.lastLogin ? shortDateTime(user.lastLogin) : '-' },
+                                { key: 'actions', label: 'Actions', render: user => (
+                                    <details className="row-actions">
+                                        <summary>Actions</summary>
+                                        <div>
+                                            <button type="button" onClick={() => openUserModal(user)}>View</button>
+                                            {canEditUsers && <button type="button" onClick={() => openUserModal(user)}>Edit</button>}
+                                            {can(data, 'users.assign_role') && <button type="button" onClick={() => openUserModal(user)}>Change Role</button>}
+                                            {can(data, 'roles.manage_permissions') && <button type="button" onClick={() => setActivePanel('permissions')}>Set Permissions</button>}
+                                            {canEditUsers && user.accountType !== 'client' && <button type="button" onClick={() => openUserModal(user)}>Change Department</button>}
+                                            {canEditUsers && user.accountType !== 'client' && <button type="button" onClick={() => openUserModal(user)}>Change Designation</button>}
+                                            {canEditUsers && user.accountType !== 'client' && <button type="button" onClick={() => openUserModal(user)}>Change Reporting Manager</button>}
+                                            {canEditUsers && user.id !== data.user.id && <button type="button" onClick={() => updateUser(user, { status: user.status === 'active' ? 'archived' : 'active' })}>{user.status === 'active' ? 'Deactivate' : 'Activate'}</button>}
+                                        </div>
+                                    </details>
+                                ) }
                             ]}
                         />
                     </article>
@@ -1176,8 +1451,8 @@ function UsersRoles({ data, reload }) {
                 <article className="dashboard-card management-card">
                     <div className="dashboard-card-head">
                         <div>
-                            <h3>Role Permissions</h3>
-                            <p>{loading ? 'Loading permission catalog...' : 'Select a role and control module access.'}</p>
+                            <h3>Roles</h3>
+                            <p>{loading ? 'Loading permission catalog...' : 'Create roles, review usage, and control module access.'}</p>
                         </div>
                     </div>
                     {can(data, 'roles.create') && (
@@ -1193,20 +1468,36 @@ function UsersRoles({ data, reload }) {
                                 <label>Level<input type="number" min="0" max={canManageSuperAdmin ? "100" : "79"} value={roleForm.level} onChange={event => setRoleForm({ ...roleForm, level: event.target.value })} /></label>
                             </div>
                             <label>Description<input value={roleForm.description} onChange={event => setRoleForm({ ...roleForm, description: event.target.value })} /></label>
-                            <button className="primary">Create Role</button>
+                            <button className="primary">+ Create Role</button>
                         </form>
                     )}
                     {roles.length ? (
                         <>
+                            <div className="role-card-grid">
+                                {roles.map(role => {
+                                    const userCount = users.filter(user => user.roleId === role.id).length;
+                                    return (
+                                        <button type="button" className={selectedRoleId === role.id ? 'role-card active' : 'role-card'} onClick={() => setSelectedRoleId(role.id)} key={role.id}>
+                                            <span className={`status-pill ${role.roleType}`}>{accountTypeLabel(role.id === 'super_admin' ? 'super_admin' : role.roleType)}</span>
+                                            <b>{role.name}</b>
+                                            <small>{userCount} user{userCount === 1 ? '' : 's'} - {(role.permissions || []).length} permissions</small>
+                                            <em>{role.status}</em>
+                                        </button>
+                                    );
+                                })}
+                            </div>
                             <ManagementTable
                                 empty="No roles available."
                                 rows={roles}
                                 columns={[
                                     { key: 'name', label: 'Role', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.name} onBlur={event => event.target.value.trim() && event.target.value.trim() !== role.name && updateRole(role, { name: event.target.value.trim() })} /> : <b>{role.name}</b> },
-                                    { key: 'description', label: 'Description', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.description || ''} onBlur={event => event.target.value !== (role.description || '') && updateRole(role, { description: event.target.value })} /> : role.description || '-' },
                                     { key: 'roleType', label: 'Type', render: role => canEditRoles && !role.isSystem ? <select value={role.roleType} onChange={event => updateRole(role, { roleType: event.target.value })}><option value="internal">internal</option><option value="client">client</option></select> : <span className={`status-pill ${role.roleType}`}>{role.roleType}</span> },
+                                    { key: 'userCount', label: 'Users', render: role => users.filter(user => user.roleId === role.id).length },
+                                    { key: 'permissionCount', label: 'Permissions', render: role => (role.permissions || []).length },
+                                    { key: 'description', label: 'Description', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.description || ''} onBlur={event => event.target.value !== (role.description || '') && updateRole(role, { description: event.target.value })} /> : role.description || '-' },
                                     { key: 'level', label: 'Level', render: role => canEditRoles && role.id !== 'super_admin' ? <input type="number" min="0" max="100" defaultValue={role.level} onBlur={event => Number(event.target.value) !== Number(role.level) && updateRole(role, { level: Number(event.target.value) })} /> : role.level },
-                                    { key: 'status', label: 'Status', render: role => canEditRoles && !role.isSystem ? <select value={role.status} onChange={event => updateRole(role, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> : <span className={`status-pill ${role.status}`}>{role.status}</span> }
+                                    { key: 'status', label: 'Status', render: role => canEditRoles && !role.isSystem ? <select value={role.status} onChange={event => updateRole(role, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> : <span className={`status-pill ${role.status}`}>{role.status}</span> },
+                                    { key: 'actions', label: 'Actions', render: role => <button type="button" className="small" onClick={() => setSelectedRoleId(role.id)}>Edit</button> }
                                 ]}
                             />
                             <label className="management-select">Role
@@ -1235,20 +1526,24 @@ function UsersRoles({ data, reload }) {
                                 ))}
                             </div>
                             {selectedRole?.id === 'super_admin' && <p className="field-note">Super Admin permissions are protected and always include every permission.</p>}
-                            <button type="button" className="primary" onClick={saveRolePermissions} disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}>Save Role Permissions</button>
+                            <div className="permission-actions">
+                                <button type="button" onClick={() => setDraftPermissions(permissions.map(permission => permission.id))} disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}>Select All</button>
+                                <button type="button" onClick={() => setDraftPermissions([])} disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}>Clear All</button>
+                                <button type="button" className="primary" onClick={saveRolePermissions} disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}>Save Permissions</button>
+                            </div>
                         </>
                     ) : <DashboardEmptyState title="No roles available." body="Roles will appear here after the RBAC catalog is seeded." />}
                 </article>
             )}
-            {activePanel === 'permissions' && <UserPermissionsPanel users={users} permissions={permissions} currentUser={data.user} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
-            {activePanel === 'departments' && <DepartmentsPanel departments={departments} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
-            {activePanel === 'designations' && <DesignationsPanel designations={designations} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'permissions' && <UserPermissionsPanel users={users} roles={roles} permissions={permissions} currentUser={data.user} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'departments' && <DepartmentsPanel departments={departments} users={users} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'designations' && <DesignationsPanel designations={designations} users={users} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'hierarchy' && <HierarchyPanel users={internalUsers} />}
         </section>
     );
 }
 
-function UserPermissionsPanel({ users, permissions, currentUser, reloadManagement, setMessage, setError }) {
+function UserPermissionsPanel({ users, roles, permissions, currentUser, reloadManagement, setMessage, setError }) {
     const editableUsers = useMemo(() => users.filter(user => user.accountType !== 'super_admin'), [users]);
     const [selectedUserId, setSelectedUserId] = useState('');
     const [overrideMap, setOverrideMap] = useState({});
@@ -1275,6 +1570,8 @@ function UserPermissionsPanel({ users, permissions, currentUser, reloadManagemen
         return () => { active = false; };
     }, [selectedUserId, setError]);
     const selectedUser = users.find(user => user.id === selectedUserId);
+    const selectedRole = roles.find(role => role.id === selectedUser?.roleId);
+    const selectedRolePermissions = new Set(selectedRole?.permissions || []);
     const permissionGroups = useMemo(() => permissions.reduce((groups, permission) => {
         groups[permission.module] = [...(groups[permission.module] || []), permission];
         return groups;
@@ -1305,10 +1602,10 @@ function UserPermissionsPanel({ users, permissions, currentUser, reloadManagemen
     };
     return (
         <article className="dashboard-card management-card">
-            <div className="dashboard-card-head">
+                    <div className="dashboard-card-head">
                 <div>
                     <h3>User Permission Overrides</h3>
-                    <p>Grant or revoke individual permissions without changing the user's role.</p>
+                    <p>Role Permission + User Override = Effective Permission.</p>
                 </div>
             </div>
             {editableUsers.length ? (
@@ -1318,6 +1615,13 @@ function UserPermissionsPanel({ users, permissions, currentUser, reloadManagemen
                             {editableUsers.map(user => <option value={user.id} key={user.id}>{user.name} - {user.roleName || user.accountType}</option>)}
                         </select>
                     </label>
+                    {selectedUser && (
+                        <div className="permission-formula-card">
+                            <b>{selectedUser.name}</b>
+                            <span>{selectedRole?.name || selectedUser.roleName || 'No role'} inherited access</span>
+                            <small>Role Permission + User Override = Effective Permission</small>
+                        </div>
+                    )}
                     {selectedUser?.id === currentUser.id && <div className="alert error">You cannot change your own permission overrides.</div>}
                     {loading ? <div className="dashboard-empty management-empty"><b>Loading overrides...</b></div> : (
                         <div className="permission-groups override-groups">
@@ -1327,11 +1631,18 @@ function UserPermissionsPanel({ users, permissions, currentUser, reloadManagemen
                                     <div>
                                         {items.map(permission => (
                                             <label className="permission-check permission-override" key={permission.id}>
-                                                <span>{permission.label}</span>
+                                                <span className="permission-override-copy">
+                                                    <b>{permission.id}</b>
+                                                    <small>
+                                                        Role: {selectedRolePermissions.has(permission.id) ? 'Allowed' : 'Denied'} -
+                                                        Override: {overrideMap[permission.id] === 'grant' ? 'Granted' : overrideMap[permission.id] === 'revoke' ? 'Denied' : 'Inherit'} -
+                                                        Effective: {(overrideMap[permission.id] === 'grant' || (!overrideMap[permission.id] && selectedRolePermissions.has(permission.id))) ? 'Allowed' : 'Denied'}
+                                                    </small>
+                                                </span>
                                                 <select value={overrideMap[permission.id] || ''} onChange={event => setOverride(permission.id, event.target.value)}>
                                                     <option value="">Inherit</option>
                                                     <option value="grant">Grant</option>
-                                                    <option value="revoke">Revoke</option>
+                                                    <option value="revoke">Deny</option>
                                                 </select>
                                             </label>
                                         ))}
@@ -1347,8 +1658,13 @@ function UserPermissionsPanel({ users, permissions, currentUser, reloadManagemen
     );
 }
 
-function DepartmentsPanel({ departments, reloadManagement, setMessage, setError }) {
+function DepartmentsPanel({ departments, users, reloadManagement, setMessage, setError }) {
     const [form, setForm] = useState({ name: '', code: '', description: '' });
+    const departmentStats = useMemo(() => departments.map(department => {
+        const members = users.filter(user => String(user.departmentId || '') === String(department.id) && user.accountType !== 'client');
+        const head = [...members].sort((a, b) => Number(b.roleLevel || 0) - Number(a.roleLevel || 0) || Number(b.designationLevel || 0) - Number(a.designationLevel || 0))[0];
+        return { ...department, employeeCount: members.length, headName: head?.name || '-' };
+    }), [departments, users]);
     const create = async event => {
         event.preventDefault();
         try {
@@ -1378,8 +1694,9 @@ function DepartmentsPanel({ departments, reloadManagement, setMessage, setError 
                     <h3>Departments</h3>
                     <p>Create and manage internal departments used by employees and assignments.</p>
                 </div>
+                <button type="submit" form="department-create-form" className="overview-submit-button"><DashboardIcon name="plus" />Add Department</button>
             </div>
-            <form className="management-form compact" onSubmit={create}>
+            <form id="department-create-form" className="management-form compact" onSubmit={create}>
                 <div className="row">
                     <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
                     <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
@@ -1389,21 +1706,26 @@ function DepartmentsPanel({ departments, reloadManagement, setMessage, setError 
             </form>
             <ManagementTable
                 empty="No departments found."
-                rows={departments}
+                rows={departmentStats}
                 columns={[
-                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
-                    { key: 'code', label: 'Code' },
-                    { key: 'description', label: 'Description', render: item => item.description || '-' },
+                    { key: 'name', label: 'Department Name', render: item => <b>{item.name}</b> },
+                    { key: 'headName', label: 'Department Head' },
+                    { key: 'employeeCount', label: 'Number Employees' },
                     { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> },
-                    { key: 'updatedAt', label: 'Updated', render: item => item.updatedAt ? shortDateTime(item.updatedAt) : '-' }
+                    { key: 'actions', label: 'Actions', render: item => <button type="button" className="small" onClick={() => setMessage(`${item.name} is ready to edit inline.`)}>Edit</button> }
                 ]}
             />
         </article>
     );
 }
 
-function DesignationsPanel({ designations, reloadManagement, setMessage, setError }) {
+function DesignationsPanel({ designations, users, reloadManagement, setMessage, setError }) {
     const [form, setForm] = useState({ name: '', code: '', description: '', hierarchyLevel: 10 });
+    const designationStats = useMemo(() => designations.map(designation => {
+        const members = users.filter(user => String(user.designationId || '') === String(designation.id) && user.accountType !== 'client');
+        const departments = [...new Set(members.map(user => user.departmentName).filter(Boolean))];
+        return { ...designation, employeeCount: members.length, departmentLabel: departments.length ? departments.slice(0, 2).join(', ') + (departments.length > 2 ? ` +${departments.length - 2}` : '') : '-' };
+    }), [designations, users]);
     const create = async event => {
         event.preventDefault();
         try {
@@ -1433,8 +1755,9 @@ function DesignationsPanel({ designations, reloadManagement, setMessage, setErro
                     <h3>Designations</h3>
                     <p>Configure organization levels without hard-coding your company structure.</p>
                 </div>
+                <button type="submit" form="designation-create-form" className="overview-submit-button"><DashboardIcon name="plus" />Add Designation</button>
             </div>
-            <form className="management-form compact" onSubmit={create}>
+            <form id="designation-create-form" className="management-form compact" onSubmit={create}>
                 <div className="row">
                     <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
                     <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
@@ -1445,13 +1768,14 @@ function DesignationsPanel({ designations, reloadManagement, setMessage, setErro
             </form>
             <ManagementTable
                 empty="No designations found."
-                rows={designations}
+                rows={designationStats}
                 columns={[
-                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
-                    { key: 'code', label: 'Code' },
-                    { key: 'hierarchyLevel', label: 'Level', render: item => <input type="number" min="0" max="999" value={item.hierarchyLevel} onChange={event => update(item, { hierarchyLevel: Number(event.target.value) })} /> },
-                    { key: 'description', label: 'Description', render: item => item.description || '-' },
-                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> }
+                    { key: 'name', label: 'Designation', render: item => <b>{item.name}</b> },
+                    { key: 'departmentLabel', label: 'Department' },
+                    { key: 'hierarchyLevel', label: 'Hierarchy Level', render: item => <input type="number" min="0" max="999" value={item.hierarchyLevel} onChange={event => update(item, { hierarchyLevel: Number(event.target.value) })} /> },
+                    { key: 'employeeCount', label: 'Number Employees' },
+                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> },
+                    { key: 'actions', label: 'Actions', render: item => <button type="button" className="small" onClick={() => setMessage(`${item.name} is ready to edit inline.`)}>Edit</button> }
                 ]}
             />
         </article>
@@ -1464,14 +1788,19 @@ function HierarchyPanel({ users }) {
         groups[key] = [...(groups[key] || []), user];
         return groups;
     }, {}), [users]);
-    const roots = byManager.root || [];
+    const userIds = new Set(users.map(user => user.id));
+    const roots = users.filter(user => !user.managerUserId || !userIds.has(user.managerUserId));
     const renderNode = (user, depth = 0) => (
         <div className="hierarchy-node" style={{ marginLeft: `${Math.min(depth, 5) * 18}px` }} key={user.id}>
-            <div>
-                <b>{user.name}</b>
-                <span>{user.designationName || user.roleName || user.accountType}</span>
+            <div className="hierarchy-person">
+                <span className="dashboard-avatar">{initialsFor(user.name)}</span>
+                <div>
+                    <b>{user.name}</b>
+                    <span>{user.roleName || accountTypeLabel(user.accountType)}</span>
+                    <small>{user.designationName || 'No designation'} - {user.departmentName || 'No department'}</small>
+                </div>
+                <em>{(byManager[user.id] || []).length} direct report{(byManager[user.id] || []).length === 1 ? '' : 's'}</em>
             </div>
-            <small>{user.departmentName || 'No department'}</small>
             {(byManager[user.id] || []).map(child => renderNode(child, depth + 1))}
         </div>
     );
