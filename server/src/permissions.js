@@ -1,4 +1,4 @@
-import { moduleCatalog } from './permissionCatalog.js';
+import { moduleCatalog, permissions as permissionCatalog, rolePermissions } from './permissionCatalog.js';
 import { one, query } from './db.js';
 
 const legacyPermissionFallback = {
@@ -73,18 +73,31 @@ export async function loadUserContext(userId) {
       permissions.add(permission);
   }
 
-  const overrides = await query(
-    'SELECT permission_id,effect FROM user_permission_overrides WHERE user_id=?',
-    [row.id]
-  );
-  for (const override of overrides) {
-    if (override.effect === 'grant')
-      permissions.add(override.permission_id);
-    else
-      permissions.delete(override.permission_id);
+  const protectedSuperAdmin = fallbackType === 'super_admin' || row.role_slug === 'super_admin';
+  if (protectedSuperAdmin) {
+    for (const [permissionId] of permissionCatalog)
+      permissions.add(permissionId);
+  } else {
+    const overrides = await query(
+      'SELECT permission_id,effect FROM user_permission_overrides WHERE user_id=?',
+      [row.id]
+    );
+    for (const override of overrides) {
+      if (override.effect === 'grant')
+        permissions.add(override.permission_id);
+      else
+        permissions.delete(override.permission_id);
+    }
   }
 
   const accountType = row.account_type || (row.role === 'admin' ? 'admin' : row.role);
+  if (accountType === 'client') {
+    const clientSafePermissions = new Set(rolePermissions.client || []);
+    for (const permissionId of [...permissions]) {
+      if (!clientSafePermissions.has(permissionId))
+        permissions.delete(permissionId);
+    }
+  }
   const user = {
     id: row.id,
     name: row.name,

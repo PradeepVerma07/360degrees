@@ -50,6 +50,9 @@ async function attachmentPayload(file) {
 
 export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
   const isAdmin = can(data, 'support.manage') || can(data, 'support.view_all');
+  const canCreateTicket = can(data, 'support.create');
+  const canReplyTicket = can(data, 'support.reply');
+  const canManageTickets = can(data, 'support.manage');
   const tickets = useMemo(() => data.supportTickets || [], [data.supportTickets]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
@@ -276,7 +279,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
           <h2>{isAdmin ? 'Support Tickets' : 'My Support Tickets'}</h2>
           <p className="muted">{isAdmin ? 'Review, reply to, and manage every submitted ticket.' : 'Raise a ticket and track every support conversation in one place.'}</p>
         </div>
-        <button type="button" className="primary" onClick={() => setShowForm(true)}>+ Raise Ticket</button>
+        {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>+ Raise Ticket</button>}
       </div>
 
       {detailError && !selected && <div className="alert error">{detailError}</div>}
@@ -297,11 +300,13 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
           onDownload={downloadAttachment}
           onClearChat={clearChat}
           onDeleteTicket={deleteTicket}
+          canReply={canReplyTicket}
+          canManage={canManageTickets}
         />
       ) : tickets.length === 0 ? (
         <div className="card empty-state">
           <h3>No support tickets found.</h3>
-          <button type="button" className="primary" onClick={() => setShowForm(true)}>Raise Your First Ticket</button>
+          {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>Raise Your First Ticket</button>}
         </div>
       ) : (
         <TicketTable
@@ -318,7 +323,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
         />
       )}
 
-      {showForm && (
+      {showForm && canCreateTicket && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="raise-ticket-title">
           <form className="modal-panel ticket-form" onSubmit={submitTicket}>
             <div className="modal-head">
@@ -423,7 +428,7 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
   );
 }
 
-function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, onReply, onUpdate, onDownload, onClearChat, onDeleteTicket }) {
+function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, onReply, onUpdate, onDownload, onClearChat, onDeleteTicket, canReply, canManage }) {
   const closed = ticket.status === 'Closed';
   const messages = ticket.messages || [];
   const attachments = ticket.attachments || [];
@@ -436,7 +441,7 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
           <p className="muted">{ticket.subject}</p>
         </div>
         <div className="ticket-detail-actions">
-          <button type="button" className="small" onClick={onClearChat}>Clear Chat</button>
+          {canManage && <button type="button" className="small" onClick={onClearChat}>Clear Chat</button>}
           <button type="button" className="danger small" onClick={() => onDeleteTicket(ticket.ticketNumber)}>Delete</button>
           <button type="button" className="icon-button" aria-label="Close ticket detail" onClick={onClose}>x</button>
         </div>
@@ -449,7 +454,7 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
         <div><span>Created date</span><b>{fmt(ticket.createdAt)}</b></div>
         {isAdmin && <div><span>User</span><b>{ticket.userName}</b></div>}
       </div>
-      {isAdmin && (
+      {canManage && (
         <div className="admin-ticket-controls">
           <label>Status
             <select value={ticket.status} onChange={event => onUpdate({ status: event.target.value })}>
@@ -503,6 +508,8 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
       <div className="reply-box">
         {closed ? (
           <div className="alert">This ticket has been closed.</div>
+        ) : !canReply ? (
+          <div className="alert">You can view this conversation but do not have permission to reply.</div>
         ) : (
           <div className="reply-composer">
             <div className="reply-composer-head">

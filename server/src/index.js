@@ -370,11 +370,16 @@ app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
     const includeInternalJobFields = user.accountType !== 'client';
-    const jobRows = await loadVisibleJobs(user);
+    const canReadJobs = hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
+    const canReadSupport = hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
+    const canReadSettings = hasAnyPermission(user, ['settings.view', 'settings.edit']);
+    const jobRows = canReadJobs ? await loadVisibleJobs(user) : [];
     const clients = await loadVisibleClients(user);
-    const ticketRows = canManageSupport(user)
-        ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
-        : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
+    const ticketRows = !canReadSupport
+        ? []
+        : canManageSupport(user)
+            ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
+            : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
     const assignees = canAssignJobs(user)
         ? await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
             FROM users u
@@ -386,17 +391,33 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const departments = canAssignJobs(user) || canViewDepartmentJobs(user)
         ? await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name")
         : [];
+    const clientOwners = hasPermission(user, 'clients.assign_owner')
+        ? await query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
+            WHERE status='active' AND COALESCE(account_type,role)<>'client' ORDER BY name`)
+        : [];
+    const currentSettings = await settings();
+    const bootstrapSettings = !canReadSettings
+        ? {
+            categories: currentSettings.categories.map(category => ({ name: category.name })),
+            startHour: currentSettings.startHour,
+            endHour: currentSettings.endHour,
+            workDays: currentSettings.workDays,
+            capacityPerCategory: 1,
+            bufferHoursPerExtraJob: 0
+        }
+        : currentSettings;
     res.json({
         user,
         permissions: user.permissions,
         modules: user.modules,
         jobs: jobRows.map(row => mapJob(row, includeInternalJobFields)),
-        clients,
+        clients: user.accountType === 'client' ? clients.map(client => ({ id: client.id, name: client.name, status: client.status })) : clients,
         supportTickets: ticketRows.map(mapTicket),
-        settings: await settings(),
-        categoryLoad: await categoryLoadForUser(user),
+        settings: bootstrapSettings,
+        categoryLoad: !canReadJobs || user.accountType === 'client' ? {} : await categoryLoadForUser(user),
         assignees,
-        departments
+        departments,
+        clientOwners
     });
 });
 app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), async (req, res) => {
@@ -735,7 +756,7 @@ app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('su
         return res.status(403).json({ error: 'Ticket access denied' });
     res.json({ ticket: await ticketDetail(ticket) });
 });
-app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePermission('support.reply', 'support.manage'), async (req, res) => {
+app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePermission('support.manage'), async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });

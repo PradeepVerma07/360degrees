@@ -75,7 +75,7 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 .dashboard-content{width:100%;min-width:0;max-width:1680px;margin:0 auto;padding:24px clamp(18px,2.1vw,34px);display:grid;gap:22px}
 .dashboard-welcome-card,.dashboard-card,.dashboard-side-card,.dashboard-stat,.dashboard-shell .card,.dashboard-shell .job,.management-card{min-width:0}
 .dashboard-welcome-card{display:flex;align-items:center;justify-content:space-between;gap:18px}
-.dashboard-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px}
+.dashboard-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:18px}
 .dashboard-work-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,360px);gap:18px;align-items:start}
 .dashboard-work-left,.dashboard-work-right{min-width:0}
 .dashboard-filter-row,.dashboard-shell .filters{display:flex;flex-wrap:wrap;gap:12px}

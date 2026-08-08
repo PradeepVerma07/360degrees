@@ -34,17 +34,17 @@ const canAny = (data, permissions) => permissions.some(permission => can(data, p
 const knownDashboardTabs = {
     overview: 'Overview',
     submit: 'Submit a Job',
-    jobs: 'By Category',
+    jobs: 'Job Board',
     settings: 'TAT Standards',
-    clients: 'Manage Clients',
+    clients: 'Clients',
     employees: 'Employees',
     users: 'Users & Roles',
     support: 'Support Tickets',
     audit: 'Audit Logs'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']]
-    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['support', 'Support Tickets']];
+    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'Job Board'], ['settings', 'TAT Standards'], ['clients', 'Clients'], ['support', 'Support Tickets']]
+    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'My Jobs'], ['support', 'Support Tickets']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('reset_token'))
@@ -80,40 +80,48 @@ export default function App() {
             setError(e.message);
     } }, []);
     useEffect(() => { if (!auth)
-        return; load(); const socket = io(API_URL || undefined); socket.on('data:changed', load); return () => { socket.disconnect(); }; }, [auth, load]);
+        return; load(); const socket = io(API_URL || undefined); socket.on('data:changed', load); socket.on('permissions:updated', load); return () => { socket.disconnect(); }; }, [auth, load]);
     if (!auth)
         return _jsx(Login, { onLogin: () => setAuth(true) });
     if (!data)
         return _jsx("div", { className: "center", children: error || 'Loading workspace...' });
     const moduleTabs = (data.modules || [])
         .filter(module => knownDashboardTabs[module.id])
-        .map(module => [module.id, module.label || knownDashboardTabs[module.id]]);
-    const tabs = moduleTabs.length ? moduleTabs : fallbackModulesFor(data);
-    const activeTab = tabs.some(([id]) => id === tab) ? tab : tabs[0]?.[0] || 'overview';
+        .map(module => {
+        if (module.id === 'jobs')
+            return [module.id, can(data, 'jobs.view_all') ? 'Job Board' : 'My Jobs'];
+        if (module.id === 'clients')
+            return [module.id, 'Clients'];
+        return [module.id, module.label || knownDashboardTabs[module.id]];
+    });
+    const tabs = Array.isArray(data.modules) ? moduleTabs : fallbackModulesFor(data);
+    const activeTab = tabs.some(([id]) => id === tab) ? tab : (tabs[0]?.[0] || null);
     const logout = () => { setToken(null); setAuth(false); setData(null); };
     const openSupportTicketForm = () => {
         setSupportCreateSignal(value => value + 1);
         setTab('support');
     };
-    const currentContent = activeTab === 'overview'
-        ? _jsx(Overview, { data: data, setTab: setTab })
+    const currentContent = !activeTab
+        ? _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "No module access" }), _jsx("p", { children: "Your account is active, but no dashboard modules are currently assigned. Contact a Super Admin for access." })] })
+        : activeTab === 'overview' && can(data, 'dashboard.view')
+            ? _jsx(Overview, { data: data, setTab: setTab })
         : activeTab === 'submit' && can(data, 'jobs.create')
             ? _jsx(Submit, { data: data, reload: load })
-            : activeTab === 'jobs' && canAny(data, ['jobs.view_all', 'jobs.view_own'])
+            : activeTab === 'jobs' && canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'])
                 ? _jsx(Jobs, { data: data, reload: load })
                 : activeTab === 'settings' && canAny(data, ['settings.view', 'settings.edit'])
                     ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
                     : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
                         ? _jsx(Clients, { data: data, reload: load })
-                        : activeTab === 'employees' && can(data, 'employees.view')
-                            ? _jsx(Employees, { data: data })
-                            : activeTab === 'users' && canAny(data, ['users.view', 'roles.view'])
+                        : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
+                            ? _jsx(Employees, { data: data, reload: load })
+                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
                                 ? _jsx(UsersRoles, { data: data, reload: load })
                                 : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
                                     ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
                                     : activeTab === 'audit' && can(data, 'audit.view')
                                         ? _jsx(AuditLogs, {})
-                                        : _jsx(Overview, { data: data, setTab: setTab });
+                                        : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
     return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
@@ -379,24 +387,52 @@ function Overview({ data, setTab }) {
     const visibleCompleted = completedMonth ? completedJobs.filter(job => monthKey(dateForMonth(job)) === completedMonth) : completedJobs;
     const canSeeClients = canAny(data, ['clients.view_all', 'clients.view']);
     const activeClients = canSeeClients ? data.clients.filter(client => client.status === 'active').length : data.user.clientId ? 1 : 0;
+    const accountType = data.user.accountType || data.user.role;
+    const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
+    const overdueJobs = pendingJobs.filter(job => addWorkingHours(new Date(job.datePosted), job.teamOverrideHours ?? job.calculatedHours, data.settings) < new Date()).length;
+    const assignedToMe = data.jobs.filter(job => job.assignedToUserId === data.user.id && isPendingJob(job)).length;
+    const activeEmployees = (data.clientOwners || []).filter(user => user.accountType === 'employee').length;
+    const overviewStats = accountType === 'super_admin'
+        ? [
+            ['blue', 'total', data.jobs.length, 'Total Jobs', 'All visible job records'],
+            ['gold', 'clock', overdueJobs, 'Overdue Jobs', 'Need immediate attention'],
+            ['purple', 'users', activeEmployees, 'Active Employees', 'Internal employee accounts'],
+            ['green', 'users', activeClients, 'Active Clients', 'Current client companies'],
+            ['purple', 'support', openTickets, 'Open Tickets', 'Support requiring action']
+        ]
+        : accountType === 'admin'
+            ? [
+                ['blue', 'total', data.jobs.length, 'Accessible Jobs', 'Your permitted job scope'],
+                ['gold', 'pending', pendingJobs.length, 'Pending Jobs', 'Awaiting completion'],
+                ['green', 'users', activeClients, 'Active Clients', 'Clients in your scope'],
+                ['purple', 'support', openTickets, 'Open Tickets', 'Support in your scope']
+            ]
+            : accountType === 'employee'
+                ? [
+                    ['blue', 'jobs', assignedToMe, 'Assigned to Me', 'Active assigned jobs'],
+                    ['gold', 'clock', overdueJobs, 'Overdue', 'Jobs beyond current TAT'],
+                    ['purple', 'pending', data.jobs.filter(job => job.status === 'in_progress').length, 'In Progress', 'Work currently underway'],
+                    ['green', 'completed', completedJobs.length, 'Completed', 'Delivered jobs in your scope']
+                ]
+                : [
+                    ['blue', 'total', data.jobs.length, 'Submitted Jobs', 'Your organisation jobs'],
+                    ['gold', 'pending', pendingJobs.length, 'Active Jobs', 'Currently in progress'],
+                    ['green', 'completed', completedJobs.length, 'Completed Jobs', 'Successfully delivered'],
+                    ['purple', 'support', openTickets, 'Open Tickets', 'Support conversations']
+                ];
     const quickActions = [
         ...(can(data, 'jobs.create') ? [['submit', 'plus', 'Submit a Job', 'Create a new job request']] : []),
-        ...(canAny(data, ['jobs.view_all', 'jobs.view_own']) ? [['jobs', 'jobs', 'View All Jobs', 'Browse all your jobs']] : []),
-        ...(canSeeClients ? [['clients', 'users', 'Manage Clients', 'View and manage clients']] : []),
+        ...(canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']) ? [['jobs', 'jobs', 'View All Jobs', 'Browse all your jobs']] : []),
+        ...(canSeeClients ? [['clients', 'users', 'Clients', 'View clients in your access scope']] : []),
         ...(canAny(data, ['support.view_all', 'support.view_own', 'support.create']) ? [['support', 'support', 'Support Tickets', 'Get help and support']] : [])
     ];
     const activities = recentActivityItems(data);
     return _jsxs(_Fragment, { children: [
             _jsxs("section", { className: "dashboard-welcome-card", children: [
-                    _jsxs("div", { children: [_jsxs("h2", { children: ["Welcome back, ", data.user.name, "!"] }), _jsx("p", { children: "Here's what's happening with your jobs today." })] }),
+                    _jsxs("div", { children: [_jsxs("h2", { children: ["Welcome back, ", data.user.name, "!"] }), _jsx("p", { children: accountType === 'super_admin' ? 'System-wide operations, people, clients and delivery at a glance.' : accountType === 'admin' ? 'Your authorised operations and delivery workload today.' : accountType === 'employee' ? 'Your assigned work, deadlines and client activity today.' : 'Track your organisation requests, deliveries and support activity.' })] }),
                     _jsxs("div", { className: "dashboard-date-box", children: [_jsx(DashboardIcon, { name: "calendar" }), _jsx("span", { children: dashboardDate(new Date()) })] })
                 ] }),
-            _jsxs("section", { className: "dashboard-stats", "aria-label": "Dashboard statistics", children: [
-                    _jsx(DashboardStat, { tone: "blue", icon: "total", value: data.jobs.length, label: "Total Jobs", support: "All time jobs posted" }),
-                    _jsx(DashboardStat, { tone: "gold", icon: "pending", value: data.jobs.filter(isPendingJob).length, label: "Pending Jobs", support: "Awaiting completion" }),
-                    _jsx(DashboardStat, { tone: "green", icon: "completed", value: data.jobs.filter(isCompletedJob).length, label: "Completed Jobs", support: "Successfully delivered" }),
-                    _jsx(DashboardStat, { tone: "purple", icon: "users", value: activeClients, label: canSeeClients ? 'Active Clients' : 'Workspace', support: canSeeClients ? 'Active clients' : 'Your client access' })
-                ] }),
+            _jsx("section", { className: "dashboard-stats", "aria-label": "Dashboard statistics", children: overviewStats.map(([tone, icon, value, label, support]) => _jsx(DashboardStat, { tone: tone, icon: icon, value: value, label: label, support: support }, label)) }),
             _jsxs("section", { className: "dashboard-work-grid", children: [
                     _jsxs("div", { className: "dashboard-work-left", children: [
                             _jsxs("article", { className: "dashboard-card dashboard-jobs-card", children: [

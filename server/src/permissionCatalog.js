@@ -96,11 +96,11 @@ export const rolePermissions = {
 export const moduleCatalog = [
   { id: 'overview', label: 'Overview', permissionAny: ['dashboard.view'] },
   { id: 'submit', label: 'Submit a Job', permissionAny: ['jobs.create'] },
-  { id: 'jobs', label: 'By Category', permissionAny: ['jobs.view_all', 'jobs.view_own'] },
+  { id: 'jobs', label: 'Job Board', permissionAny: ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'] },
   { id: 'settings', label: 'TAT Standards', permissionAny: ['settings.view', 'settings.edit'] },
-  { id: 'clients', label: 'Manage Clients', permissionAny: ['clients.view_all', 'clients.view', 'clients.create'] },
-  { id: 'employees', label: 'Employees', permissionAny: ['employees.view'] },
-  { id: 'users', label: 'Users & Roles', permissionAny: ['users.view', 'roles.view'] },
+  { id: 'clients', label: 'Clients', permissionAny: ['clients.view_all', 'clients.view', 'clients.create'] },
+  { id: 'employees', label: 'Employees', permissionAny: ['employees.view', 'employees.create', 'employees.edit'] },
+  { id: 'users', label: 'Users & Roles', permissionAny: ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'] },
   { id: 'support', label: 'Support Tickets', permissionAny: ['support.view_all', 'support.view_own', 'support.create'] },
   { id: 'audit', label: 'Audit Logs', permissionAny: ['audit.view'] }
 ];
