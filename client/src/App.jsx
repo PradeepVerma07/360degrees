@@ -29,6 +29,7 @@ const groupByMonth = (jobs, getDate) => jobs.reduce((groups, job) => {
 }, {});
 const sortedMonthKeys = groups => Object.keys(groups).sort().reverse();
 const clientNameFor = (data, id) => data.clients.find(c => c.id === id)?.name || id;
+const assigneeLabelFor = user => [user.name, user.designationName || user.roleName, user.departmentName].filter(Boolean).join(' - ');
 const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
 const canAny = (data, permissions) => permissions.some(permission => can(data, permission));
 const knownDashboardTabs = {
@@ -552,15 +553,118 @@ function MonthGroups({ groups, data, empty, editable = false, reload, sortDate =
         }) });
 }
 function Metric({ label, value }) { return _jsxs("div", { className: "metric", children: [_jsx("span", { children: label }), _jsx("strong", { children: value })] }); }
-function Submit({ data, reload }) { const first = data.settings.categories[0]?.name || ''; const activeClients = useMemo(() => data.clients.filter(c => c.status === 'active'), [data.clients]); const showClientSelector = data.user.accountType !== 'client' && activeClients.length > 0; const [form, setForm] = useState({ clientId: data.user.clientId || activeClients[0]?.id || '', title: '', description: '', category: first, priority: 'Medium', postedBy: '', assetLink: '' }); const [message, setMessage] = useState(''); const submit = async (e) => { e.preventDefault(); try {
-    await api.createJob(form);
-    setMessage('Job submitted successfully. All logged-in users will receive the update instantly.');
-    setForm({ ...form, title: '', description: '', postedBy: '', assetLink: '' });
-    await reload();
+function Submit({ data, reload }) {
+    const first = data.settings.categories[0]?.name || '';
+    const activeClients = useMemo(() => data.clients.filter(c => c.status === 'active'), [data.clients]);
+    const assignees = data.assignees || [];
+    const departments = data.departments || [];
+    const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
+    const showClientSelector = data.user.accountType !== 'client' && activeClients.length > 0;
+    const emptyForm = {
+        clientId: data.user.clientId || activeClients[0]?.id || '',
+        title: '',
+        description: '',
+        category: first,
+        priority: 'Medium',
+        postedBy: '',
+        assetLink: '',
+        assignedToUserId: '',
+        departmentId: '',
+        assignmentNote: ''
+    };
+    const [form, setForm] = useState(emptyForm);
+    const [message, setMessage] = useState('');
+    const setAssignee = assignedToUserId => {
+        const selected = assignees.find(user => user.id === assignedToUserId);
+        setForm(current => ({
+            ...current,
+            assignedToUserId,
+            departmentId: selected?.departmentId || current.departmentId
+        }));
+    };
+    const submit = async (e) => {
+        e.preventDefault();
+        try {
+            await api.createJob(canAssign ? form : {
+                clientId: form.clientId,
+                title: form.title,
+                description: form.description,
+                category: form.category,
+                priority: form.priority,
+                postedBy: form.postedBy,
+                assetLink: form.assetLink
+            });
+            setMessage(form.assignedToUserId ? 'Job submitted and assigned successfully.' : 'Job submitted successfully. All logged-in users will receive the update instantly.');
+            setForm(current => ({ ...emptyForm, clientId: current.clientId, category: current.category, priority: current.priority }));
+            await reload();
+        }
+        catch (err) {
+            setMessage(err.message);
+        }
+    };
+    return (
+        <form className="card form" onSubmit={submit}>
+            <h2>New job request</h2>
+            {message && <div className="alert">{message}</div>}
+            {showClientSelector && (
+                <label>Client
+                    <select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}>
+                        {activeClients.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}
+                    </select>
+                </label>
+            )}
+            <label>Job title
+                <input required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+            </label>
+            <label>Description
+                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            </label>
+            <div className="row">
+                <label>Category
+                    <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
+                        {data.settings.categories.map(c => <option key={c.name}>{c.name}</option>)}
+                    </select>
+                </label>
+                <label>Priority
+                    <select value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}>
+                        <option>Low</option>
+                        <option>Medium</option>
+                        <option>High</option>
+                        <option>Urgent</option>
+                    </select>
+                </label>
+            </div>
+            {canAssign && (
+                <>
+                    <div className="row">
+                        <label>Assign to employee
+                            <select value={form.assignedToUserId} onChange={e => setAssignee(e.target.value)}>
+                                <option value="">Unassigned</option>
+                                {assignees.map(user => <option value={user.id} key={user.id}>{assigneeLabelFor(user)}</option>)}
+                            </select>
+                        </label>
+                        <label>Department
+                            <select value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value })}>
+                                <option value="">No department</option>
+                                {departments.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                            </select>
+                        </label>
+                    </div>
+                    <label>Assignment note
+                        <input value={form.assignmentNote} onChange={e => setForm({ ...form, assignmentNote: e.target.value })} placeholder="Optional instruction for the employee or team leader" />
+                    </label>
+                </>
+            )}
+            <label>Asset link
+                <input value={form.assetLink} onChange={e => setForm({ ...form, assetLink: e.target.value })} placeholder="Google Drive, Dropbox or another secure URL" />
+            </label>
+            <label>Posted by
+                <input required value={form.postedBy} onChange={e => setForm({ ...form, postedBy: e.target.value })} />
+            </label>
+            <button className="primary">Submit job</button>
+        </form>
+    );
 }
-catch (err) {
-    setMessage(err.message);
-} }; return _jsxs("form", { className: "card form", onSubmit: submit, children: [_jsx("h2", { children: "New job request" }), message && _jsx("div", { className: "alert", children: message }), showClientSelector && _jsxs("label", { children: ["Client", _jsx("select", { value: form.clientId, onChange: e => setForm({ ...form, clientId: e.target.value }), children: activeClients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id)) })] }), _jsxs("label", { children: ["Job title", _jsx("input", { required: true, value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) })] }), _jsxs("label", { children: ["Description", _jsx("textarea", { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }) })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category", _jsx("select", { value: form.category, onChange: e => setForm({ ...form, category: e.target.value }), children: data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name)) })] }), _jsxs("label", { children: ["Priority", _jsxs("select", { value: form.priority, onChange: e => setForm({ ...form, priority: e.target.value }), children: [_jsx("option", { children: "Low" }), _jsx("option", { children: "Medium" }), _jsx("option", { children: "High" }), _jsx("option", { children: "Urgent" })] })] })] }), _jsxs("label", { children: ["Asset link", _jsx("input", { value: form.assetLink, onChange: e => setForm({ ...form, assetLink: e.target.value }), placeholder: "Google Drive, Dropbox or another secure URL" })] }), _jsxs("label", { children: ["Posted by", _jsx("input", { required: true, value: form.postedBy, onChange: e => setForm({ ...form, postedBy: e.target.value }) })] }), _jsx("button", { className: "primary", children: "Submit job" })] }); }
 function Jobs({ data, reload }) {
     const [category, setCategory] = useState('');
     const [priority, setPriority] = useState('');
@@ -644,6 +748,12 @@ function JobCard({ job, data, editable = false, reload }) {
     const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
     const canChangeStatus = canAny(data, ['jobs.edit', 'jobs.update_status']);
     const canOverrideTat = can(data, 'jobs.override_tat');
+    const changeAssignee = assignedToUserId => {
+        const selected = (data.assignees || []).find(user => user.id === assignedToUserId);
+        setAssignee(assignedToUserId);
+        if (selected?.departmentId && !department)
+            setDepartment(selected.departmentId);
+    };
     const save = async () => {
         const patch = {};
         if (canChangeStatus)
@@ -682,10 +792,10 @@ function JobCard({ job, data, editable = false, reload }) {
                     canChangeStatus && _jsx("select", { value: status, onChange: e => setStatus(e.target.value), children: Object.entries(statusLabels).map(([v, l]) => _jsx("option", { value: v, children: l }, v)) }),
                     canOverrideTat && _jsx("input", { type: "number", min: "1", value: hours, onChange: e => setHours(Number(e.target.value)), "aria-label": "TAT hours" }),
                     canOverrideTat && _jsx("input", { value: note, onChange: e => setNote(e.target.value), placeholder: "Team TAT note" }),
-                    canAssign && _jsxs("select", { value: assignee, onChange: e => setAssignee(e.target.value), "aria-label": "Assigned employee", children: [_jsx("option", { value: "", children: "Unassigned" }), (data.assignees || []).map(user => _jsx("option", { value: user.id, children: user.departmentName ? `${user.name} - ${user.departmentName}` : user.name }, user.id))] }),
+                    canAssign && _jsxs("select", { value: assignee, onChange: e => changeAssignee(e.target.value), "aria-label": "Assigned employee", children: [_jsx("option", { value: "", children: "Unassigned" }), (data.assignees || []).map(user => _jsx("option", { value: user.id, children: assigneeLabelFor(user) }, user.id))] }),
                     canAssign && _jsxs("select", { value: department, onChange: e => setDepartment(e.target.value), "aria-label": "Job department", children: [_jsx("option", { value: "", children: "No department" }), (data.departments || []).map(item => _jsx("option", { value: item.id, children: item.name }, item.id))] }),
                     canAssign && _jsx("input", { value: assignmentNote, onChange: e => setAssignmentNote(e.target.value), placeholder: "Assignment note" }),
-                    _jsx("button", { onClick: save, children: "Save" })
+                    _jsx("button", { type: "button", onClick: save, children: "Save" })
                 ] })
         ] });
 }

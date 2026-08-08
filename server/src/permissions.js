@@ -7,6 +7,9 @@ const legacyPermissionFallback = {
     'jobs.view_all',
     'jobs.create',
     'jobs.edit',
+    'jobs.assign',
+    'jobs.reassign',
+    'jobs.view_department',
     'jobs.update_status',
     'jobs.override_tat',
     'clients.view',
@@ -25,6 +28,7 @@ const legacyPermissionFallback = {
     'dashboard.view',
     'jobs.view_own',
     'jobs.create',
+    'jobs.assign',
     'support.view_own',
     'support.create',
     'support.reply'

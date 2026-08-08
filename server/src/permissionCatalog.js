@@ -42,7 +42,9 @@ export const permissions = [
 export const roles = [
   ['super_admin', 'Super Admin', 'Highest-level system owner', 100, 'internal'],
   ['admin', 'Admin', 'Internal administrator with current dashboard access', 80, 'internal'],
+  ['team_leader', 'Team Leader', 'Internal team lead who can assign work to team members and juniors', 60, 'internal'],
   ['employee', 'Employee', 'Internal employee with assigned work access', 40, 'internal'],
+  ['junior_employee', 'Junior Employee', 'Junior internal employee focused on assigned work', 20, 'internal'],
   ['client', 'Client', 'Client workspace access', 10, 'client']
 ];
 
@@ -74,6 +76,19 @@ export const rolePermissions = {
     'settings.view',
     'settings.edit'
   ],
+  team_leader: [
+    'dashboard.view',
+    'jobs.view_own',
+    'jobs.view_department',
+    'jobs.create',
+    'jobs.assign',
+    'jobs.reassign',
+    'jobs.update_status',
+    'clients.view',
+    'support.view_own',
+    'support.create',
+    'support.reply'
+  ],
   employee: [
     'dashboard.view',
     'jobs.view_own',
@@ -87,6 +102,14 @@ export const rolePermissions = {
     'dashboard.view',
     'jobs.view_own',
     'jobs.create',
+    'jobs.assign',
+    'support.view_own',
+    'support.create',
+    'support.reply'
+  ],
+  junior_employee: [
+    'dashboard.view',
+    'jobs.view_own',
     'support.view_own',
     'support.create',
     'support.reply'

@@ -164,7 +164,7 @@ const optionalId = value => {
 };
 const entityStatus = ['active', 'inactive'];
 const roleTypes = ['internal', 'client'];
-const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'support.view_own', 'support.create', 'support.reply']);
+const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'jobs.assign', 'support.view_own', 'support.create', 'support.reply']);
 const mapAttachment = (row) => ({
     id: String(row.id), ticketNumber: row.ticket_number, fileName: row.file_name,
     mimeType: row.mime_type, sizeBytes: row.size_bytes, messageId: row.message_id ? String(row.message_id) : null, createdAt: row.created_at
@@ -221,6 +221,68 @@ const canUseClientForJob = async (user, clientId) => {
         return false;
     const client = await one('SELECT * FROM clients WHERE id=? AND status=?', [clientId, 'active']);
     return Boolean(client && canAccessClientRecord(user, client));
+};
+const hasGlobalAssignmentScope = user => isSuperAdmin(user) || canViewAllJobs(user) || user.accountType === 'client';
+const internalAssignableUserSelect = `SELECT u.id,u.name,COALESCE(u.account_type,u.role) accountType,
+    u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
+    d.name departmentName,ds.name designationName,ds.hierarchy_level designationLevel,
+    r.name roleName,r.level roleLevel
+  FROM users u
+  LEFT JOIN departments d ON d.id=u.department_id
+  LEFT JOIN designations ds ON ds.id=u.designation_id
+  LEFT JOIN roles r ON r.id=u.role_id
+  WHERE u.status='active'
+    AND COALESCE(u.account_type,u.role)<>'client'
+    AND COALESCE(u.account_type,u.role)<>'super_admin'`;
+const assignmentScopeAllowsUser = (actor, target) => {
+    if (hasGlobalAssignmentScope(actor))
+        return true;
+    if (target.id === actor.id || target.managerUserId === actor.id)
+        return true;
+    const sameDepartment = actor.departmentId && Number(target.departmentId || 0) === Number(actor.departmentId);
+    if (!sameDepartment)
+        return false;
+    const targetRoleLevel = Number(target.roleLevel || 0);
+    const actorRoleLevel = Number(actor.roleLevel || 0);
+    if (targetRoleLevel < actorRoleLevel)
+        return true;
+    if (targetRoleLevel > actorRoleLevel)
+        return false;
+    const actorDesignationLevel = actor.designationLevel == null ? Number.POSITIVE_INFINITY : Number(actor.designationLevel || 0);
+    const targetDesignationLevel = Number(target.designationLevel || 0);
+    return targetDesignationLevel <= actorDesignationLevel;
+};
+const loadAssignableUsers = async user => {
+    const rows = await query(`${internalAssignableUserSelect} ORDER BY d.name IS NULL,d.name,ds.hierarchy_level DESC,u.name`);
+    return rows.filter(candidate => assignmentScopeAllowsUser(user, candidate));
+};
+const loadAssignableDepartments = async user => {
+    const departments = await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name");
+    if (hasGlobalAssignmentScope(user))
+        return departments;
+    if (!user.departmentId)
+        return [];
+    return departments.filter(department => Number(department.id) === Number(user.departmentId));
+};
+const validateAssigneeForUser = async (user, assignedToUserId) => {
+    if (!assignedToUserId)
+        return { assignee: null };
+    const assignee = await one(`${internalAssignableUserSelect} AND u.id=?`, [assignedToUserId]);
+    if (!assignee)
+        return { status: 400, error: 'Active internal assignee not found' };
+    if (!assignmentScopeAllowsUser(user, assignee))
+        return { status: 403, error: 'You can only assign jobs to employees in your assignment scope' };
+    return { assignee };
+};
+const validateDepartmentForUser = async (user, departmentId) => {
+    if (!departmentId)
+        return { departmentId: null };
+    const department = await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId]);
+    if (!department)
+        return { status: 400, error: 'Active department not found' };
+    if (!hasGlobalAssignmentScope(user) && Number(department.id) !== Number(user.departmentId || 0))
+        return { status: 403, error: 'You can only assign jobs within your department' };
+    return { departmentId: department.id };
 };
 const loadVisibleJobs = user => {
     if (canViewAllJobs(user))
@@ -369,7 +431,7 @@ app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
 });
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
-    const includeInternalJobFields = user.accountType !== 'client';
+    const includeInternalJobFields = user.accountType !== 'client' || canAssignJobs(user);
     const canReadJobs = hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
     const canReadSupport = hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
     const canReadSettings = hasAnyPermission(user, ['settings.view', 'settings.edit']);
@@ -380,16 +442,9 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         : canManageSupport(user)
             ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
             : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    const assignees = canAssignJobs(user)
-        ? await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
-            FROM users u
-            LEFT JOIN departments d ON d.id=u.department_id
-            LEFT JOIN designations ds ON ds.id=u.designation_id
-            WHERE u.status='active' AND COALESCE(u.account_type,u.role)<>'client'
-            ORDER BY u.name`)
-        : [];
+    const assignees = canAssignJobs(user) ? await loadAssignableUsers(user) : [];
     const departments = canAssignJobs(user) || canViewDepartmentJobs(user)
-        ? await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name")
+        ? await loadAssignableDepartments(user)
         : [];
     const clientOwners = hasPermission(user, 'clients.assign_owner')
         ? await query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
@@ -436,7 +491,7 @@ app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_
     if (!schema.success)
         return res.status(400).json({ error: schema.error.issues[0].message });
     const filters = schema.data;
-    const includeInternalJobFields = req.user.accountType !== 'client';
+    const includeInternalJobFields = req.user.accountType !== 'client' || canAssignJobs(req.user);
     let jobs = (await loadVisibleJobs(req.user)).map(row => mapJob(row, includeInternalJobFields));
     if (filters.search) {
         const needle = filters.search.toLowerCase();
@@ -469,7 +524,7 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
         return res.status(404).json({ error: 'Job not found' });
     if (!canAccessJob(req.user, row))
         return res.status(403).json({ error: 'Job access denied' });
-    const includeInternalJobFields = req.user.accountType !== 'client';
+    const includeInternalJobFields = req.user.accountType !== 'client' || canAssignJobs(req.user);
     const job = mapJob(row, includeInternalJobFields);
     const assignmentHistory = includeInternalJobFields
         ? await query(`SELECT ja.id,ja.job_id jobId,ja.previous_assignee_user_id previousAssigneeUserId,
@@ -495,7 +550,18 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
     res.json({ job, assignmentHistory });
 });
 app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req, res) => {
-    const schema = z.object({ clientId: z.string().optional(), title: z.string().min(2), description: z.string().default(''), category: z.string().min(1), priority: z.enum(['Low', 'Medium', 'High', 'Urgent']), postedBy: z.string().min(2), assetLink: z.string().default('') });
+    const schema = z.object({
+        clientId: z.string().optional(),
+        title: z.string().min(2),
+        description: z.string().default(''),
+        category: z.string().min(1),
+        priority: z.enum(['Low', 'Medium', 'High', 'Urgent']),
+        postedBy: z.string().min(2),
+        assetLink: z.string().default(''),
+        assignedToUserId: z.string().trim().optional().or(z.literal('')),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        assignmentNote: z.string().trim().max(1000).optional().or(z.literal(''))
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -505,13 +571,61 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
         return res.status(400).json({ error: 'Client is required' });
     if (!(await canUseClientForJob(user, clientId)))
         return res.status(403).json({ error: 'You are not allowed to create jobs for this client' });
+    const assignmentFields = ['assignedToUserId', 'departmentId', 'assignmentNote'];
+    const assignmentRequested = assignmentFields.some(key => parsed.data[key] !== undefined);
+    if (assignmentRequested && !canAssignJobs(user))
+        return res.status(403).json({ error: 'Job assignment permission required' });
+    const assignedToUserId = parsed.data.assignedToUserId || null;
+    const requestedDepartmentId = parsed.data.departmentId === undefined ? null : optionalId(parsed.data.departmentId);
+    if (Number.isNaN(requestedDepartmentId))
+        return res.status(400).json({ error: 'Department is invalid' });
+    const assigneeValidation = await validateAssigneeForUser(user, assignedToUserId);
+    if (assigneeValidation.error)
+        return res.status(assigneeValidation.status).json({ error: assigneeValidation.error });
+    const departmentId = requestedDepartmentId || assigneeValidation.assignee?.departmentId || null;
+    const departmentValidation = await validateDepartmentForUser(user, departmentId);
+    if (departmentValidation.error)
+        return res.status(departmentValidation.status).json({ error: departmentValidation.error });
+    const assignmentNote = assignmentRequested ? (parsed.data.assignmentNote || '') : null;
+    const assignmentActivity = assignmentRequested && Boolean(assignedToUserId || departmentValidation.departmentId || assignmentNote);
     const id = 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const now = new Date().toISOString();
     const calculatedHours = calculateHours(await settings(), await categoryLoad(), parsed.data.category, parsed.data.priority);
-    await query(`INSERT INTO jobs (id,client_id,title,description,category,priority,posted_by,created_by_user_id,asset_link,calculated_hours,status,date_posted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`, [id, clientId, parsed.data.title, parsed.data.description, parsed.data.category, parsed.data.priority, parsed.data.postedBy, user.id, parsed.data.assetLink, calculatedHours, now, now]);
-    await audit(user.id, 'create', 'job', id, parsed.data);
+    await transaction(async connection => {
+        await query(`INSERT INTO jobs
+            (id,client_id,title,description,category,priority,posted_by,created_by_user_id,assigned_to_user_id,assigned_by_user_id,department_id,assignment_date,assignment_note,asset_link,calculated_hours,status,date_posted,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`,
+            [
+                id,
+                clientId,
+                parsed.data.title,
+                parsed.data.description,
+                parsed.data.category,
+                parsed.data.priority,
+                parsed.data.postedBy,
+                user.id,
+                assignedToUserId,
+                assignmentActivity ? user.id : null,
+                departmentValidation.departmentId,
+                assignmentActivity ? now : null,
+                assignmentNote,
+                parsed.data.assetLink,
+                calculatedHours,
+                now,
+                now
+            ],
+            connection);
+        if (assignmentActivity) {
+            await query(`INSERT INTO job_assignments
+                (job_id,previous_assignee_user_id,assigned_to_user_id,assigned_by_user_id,previous_department_id,department_id,note,created_at)
+                VALUES (?,?,?,?,?,?,?,?)`,
+                [id, null, assignedToUserId, user.id, null, departmentValidation.departmentId, assignmentNote || '', new Date()],
+                connection);
+        }
+        await audit(user.id, 'create', 'job', id, parsed.data, connection);
+    });
     emitRefresh();
-    res.status(201).json({ job: mapJob(await one('SELECT * FROM jobs WHERE id=?', [id])) });
+    res.status(201).json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [id]), user.accountType !== 'client' || canAssignJobs(user)) });
 });
 app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), async (req, res) => {
     const schema = z.object({
@@ -560,21 +674,17 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
             || parsed.data.assignmentNote !== undefined);
     if (Number.isNaN(departmentId))
         return res.status(400).json({ error: 'Department is invalid' });
-    if (assignedToUserId) {
-        const assignee = await one("SELECT id,account_type FROM users WHERE id=? AND status='active'", [assignedToUserId]);
-        if (!assignee || assignee.account_type === 'client')
-            return res.status(400).json({ error: 'Active internal assignee not found' });
-    }
-    if (departmentId) {
-        const department = await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId]);
-        if (!department)
-            return res.status(400).json({ error: 'Active department not found' });
-    }
+    const assigneeValidation = await validateAssigneeForUser(req.user, assignedToUserId);
+    if (assigneeValidation.error)
+        return res.status(assigneeValidation.status).json({ error: assigneeValidation.error });
+    const departmentValidation = await validateDepartmentForUser(req.user, departmentId);
+    if (departmentValidation.error)
+        return res.status(departmentValidation.status).json({ error: departmentValidation.error });
     const normalizedData = { ...parsed.data };
     if (parsed.data.assignedToUserId !== undefined)
         normalizedData.assignedToUserId = assignedToUserId;
     if (parsed.data.departmentId !== undefined)
-        normalizedData.departmentId = departmentId;
+        normalizedData.departmentId = departmentValidation.departmentId;
     const map = { title: 'title', description: 'description', category: 'category', priority: 'priority', status: 'status', assetLink: 'asset_link', teamOverrideHours: 'team_override_hours', teamOverrideNote: 'team_override_note', assignedToUserId: 'assigned_to_user_id', departmentId: 'department_id', assignmentNote: 'assignment_note' };
     const entries = Object.entries(normalizedData);
     if (!entries.length)
@@ -607,7 +717,7 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
                     assignedToUserId || null,
                     req.user.id,
                     current.department_id || null,
-                    departmentId || null,
+                    departmentValidation.departmentId || null,
                     parsed.data.assignmentNote || '',
                     new Date()
                 ],
@@ -617,7 +727,7 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
         await audit(req.user.id, 'update', 'job', req.params.id, parsed.data, connection);
     });
     emitRefresh();
-    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client') });
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client' || canAssignJobs(req.user)) });
 });
 app.put('/api/settings', requireAuth, requirePermission('settings.edit'), async (req, res) => {
     const schema = z.object({ categories: z.array(z.object({ name: z.string().min(1), baseHours: z.number().positive() })).min(1), capacityPerCategory: z.number().int().positive(), bufferHoursPerExtraJob: z.number().nonnegative(), startHour: z.number().min(0).max(24), endHour: z.number().min(0).max(24), workDays: z.array(z.number().int().min(0).max(6)).min(1) });
