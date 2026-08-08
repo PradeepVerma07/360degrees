@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import { permissions, rolePermissions, roles } from './permissionCatalog.js';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
 const dbHost = configuredDbHost === 'localhost' ? '127.0.0.1' : configuredDbHost;
@@ -64,6 +65,38 @@ export async function transaction(work) {
   } finally {
     connection.release();
   }
+}
+
+async function columnExists(tableName, columnName) {
+  const row = await one(
+    `SELECT COUNT(*) AS count
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?`,
+    [tableName, columnName]
+  );
+  return Number(row?.count || 0) > 0;
+}
+
+async function addColumnIfMissing(tableName, columnName, definition) {
+  if (await columnExists(tableName, columnName))
+    return;
+  await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+}
+
+async function indexExists(tableName, indexName) {
+  const row = await one(
+    `SELECT COUNT(*) AS count
+      FROM INFORMATION_SCHEMA.STATISTICS
+      WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?`,
+    [tableName, indexName]
+  );
+  return Number(row?.count || 0) > 0;
+}
+
+async function addIndexIfMissing(tableName, indexName, definition) {
+  if (await indexExists(tableName, indexName))
+    return;
+  await query(`CREATE INDEX ${indexName} ON ${tableName} ${definition}`);
 }
 
 export async function initialiseDatabase() {
@@ -173,6 +206,9 @@ export async function initialiseDatabase() {
       ON UPDATE CASCADE ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+  await initialiseRbacSchema();
+  await seedRbacDefaults();
+
   await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
   const row = await one('SELECT COUNT(*) AS count FROM clients');
   if (process.env.SEED_DEMO_DATA !== 'false') {
@@ -181,6 +217,186 @@ export async function initialiseDatabase() {
   }
   const adminRow = await one("SELECT COUNT(*) AS count FROM users WHERE role='admin' AND status='active'");
   if (Number(adminRow.count) === 0) await ensureDemoAdmin();
+  await mapExistingUsersToRbac();
+  await ensureEnvironmentSuperAdmin();
+}
+
+async function initialiseRbacSchema() {
+  await query(`CREATE TABLE IF NOT EXISTS roles (
+    id VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(120) NOT NULL,
+    slug VARCHAR(80) NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    level INT NOT NULL DEFAULT 0,
+    role_type ENUM('internal','client') NOT NULL DEFAULT 'internal',
+    is_system TINYINT(1) NOT NULL DEFAULT 0,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_roles_status (status),
+    INDEX idx_roles_type (role_type)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS permissions (
+    id VARCHAR(100) PRIMARY KEY,
+    module VARCHAR(80) NOT NULL,
+    action VARCHAR(80) NOT NULL,
+    label VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_permissions_module (module)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id VARCHAR(50) NOT NULL,
+    permission_id VARCHAR(100) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (role_id, permission_id),
+    CONSTRAINT fk_role_permissions_role FOREIGN KEY (role_id) REFERENCES roles(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_role_permissions_permission FOREIGN KEY (permission_id) REFERENCES permissions(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS user_permission_overrides (
+    user_id VARCHAR(100) NOT NULL,
+    permission_id VARCHAR(100) NOT NULL,
+    effect ENUM('grant','revoke') NOT NULL,
+    created_by VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    PRIMARY KEY (user_id, permission_id),
+    INDEX idx_user_permission_effect (effect),
+    CONSTRAINT fk_user_overrides_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_user_overrides_permission FOREIGN KEY (permission_id) REFERENCES permissions(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS departments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(160) NOT NULL UNIQUE,
+    code VARCHAR(60) NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    created_by VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS designations (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(160) NOT NULL UNIQUE,
+    code VARCHAR(60) NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    hierarchy_level INT NOT NULL DEFAULT 0,
+    status VARCHAR(30) NOT NULL DEFAULT 'active',
+    created_by VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_designations_level (hierarchy_level)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS employee_profiles (
+    user_id VARCHAR(100) PRIMARY KEY,
+    employee_id VARCHAR(80) NULL UNIQUE,
+    joining_date DATE NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_employee_profiles_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query("ALTER TABLE users MODIFY role ENUM('super_admin','admin','employee','client') NOT NULL DEFAULT 'client'");
+  await query('ALTER TABLE support_ticket_messages MODIFY author_role VARCHAR(50) NOT NULL');
+
+  await addColumnIfMissing('users', 'account_type', "ENUM('super_admin','admin','employee','client') NULL AFTER role");
+  await addColumnIfMissing('users', 'role_id', 'VARCHAR(50) NULL AFTER account_type');
+  await addColumnIfMissing('users', 'email', 'VARCHAR(255) NULL AFTER name');
+  await addColumnIfMissing('users', 'phone', 'VARCHAR(60) NULL AFTER email');
+  await addColumnIfMissing('users', 'department_id', 'BIGINT UNSIGNED NULL AFTER client_id');
+  await addColumnIfMissing('users', 'designation_id', 'BIGINT UNSIGNED NULL AFTER department_id');
+  await addColumnIfMissing('users', 'manager_user_id', 'VARCHAR(100) NULL AFTER designation_id');
+  await addColumnIfMissing('users', 'created_by', 'VARCHAR(100) NULL AFTER manager_user_id');
+  await addColumnIfMissing('users', 'last_login', 'DATETIME(3) NULL AFTER created_at');
+  await addColumnIfMissing('users', 'updated_at', 'DATETIME(3) NULL AFTER last_login');
+
+  await addColumnIfMissing('clients', 'contact_name', 'VARCHAR(255) NULL AFTER name');
+  await addColumnIfMissing('clients', 'email', 'VARCHAR(255) NULL AFTER contact_name');
+  await addColumnIfMissing('clients', 'phone', 'VARCHAR(60) NULL AFTER email');
+  await addColumnIfMissing('clients', 'industry', 'VARCHAR(160) NULL AFTER phone');
+  await addColumnIfMissing('clients', 'account_owner_user_id', 'VARCHAR(100) NULL AFTER industry');
+  await addColumnIfMissing('clients', 'created_by', 'VARCHAR(100) NULL AFTER account_owner_user_id');
+  await addColumnIfMissing('clients', 'updated_at', 'DATETIME(3) NULL AFTER created_at');
+
+  await addColumnIfMissing('jobs', 'created_by_user_id', 'VARCHAR(100) NULL AFTER posted_by');
+  await addColumnIfMissing('jobs', 'assigned_to_user_id', 'VARCHAR(100) NULL AFTER created_by_user_id');
+  await addColumnIfMissing('jobs', 'assigned_by_user_id', 'VARCHAR(100) NULL AFTER assigned_to_user_id');
+  await addColumnIfMissing('jobs', 'department_id', 'BIGINT UNSIGNED NULL AFTER assigned_by_user_id');
+  await addColumnIfMissing('jobs', 'assignment_date', 'VARCHAR(40) NULL AFTER department_id');
+  await addColumnIfMissing('jobs', 'assignment_note', 'TEXT NULL AFTER assignment_date');
+
+  await addIndexIfMissing('users', 'idx_users_role_id', '(role_id)');
+  await addIndexIfMissing('users', 'idx_users_account_type', '(account_type)');
+  await addIndexIfMissing('users', 'idx_users_client_id', '(client_id)');
+  await addIndexIfMissing('clients', 'idx_clients_owner', '(account_owner_user_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_assigned_to', '(assigned_to_user_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_created_by', '(created_by_user_id)');
+}
+
+async function seedRbacDefaults() {
+  for (const [id, name, description, level, roleType] of roles) {
+    await query(
+      `INSERT INTO roles (id,name,slug,description,level,role_type,is_system,status)
+        VALUES (?,?,?,?,?,?,1,'active')
+        ON DUPLICATE KEY UPDATE name=VALUES(name),description=VALUES(description),level=VALUES(level),role_type=VALUES(role_type),is_system=1,status='active'`,
+      [id, name, id, description, level, roleType]
+    );
+  }
+
+  for (const [id, module, action, label] of permissions) {
+    await query(
+      `INSERT INTO permissions (id,module,action,label,description)
+        VALUES (?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE module=VALUES(module),action=VALUES(action),label=VALUES(label)`,
+      [id, module, action, label, label]
+    );
+  }
+
+  for (const [roleId, permissionIds] of Object.entries(rolePermissions)) {
+    for (const permissionId of permissionIds) {
+      await query('INSERT IGNORE INTO role_permissions (role_id,permission_id) VALUES (?,?)', [roleId, permissionId]);
+    }
+  }
+
+  await query(`INSERT IGNORE INTO departments (name,code,description,status)
+    VALUES ('Operations','OPS','Default operations department','active')`);
+  await query(`INSERT IGNORE INTO designations (name,code,description,hierarchy_level,status)
+    VALUES ('Team Member','TEAM_MEMBER','Default internal team designation',10,'active')`);
+}
+
+async function mapExistingUsersToRbac() {
+  await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' AND (role_id IS NULL OR role_id='')");
+  await query("UPDATE users SET account_type='client', role_id='client' WHERE role='client' AND (role_id IS NULL OR role_id='')");
+  await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
+}
+
+async function ensureEnvironmentSuperAdmin() {
+  const id = (process.env.SUPER_ADMIN_ID || '').trim();
+  const password = (process.env.SUPER_ADMIN_PASSWORD || '').trim();
+  if (!id)
+    return;
+  const name = (process.env.SUPER_ADMIN_NAME || 'Super Admin').trim();
+  const email = (process.env.SUPER_ADMIN_EMAIL || '').trim() || null;
+  const existing = await one('SELECT id FROM users WHERE id=?', [id]);
+  if (existing) {
+    await query("UPDATE users SET role='super_admin',account_type='super_admin',role_id='super_admin',client_id=NULL,email=COALESCE(?,email),status='active' WHERE id=?", [email, id]);
+    return;
+  }
+  if (!password)
+    return;
+  const hash = await bcrypt.hash(password, 12);
+  await query(`INSERT INTO users (id,name,email,password_hash,role,account_type,role_id,client_id,status,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`, [id, name, email, hash, 'super_admin', 'super_admin', 'super_admin', null, 'active', new Date()]);
 }
 
 async function ensureDemoAdmin() {

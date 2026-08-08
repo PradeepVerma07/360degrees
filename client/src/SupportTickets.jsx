@@ -17,6 +17,7 @@ const allowedExtensions = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', '
 const maxAttachmentBytes = 10 * 1024 * 1024;
 const fmt = value => new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
 
 function bytesToBase64(bytes) {
   let binary = '';
@@ -42,7 +43,7 @@ async function attachmentPayload(file) {
 }
 
 export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
-  const isAdmin = data.user.role === 'admin';
+  const isAdmin = can(data, 'support.manage') || can(data, 'support.view_all');
   const tickets = useMemo(() => data.supportTickets || [], [data.supportTickets]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
@@ -463,10 +464,10 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
       ) : (
         <div className="conversation">
           {messages.map(message => (
-            <article className={`message ${message.authorRole}`} key={message.id}>
+            <article className={`message ${message.authorRole === 'client' ? 'client' : 'admin'}`} key={message.id}>
               <div className="message-head">
                 <b>{message.authorName}</b>
-                <span>{message.authorRole === 'admin' ? 'Admin reply' : 'User reply'} - {fmt(message.createdAt)}</span>
+                <span>{message.authorRole === 'client' ? 'User reply' : 'Team reply'} - {fmt(message.createdAt)}</span>
               </div>
               <p>{message.body}</p>
               {message.attachments?.length > 0 && (
