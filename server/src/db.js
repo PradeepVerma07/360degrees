@@ -67,6 +67,20 @@ export async function transaction(work) {
   }
 }
 
+const cleanEnvValue = value => {
+  const trimmed = (value || '').trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))
+    return trimmed.slice(1, -1);
+  return trimmed;
+};
+
+export const environmentSuperAdminCredentials = () => ({
+  id: cleanEnvValue(process.env.SUPER_ADMIN_ID),
+  password: cleanEnvValue(process.env.SUPER_ADMIN_PASSWORD),
+  name: cleanEnvValue(process.env.SUPER_ADMIN_NAME) || 'Super Admin',
+  email: cleanEnvValue(process.env.SUPER_ADMIN_EMAIL) || null
+});
+
 async function columnExists(tableName, columnName) {
   const row = await one(
     `SELECT COUNT(*) AS count
@@ -376,19 +390,10 @@ async function mapExistingUsersToRbac() {
   await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
 }
 
-async function ensureEnvironmentSuperAdmin() {
-  const cleanEnvValue = value => {
-    const trimmed = (value || '').trim();
-    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'")))
-      return trimmed.slice(1, -1);
-    return trimmed;
-  };
-  const id = cleanEnvValue(process.env.SUPER_ADMIN_ID);
-  const password = cleanEnvValue(process.env.SUPER_ADMIN_PASSWORD);
+export async function ensureEnvironmentSuperAdmin() {
+  const { id, password, name, email } = environmentSuperAdminCredentials();
   if (!id)
     return;
-  const name = cleanEnvValue(process.env.SUPER_ADMIN_NAME) || 'Super Admin';
-  const email = cleanEnvValue(process.env.SUPER_ADMIN_EMAIL) || null;
   const existing = await one('SELECT id FROM users WHERE id=?', [id]);
   if (existing) {
     if (password) {

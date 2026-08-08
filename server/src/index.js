@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server } from 'socket.io';
 import { z } from 'zod';
-import { pool, query, one, transaction, initialiseDatabase, audit } from './db.js';
+import { pool, query, one, transaction, initialiseDatabase, audit, ensureEnvironmentSuperAdmin, environmentSuperAdminCredentials } from './db.js';
 import { requireAuth, signToken } from './auth.js';
 import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
 import { calculateHours } from './tat.js';
@@ -264,6 +264,13 @@ app.post('/api/auth/login', async (req, res) => {
     if (!parsed.success)
         return res.status(400).json({ error: 'ID and password are required' });
     const loginId = parsed.data.id.trim();
+    const envSuperAdmin = environmentSuperAdminCredentials();
+    if (envSuperAdmin.id
+        && envSuperAdmin.password
+        && [envSuperAdmin.id, envSuperAdmin.email].filter(Boolean).includes(loginId)
+        && parsed.data.password === envSuperAdmin.password) {
+        await ensureEnvironmentSuperAdmin();
+    }
     const user = await one("SELECT * FROM users WHERE (id=? OR email=?) AND status='active' ORDER BY id=? DESC LIMIT 1", [loginId, loginId, loginId]);
     if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash)))
         return res.status(401).json({ error: 'Incorrect ID or password' });
