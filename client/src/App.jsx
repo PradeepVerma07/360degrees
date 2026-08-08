@@ -553,10 +553,10 @@ function Clients({ data, reload }) {
                     <tbody>
                         {data.clients.map(client => (
                             <tr key={client.id}>
-                                <td><b>{client.id}</b></td>
-                                <td>{client.name}</td>
-                                <td><span className={`status-pill ${client.status}`}>{client.status}</span></td>
-                                <td>
+                                <td data-label="Client ID"><b>{client.id}</b></td>
+                                <td data-label="Name">{client.name}</td>
+                                <td data-label="Status"><span className={`status-pill ${client.status}`}>{client.status}</span></td>
+                                <td data-label="New Password">
                                     <input
                                         type="password"
                                         value={passwords[client.id] || ''}
@@ -569,7 +569,7 @@ function Clients({ data, reload }) {
                                         aria-label={`New password for ${client.name}`}
                                     />
                                 </td>
-                                <td>
+                                <td data-label="Actions">
                                     <div className="client-actions">
                                         <button type="button" className="primary small" onClick={() => resetPassword(client.id)}>Reset Password</button>
                                         <button type="button" className={client.status === 'active' ? 'danger small' : 'small'} onClick={() => toggleClient(client.id, client.status)}>

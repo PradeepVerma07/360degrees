@@ -382,7 +382,7 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
           <tbody>
             {tickets.map(ticket => (
               <tr key={ticket.ticketNumber}>
-                <td className="select-col">
+                <td className="select-col" data-label="Select">
                   <input
                     className="ticket-check"
                     type="checkbox"
@@ -391,14 +391,14 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
                     aria-label={`Select ticket ${ticket.ticketNumber}`}
                   />
                 </td>
-                <td><b>{ticket.ticketNumber}</b></td>
-                {isAdmin && <td>{ticket.userName}</td>}
-                <td>{ticket.subject}</td>
-                <td>{ticket.category}</td>
-                <td><span className={`priority-badge priority-${slug(ticket.priority)}`}>{ticket.priority}</span></td>
-                <td><StatusBadge status={ticket.status} /></td>
-                <td>{fmt(ticket.createdAt)}</td>
-                <td>
+                <td data-label="Ticket ID"><b>{ticket.ticketNumber}</b></td>
+                {isAdmin && <td data-label="User">{ticket.userName}</td>}
+                <td data-label="Subject">{ticket.subject}</td>
+                <td data-label="Category">{ticket.category}</td>
+                <td data-label="Priority"><span className={`priority-badge priority-${slug(ticket.priority)}`}>{ticket.priority}</span></td>
+                <td data-label="Status"><StatusBadge status={ticket.status} /></td>
+                <td data-label="Created Date">{fmt(ticket.createdAt)}</td>
+                <td data-label="Action">
                   <div className="ticket-row-actions">
                     <button type="button" className="small" onClick={() => onView(ticket.ticketNumber)}>{loadingTicket === ticket.ticketNumber ? 'Opening...' : 'View'}</button>
                     <button type="button" className="danger small" onClick={() => onDeleteOne(ticket.ticketNumber)}>Delete</button>
