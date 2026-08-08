@@ -230,6 +230,8 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 .row-actions button{min-height:36px;text-align:left;padding:0 10px!important;border-radius:8px!important;color:var(--ci-text)}
 .row-actions button:hover{background:#f4f7ff!important}
 .user-modal{width:min(880px,100%)}
+.modal-alert{margin:0 0 12px}
+.field-action{width:max-content;min-height:32px;margin-top:8px;padding:0 10px;border:1px solid var(--ci-border);background:#fff;color:var(--ci-primary);font-size:12px;font-weight:800}
 .modal-kicker{display:block;color:var(--ci-gold);font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;margin-bottom:6px}
 .modal-section{padding:16px 0;border-top:1px solid var(--ci-border)}
 .modal-section:first-of-type{border-top:0;padding-top:4px}

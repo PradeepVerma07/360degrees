@@ -984,7 +984,7 @@ app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.vi
     res.json({ users: rows });
 });
 
-app.post('/api/users', requireAuth, requirePermission('users.create'), async (req, res) => {
+app.post('/api/users', requireAuth, requirePermission('users.create', 'employees.create'), async (req, res) => {
     const parsed = z.object({
         id: z.string().trim().regex(/^[a-zA-Z0-9._-]+$/),
         name: z.string().trim().min(2),
@@ -1004,6 +1004,8 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
     const input = parsed.data;
+    if (!hasPermission(req.user, 'users.create') && input.accountType !== 'employee')
+        return res.status(403).json({ error: 'Employee managers can only create employee accounts' });
     if (input.accountType === 'super_admin' && !isSuperAdmin(req.user))
         return res.status(403).json({ error: 'Only Super Admin can create another Super Admin' });
     if (input.accountType === 'admin' && !isSuperAdmin(req.user))
@@ -1012,6 +1014,8 @@ app.post('/api/users', requireAuth, requirePermission('users.create'), async (re
         return res.status(409).json({ error: 'User ID already exists' });
     if (input.email && await one('SELECT id FROM users WHERE email=?', [input.email]))
         return res.status(409).json({ error: 'Email already exists' });
+    if (input.accountType !== 'client' && input.employeeId && await one('SELECT user_id FROM employee_profiles WHERE employee_id=?', [input.employeeId]))
+        return res.status(409).json({ error: 'Employee ID already exists' });
     const role = await one("SELECT * FROM roles WHERE id=? AND status='active'", [input.roleId]);
     if (!role)
         return res.status(400).json({ error: 'Active role not found' });
@@ -1195,7 +1199,7 @@ app.put('/api/users/:id/permission-overrides', requireAuth, requirePermission('r
     res.json({ ok: true });
 });
 
-app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'users.view'), async (_req, res) => {
+app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), async (_req, res) => {
     const departments = await query('SELECT id,name,code,description,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM departments ORDER BY status,name');
     res.json({ departments });
 });
@@ -1257,7 +1261,7 @@ app.patch('/api/departments/:id', requireAuth, requirePermission('departments.ma
     res.json({ ok: true });
 });
 
-app.get('/api/designations', requireAuth, requirePermission('designations.manage', 'employees.view', 'users.view'), async (_req, res) => {
+app.get('/api/designations', requireAuth, requirePermission('designations.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), async (_req, res) => {
     const designations = await query('SELECT id,name,code,description,hierarchy_level hierarchyLevel,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM designations ORDER BY hierarchy_level DESC,name');
     res.json({ designations });
 });
@@ -1404,7 +1408,7 @@ app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), a
     res.json({ ok: true });
 });
 
-app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view'), async (_req, res) => {
+app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.create', 'employees.edit'), async (_req, res) => {
     const roles = await query(`SELECT id,name,slug,description,level,role_type roleType,is_system isSystem,status,created_at createdAt,updated_at updatedAt
       FROM roles ORDER BY level DESC,name`);
     const rolePermissionRows = await query('SELECT role_id roleId,permission_id permissionId FROM role_permissions');

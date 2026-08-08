@@ -197,7 +197,7 @@ export default function App() {
                         ? _jsx(Clients, { data: data, reload: load })
                         : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
                             ? _jsx(Employees, { data: data, setTab: setTab })
-                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
+                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
                                 ? _jsx(UsersRoles, { data: data, reload: load })
                                 : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
                                     ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
@@ -1257,6 +1257,33 @@ const blankUserForm = {
 };
 const accountTypeLabel = value => ({ super_admin: 'Super Admin', admin: 'Admin', employee: 'Employee', client: 'Client', internal: 'Internal' }[value] || value || '-');
 const statusText = value => value === 'archived' ? 'Inactive' : value === 'inactive' ? 'Inactive' : 'Active';
+const normalized = value => String(value || '').trim().toLowerCase();
+const cleanUserId = value => normalized(value).replace(/[^a-z0-9._-]+/g, '.').replace(/^[._-]+|[._-]+$/g, '') || 'employee';
+const uniqueUserIdFor = (seed, users) => {
+    const base = cleanUserId(seed);
+    const used = new Set(users.map(user => normalized(user.id)));
+    if (!used.has(base))
+        return base;
+    for (let index = 2; index < 1000; index += 1) {
+        const candidate = `${base}${index}`;
+        if (!used.has(candidate))
+            return candidate;
+    }
+    return `${base}${Date.now().toString(36)}`;
+};
+const userConflictFor = (form, users, editingUser = null) => {
+    const currentId = normalized(editingUser?.id);
+    const id = normalized(form.id);
+    const email = normalized(form.email);
+    const employeeId = normalized(form.employeeId);
+    if (id && users.some(user => normalized(user.id) === id && normalized(user.id) !== currentId))
+        return `User ID "${form.id}" already exists. Use another User ID.`;
+    if (email && users.some(user => normalized(user.email) === email && normalized(user.id) !== currentId))
+        return `Email "${form.email}" already exists. Use another email address.`;
+    if (!editingUser && form.accountType !== 'client' && employeeId && users.some(user => normalized(user.employeeId) === employeeId))
+        return `Employee ID "${form.employeeId}" already exists. Use another Employee ID.`;
+    return '';
+};
 
 function UsersRoles({ data, reload }) {
     const [activePanel, setActivePanel] = useState('users');
@@ -1272,6 +1299,7 @@ function UsersRoles({ data, reload }) {
     const [loading, setLoading] = useState(true);
     const [form, setForm] = useState(blankUserForm);
     const [userModalOpen, setUserModalOpen] = useState(false);
+    const [userFormError, setUserFormError] = useState('');
     const [editingUser, setEditingUser] = useState(null);
     const [userSearch, setUserSearch] = useState('');
     const [userFilters, setUserFilters] = useState({ accountType: '', roleId: '', departmentId: '', designationId: '', status: '' });
@@ -1281,11 +1309,11 @@ function UsersRoles({ data, reload }) {
         setError('');
         try {
             const [usersResult, rolesResult, permissionsResult, departmentsResult, designationsResult] = await Promise.all([
-                can(data, 'users.view') ? api.users() : Promise.resolve({ users: [] }),
-                can(data, 'roles.view') ? api.roles() : Promise.resolve({ roles: [] }),
+                canAny(data, ['users.view', 'employees.view']) ? api.users() : Promise.resolve({ users: [] }),
+                canAny(data, ['roles.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.create', 'employees.edit']) ? api.roles() : Promise.resolve({ roles: [] }),
                 canAny(data, ['roles.view', 'roles.manage_permissions']) ? api.permissions() : Promise.resolve({ permissions: [] }),
-                canAny(data, ['departments.manage', 'users.view', 'employees.view']) ? api.departments() : Promise.resolve({ departments: [] }),
-                canAny(data, ['designations.manage', 'users.view', 'employees.view']) ? api.designations() : Promise.resolve({ designations: [] })
+                canAny(data, ['departments.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.departments() : Promise.resolve({ departments: [] }),
+                canAny(data, ['designations.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.designations() : Promise.resolve({ designations: [] })
             ]);
             setUsers(usersResult.users || []);
             setRoles(rolesResult.roles || []);
@@ -1319,15 +1347,17 @@ function UsersRoles({ data, reload }) {
         return role.id !== 'super_admin' || (canManageSuperAdmin && form.accountType === 'super_admin');
     }), [roles, form.accountType, canManageSuperAdmin]);
     const internalUsers = useMemo(() => users.filter(user => user.accountType !== 'client'), [users]);
+    const canCreateFullUsers = can(data, 'users.create');
+    const canCreateEmployeeUsers = can(data, 'employees.create');
     const canEditUsers = canAny(data, ['users.edit', 'employees.edit']);
     const canEditRoles = can(data, 'roles.edit');
     const managementTabs = useMemo(() => [
-        can(data, 'users.view') && ['users', 'Users'],
+        canAny(data, ['users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) && ['users', 'Users'],
         can(data, 'roles.view') && ['roles', 'Roles'],
         can(data, 'roles.manage_permissions') && ['permissions', 'Permissions'],
         can(data, 'departments.manage') && ['departments', 'Departments'],
         can(data, 'designations.manage') && ['designations', 'Designations'],
-        can(data, 'users.view') && ['hierarchy', 'Hierarchy']
+        canAny(data, ['users.view', 'employees.view']) && ['hierarchy', 'Hierarchy']
     ].filter(Boolean), [data]);
     useEffect(() => {
         if (managementTabs.length && !managementTabs.some(([id]) => id === activePanel))
@@ -1382,6 +1412,7 @@ function UsersRoles({ data, reload }) {
     const openUserModal = (user = null) => {
         setMessage('');
         setError('');
+        setUserFormError('');
         if (user) {
             setEditingUser(user);
             setForm({
@@ -1410,25 +1441,30 @@ function UsersRoles({ data, reload }) {
     };
     const closeUserModal = () => {
         setUserModalOpen(false);
+        setUserFormError('');
         setEditingUser(null);
         setForm({ ...blankUserForm, roleId: roleOptions[0]?.id || '' });
     };
     useEffect(() => {
-        if (!roleOptions.length || userModalOpen)
+        if (userModalOpen)
             return;
         let requestedPanel = '';
         let requestedModal = '';
         try {
             requestedPanel = sessionStorage.getItem('ci360-users-panel') || '';
             requestedModal = sessionStorage.getItem('ci360-open-user-modal') || '';
-            sessionStorage.removeItem('ci360-users-panel');
-            sessionStorage.removeItem('ci360-open-user-modal');
         }
         catch { }
-        if (requestedPanel && managementTabs.some(([id]) => id === requestedPanel))
+        if (requestedPanel && managementTabs.some(([id]) => id === requestedPanel)) {
             setActivePanel(requestedPanel);
+            try { sessionStorage.removeItem('ci360-users-panel'); }
+            catch { }
+        }
         if (requestedModal === 'employee') {
+            if (!roleOptions.length)
+                return;
             setEditingUser(null);
+            setUserFormError('');
             setForm({
                 ...blankUserForm,
                 accountType: 'employee',
@@ -1436,10 +1472,23 @@ function UsersRoles({ data, reload }) {
             });
             setActivePanel('users');
             setUserModalOpen(true);
+            try { sessionStorage.removeItem('ci360-open-user-modal'); }
+            catch { }
         }
     }, [managementTabs, roleOptions, userModalOpen]);
     const saveUser = async event => {
         event.preventDefault();
+        setUserFormError('');
+        setError('');
+        const duplicateMessage = userConflictFor(form, users, editingUser);
+        if (duplicateMessage) {
+            setUserFormError(duplicateMessage);
+            return;
+        }
+        if (!editingUser && !canCreateFullUsers && form.accountType !== 'employee') {
+            setUserFormError('You can create employee accounts only.');
+            return;
+        }
         try {
             if (editingUser) {
                 const patch = {
@@ -1469,7 +1518,7 @@ function UsersRoles({ data, reload }) {
             await reload?.();
         }
         catch (err) {
-            setError(err.message);
+            setUserFormError(err.message);
         }
     };
     const createRole = async event => {
@@ -1518,7 +1567,7 @@ function UsersRoles({ data, reload }) {
                     <h2>Users & Roles</h2>
                     <p>Manage users, roles, permissions, departments, designations and organizational access.</p>
                 </div>
-                {can(data, 'users.create') && <button type="button" className="overview-submit-button" onClick={() => openUserModal()}><DashboardIcon name="plus" />Add User</button>}
+                {canAny(data, ['users.create', 'employees.create']) && <button type="button" className="overview-submit-button" onClick={() => openUserModal()}><DashboardIcon name="plus" />{canCreateFullUsers ? 'Add User' : 'Add Employee'}</button>}
             </div>
             {message && <div className="alert success">{message}</div>}
             {error && <div className="alert error">{error}</div>}
@@ -1538,11 +1587,15 @@ function UsersRoles({ data, reload }) {
                             </div>
                             <button type="button" className="icon-button" aria-label="Close user form" onClick={closeUserModal}>x</button>
                         </div>
+                        {userFormError && <div className="alert error modal-alert">{userFormError}</div>}
                         <div className="modal-section">
                             <h3>Personal Information</h3>
                             <div className="row">
-                                <label>User ID<input required disabled={Boolean(editingUser)} value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
-                                <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
+                                <label>User ID
+                                    <input required disabled={Boolean(editingUser)} value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} />
+                                    {!editingUser && userConflictFor({ ...form, email: '', employeeId: '' }, users) && <button type="button" className="field-action" onClick={() => setForm(current => ({ ...current, id: uniqueUserIdFor(current.id || current.name, users) }))}>Use available ID</button>}
+                                </label>
+                                <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value, id: !editingUser && !form.id ? uniqueUserIdFor(event.target.value, users) : form.id })} /></label>
                             </div>
                             <div className="row">
                                 <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
@@ -1553,11 +1606,11 @@ function UsersRoles({ data, reload }) {
                             <h3>Account</h3>
                             <div className="row">
                                 <label>Account Type
-                                    <select disabled={Boolean(editingUser)} value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
+                                    <select disabled={Boolean(editingUser) || (!canCreateFullUsers && canCreateEmployeeUsers)} value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
                                         <option value="employee">Employee</option>
-                                        {canManageSuperAdmin && <option value="admin">Admin</option>}
-                                        <option value="client">Client</option>
-                                        {canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
+                                        {canCreateFullUsers && canManageSuperAdmin && <option value="admin">Admin</option>}
+                                        {canCreateFullUsers && <option value="client">Client</option>}
+                                        {canCreateFullUsers && canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
                                     </select>
                                 </label>
                                 <label>Role
