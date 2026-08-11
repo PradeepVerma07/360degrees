@@ -270,6 +270,11 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 @media(max-width:900px){.overview-workload-grid{grid-template-columns:1fr}.management-stats-users{grid-template-columns:repeat(2,minmax(0,1fr))}.user-filter-bar{grid-template-columns:1fr 1fr}}
 @media(max-width:700px){.management-stats-users{grid-template-columns:1fr}.user-filter-bar{grid-template-columns:1fr}.dashboard-shell .management-table,.dashboard-shell .management-table tbody,.dashboard-shell .management-table tr,.dashboard-shell .management-table td{display:block;width:100%;min-width:0}.dashboard-shell .management-table thead{display:none}.dashboard-shell .management-table tr{margin:0 0 12px;padding:14px;border:1px solid var(--ci-border);border-radius:14px;background:var(--ci-card);box-shadow:0 4px 16px rgba(16,32,68,.05)}.dashboard-shell .management-table td{display:grid;grid-template-columns:minmax(104px,36%) minmax(0,1fr);gap:10px;align-items:center;padding:9px 0;border:0;overflow-wrap:anywhere}.dashboard-shell .management-table td+td{border-top:1px solid var(--ci-border)}.dashboard-shell .management-table td:before{content:attr(data-label);color:var(--ci-muted);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.row-actions div{position:static;width:100%;margin-top:8px;box-shadow:none}.hierarchy-person{grid-template-columns:34px minmax(0,1fr)}.hierarchy-person em{grid-column:2}.overview-workload-row{grid-template-columns:1fr 38px}.overview-workload-meter{grid-column:1/-1;grid-row:2}}
 
+/* Role login route polish */
+.auth-logo-icon-only,.auth-mobile-logo .auth-logo-icon-only{background:transparent!important;border-radius:0!important;box-shadow:none!important}
+.auth-story .auth-logo-icon-only,.auth-mobile-logo .auth-logo-icon-only{width:auto;height:auto;padding:0}
+.auth-story .auth-logo-icon-only img,.auth-mobile-logo .auth-logo-icon-only img{width:54px;height:54px}
+
 /* Role-specific portals */
 .auth-portal-switcher{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px;padding:5px;border:1px solid #e4e7ec;border-radius:14px;background:#f7f9fd}
 .auth-portal-switcher button{min-height:38px;border:0;border-radius:10px;background:transparent;color:#667085;font-size:13px;font-weight:900}
