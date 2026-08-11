@@ -276,9 +276,6 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 .auth-story .auth-logo-icon-only img,.auth-mobile-logo .auth-logo-icon-only img{width:54px;height:54px}
 
 /* Role-specific portals */
-.auth-portal-switcher{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 18px;padding:5px;border:1px solid #e4e7ec;border-radius:14px;background:#f7f9fd}
-.auth-portal-switcher button{min-height:38px;border:0;border-radius:10px;background:transparent;color:#667085;font-size:13px;font-weight:900}
-.auth-portal-switcher button.active{background:#0f2346;color:#fff;box-shadow:0 8px 20px rgba(15,35,70,.16)}
 .auth-team .auth-story{background:#0d3f39}.auth-client .auth-story{background:#3d2f12}
 .auth-team .auth-kicker,.auth-team .text-button:hover,.auth-team .auth-footnote a:hover{color:#198754}
 .auth-client .auth-kicker,.auth-client .text-button:hover,.auth-client .auth-footnote a:hover{color:#c58a00}
