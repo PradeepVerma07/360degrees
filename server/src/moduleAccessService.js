@@ -21,6 +21,7 @@ const moduleDescriptions = {
   users: 'Users, roles, permissions and hierarchy',
   productivity: 'Productivity analytics, targets, account rosters and salary-private efficiency',
   support: 'Support tickets and conversations',
+  chat: 'Internal employee team chat',
   notifications: 'Workflow notifications and assignment alerts',
   profile: 'Personal account details',
   audit: 'Security and activity history',
@@ -38,6 +39,7 @@ const moduleIcons = {
   users: 'shield',
   productivity: 'total',
   support: 'support',
+  chat: 'chat',
   notifications: 'bell',
   profile: 'users',
   audit: 'document',
@@ -407,7 +409,7 @@ async function triggerMatches(user, trigger) {
     return Number(row?.count || 0) > 0;
   }
   if (trigger.triggerType === 'support_ticket_assigned') {
-    const row = await one("SELECT COUNT(*) count FROM support_tickets WHERE status NOT IN ('Resolved','Closed') AND (user_id=? OR client_id=?)", [user.id, user.clientId || '']);
+    const row = await one("SELECT COUNT(*) count FROM support_tickets WHERE status NOT IN ('Resolved','Closed') AND (user_id=? OR assigned_to_user_id=? OR client_id=?)", [user.id, user.id, user.clientId || '']);
     return Number(row?.count || 0) > 0;
   }
   return false;

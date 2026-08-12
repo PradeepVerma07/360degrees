@@ -4,6 +4,7 @@ import { io } from 'socket.io-client';
 import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
+import TeamChat from './TeamChat';
 import ci360LogoMark from './assets/ci360-logo-mark.png';
 import './styles.css';
 const statusLabels = {
@@ -56,14 +57,15 @@ const knownDashboardTabs = {
     users: 'Users & Roles',
     productivity: 'Productivity Intelligence',
     support: 'Support Tickets',
+    chat: 'Team Chat',
     notifications: 'Notifications',
     profile: 'Profile',
     audit: 'Audit Logs',
     app_settings: 'Settings'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['dispatch', 'Job Dispatch'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['notifications', 'Notifications'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
-    : [['overview', 'Overview'], ['submit', data.user?.accountType === 'client' ? 'Log a Job' : 'Submit a Job'], ['jobs', 'My Jobs'], ['notifications', 'Notifications'], ['support', 'Support Tickets'], ['profile', 'Profile']];
+    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['dispatch', 'Job Dispatch'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['chat', 'Team Chat'], ['notifications', 'Notifications'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
+    : [['overview', 'Overview'], ['submit', data.user?.accountType === 'client' ? 'Log a Job' : 'Submit a Job'], ['jobs', 'My Jobs'], ['notifications', 'Notifications'], ['support', 'Support Tickets'], ...(data.user?.accountType === 'client' ? [] : [['chat', 'Team Chat']]), ['profile', 'Profile']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('reset_token'))
@@ -232,9 +234,11 @@ export default function App() {
                                     ? _jsx(UsersRoles, { data: data, reload: load })
                                     : activeTab === 'productivity' && can(data, 'productivity.view')
                                         ? _jsx(ProductivityIntelligence, { data: data })
-                                        : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
+                                        : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create', 'support.assign'])
                                             ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
-                                            : activeTab === 'notifications' && can(data, 'notifications.view')
+                                            : activeTab === 'chat' && can(data, 'chat.view')
+                                                ? _jsx(TeamChat, { data: data, reload: load })
+                                                : activeTab === 'notifications' && can(data, 'notifications.view')
                                                 ? _jsx(NotificationsPanel, { data: data, reload: load })
                                                 : activeTab === 'profile' && can(data, 'profile.view')
                                                     ? _jsx(ProfilePanel, { data: data })
@@ -406,7 +410,7 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', dispatch: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', productivity: 'total', support: 'support', notifications: 'bell', profile: 'users', audit: 'document', app_settings: 'settings' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', dispatch: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', productivity: 'total', support: 'support', chat: 'chat', notifications: 'bell', profile: 'users', audit: 'document', app_settings: 'settings' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
@@ -418,6 +422,7 @@ const dashboardTabDescriptions = {
     users: 'Roles and access',
     productivity: 'Team intelligence',
     support: 'Help and tickets',
+    chat: 'Internal messages',
     notifications: 'Alerts and updates',
     profile: 'Account details',
     audit: 'Activity history',
@@ -448,6 +453,7 @@ function DashboardIcon({ name }) {
         clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
         users: ['M16 18a4 4 0 0 0-8 0', 'M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M20 18a3.5 3.5 0 0 0-3-3.45', 'M17 5.3a2.6 2.6 0 0 1 0 5.4'],
         support: ['M5 18v-5a7 7 0 0 1 14 0v5', 'M5 18h3v-5H5z', 'M16 18h3v-5h-3z', 'M16 19a4 4 0 0 1-8 0'],
+        chat: ['M4 5h16v11H8l-4 4z', 'M8 9h8', 'M8 13h5'],
         bell: ['M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16z', 'M10 20a2 2 0 0 0 4 0'],
         menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
         chevron: ['M9 6l6 6-6 6'],
@@ -599,7 +605,7 @@ function Overview({ data, setTab }) {
     });
     const completedJobs = [...jobs.filter(isCompletedJob)].sort((a, b) => timestamp(dateForMonth(b)) - timestamp(dateForMonth(a)));
     const canOpenJobs = canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
-    const canOpenSupport = canAny(data, ['support.view_all', 'support.view_own', 'support.create']);
+    const canOpenSupport = canAny(data, ['support.view_all', 'support.view_own', 'support.create', 'support.assign']);
     const canOpenAudit = can(data, 'audit.view');
     const dashboardProfile = dashboardProfileFor(data);
     const now = new Date();

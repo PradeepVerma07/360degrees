@@ -144,5 +144,9 @@ export const api = {
     clearSupportTicketMessages: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}/messages`, { method: 'DELETE' }),
     deleteSupportTicket: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}`, { method: 'DELETE' }),
     deleteSupportTickets: (ticketNumbers) => request('/api/support-tickets/bulk-delete', { method: 'POST', body: JSON.stringify({ ticketNumbers }) }),
-    downloadTicketAttachment: (ticketNumber, attachmentId, fileName) => download(`/api/support-tickets/${ticketNumber}/attachments/${attachmentId}`, fileName)
+    downloadTicketAttachment: (ticketNumber, attachmentId, fileName) => download(`/api/support-tickets/${ticketNumber}/attachments/${attachmentId}`, fileName),
+    internalChatThreads: () => request('/api/internal-chat'),
+    createInternalChatThread: (data) => request('/api/internal-chat', { method: 'POST', body: JSON.stringify(data) }),
+    getInternalChatThread: (id) => request(`/api/internal-chat/${id}`),
+    replyInternalChatThread: (id, body) => request(`/api/internal-chat/${id}/replies`, { method: 'POST', body: JSON.stringify({ body }) })
 };

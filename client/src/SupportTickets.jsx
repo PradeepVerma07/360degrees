@@ -50,12 +50,18 @@ async function attachmentPayload(file) {
 
 export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
   const isAdmin = can(data, 'support.manage') || can(data, 'support.view_all');
+  const isClient = data.user?.accountType === 'client';
   const canCreateTicket = can(data, 'support.create');
   const canReplyTicket = can(data, 'support.reply');
   const canManageTickets = can(data, 'support.manage');
+  const canAssignTickets = can(data, 'support.assign') || canManageTickets || isAdmin;
+  const canDeleteTickets = canManageTickets || (isClient && can(data, 'support.view_own'));
+  const departments = data.departments || [];
+  const assignees = data.assignees || [];
+  const clientJobs = useMemo(() => (data.jobs || []).filter(job => !['completed', 'cancelled'].includes(job.status)), [data.jobs]);
   const tickets = useMemo(() => data.supportTickets || [], [data.supportTickets]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
+  const [form, setForm] = useState({ subject: '', jobId: '', category: 'Technical Issue', priority: 'Medium', description: '' });
   const [attachment, setAttachment] = useState(null);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -153,7 +159,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
   }, [selected?.ticketNumber, reload]);
 
   const resetForm = () => {
-    setForm({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
+    setForm({ subject: '', jobId: '', category: 'Technical Issue', priority: 'Medium', description: '' });
     setAttachment(null);
     setFormError('');
   };
@@ -277,9 +283,9 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
       <div className="page-title">
         <div>
           <h2>{isAdmin ? 'Support Tickets' : 'My Support Tickets'}</h2>
-          <p className="muted">{isAdmin ? 'Review, reply to, and manage every submitted ticket.' : 'Raise a ticket and track every support conversation in one place.'}</p>
+          <p className="muted">{isAdmin ? 'Assign tickets by department and employee, then keep every conversation in one place.' : isClient ? 'Raise separate tickets for different jobs and track every support conversation.' : 'Reply to client ticket chats assigned to you.'}</p>
         </div>
-        {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>+ Raise Ticket</button>}
+        {canCreateTicket && isClient && <button type="button" className="primary" onClick={() => setShowForm(true)}>+ Raise Ticket</button>}
       </div>
 
       {detailError && !selected && <div className="alert error">{detailError}</div>}
@@ -300,13 +306,17 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
           onDownload={downloadAttachment}
           onClearChat={clearChat}
           onDeleteTicket={deleteTicket}
+          canDelete={canDeleteTickets}
           canReply={canReplyTicket}
           canManage={canManageTickets}
+          canAssign={canAssignTickets}
+          departments={departments}
+          assignees={assignees}
         />
       ) : tickets.length === 0 ? (
         <div className="card empty-state">
           <h3>No support tickets found.</h3>
-          {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>Raise Your First Ticket</button>}
+          {canCreateTicket && isClient && <button type="button" className="primary" onClick={() => setShowForm(true)}>Raise Your First Ticket</button>}
         </div>
       ) : (
         <TicketTable
@@ -320,10 +330,11 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
           onDeleteSelected={deleteSelectedTickets}
           onDeleteOne={deleteTicket}
           onView={openTicket}
+          canDelete={canDeleteTickets}
         />
       )}
 
-      {showForm && canCreateTicket && (
+      {showForm && canCreateTicket && isClient && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="raise-ticket-title">
           <form className="modal-panel ticket-form" onSubmit={submitTicket}>
             <div className="modal-head">
@@ -336,6 +347,12 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
             {formError && <div className="alert error">{formError}</div>}
             <label>Subject
               <input required value={form.subject} onChange={event => setForm({ ...form, subject: event.target.value })} />
+            </label>
+            <label>Related Job
+              <select value={form.jobId} onChange={event => setForm({ ...form, jobId: event.target.value })}>
+                <option value="">General support ticket</option>
+                {clientJobs.map(job => <option value={job.id} key={job.id}>{job.title} - {job.statusLabel || job.status}</option>)}
+              </select>
             </label>
             <div className="row">
               <label>Category
@@ -367,7 +384,7 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
   );
 }
 
-function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTicketsSelected, onToggleTicket, onToggleAll, onDeleteSelected, onDeleteOne, onView }) {
+function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTicketsSelected, onToggleTicket, onToggleAll, onDeleteSelected, onDeleteOne, onView, canDelete }) {
   return (
     <div className="card table-card ticket-list-card">
       <div className="ticket-toolbar">
@@ -375,7 +392,7 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
           <b>{selectedTicketSet.size ? `${selectedTicketSet.size} selected` : `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}`}</b>
           <span>Select tickets to delete multiple chats at once.</span>
         </div>
-        <button type="button" className="danger small" onClick={onDeleteSelected} disabled={!selectedTicketSet.size}>Delete Selected</button>
+        {canDelete && <button type="button" className="danger small" onClick={onDeleteSelected} disabled={!selectedTicketSet.size}>Delete Selected</button>}
       </div>
       <div className="responsive-table">
         <table className="ticket-table">
@@ -387,6 +404,8 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
               <th>Ticket ID</th>
               {isAdmin && <th>User</th>}
               <th>Subject</th>
+              <th>Job</th>
+              <th>Assigned</th>
               <th>Category</th>
               <th>Priority</th>
               <th>Status</th>
@@ -409,6 +428,8 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
                 <td data-label="Ticket ID"><b>{ticket.ticketNumber}</b></td>
                 {isAdmin && <td data-label="User">{ticket.userName}</td>}
                 <td data-label="Subject">{ticket.subject}</td>
+                <td data-label="Job">{ticket.jobTitle || 'General'}</td>
+                <td data-label="Assigned">{ticket.assignedToName || ticket.departmentName || 'Unassigned'}</td>
                 <td data-label="Category">{ticket.category}</td>
                 <td data-label="Priority"><span className={`priority-badge priority-${slug(ticket.priority)}`}>{ticket.priority}</span></td>
                 <td data-label="Status"><StatusBadge status={ticket.status} /></td>
@@ -416,7 +437,7 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
                 <td data-label="Action">
                   <div className="ticket-row-actions">
                     <button type="button" className="small" onClick={() => onView(ticket.ticketNumber)}>{loadingTicket === ticket.ticketNumber ? 'Opening...' : 'View'}</button>
-                    <button type="button" className="danger small" onClick={() => onDeleteOne(ticket.ticketNumber)}>Delete</button>
+                    {canDelete && <button type="button" className="danger small" onClick={() => onDeleteOne(ticket.ticketNumber)}>Delete</button>}
                   </div>
                 </td>
               </tr>
@@ -428,10 +449,13 @@ function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTi
   );
 }
 
-function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, onReply, onUpdate, onDownload, onClearChat, onDeleteTicket, canReply, canManage }) {
+function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, onReply, onUpdate, onDownload, onClearChat, onDeleteTicket, canDelete, canReply, canManage, canAssign, departments, assignees }) {
   const closed = ticket.status === 'Closed';
   const messages = ticket.messages || [];
   const attachments = ticket.attachments || [];
+  const scopedAssignees = ticket.departmentId
+    ? assignees.filter(user => !user.departmentId || Number(user.departmentId) === Number(ticket.departmentId))
+    : assignees;
   return (
     <section className="card ticket-detail ticket-detail-page" role="region" aria-labelledby="ticket-detail-title">
       <div className="modal-head ticket-detail-head">
@@ -442,7 +466,7 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
         </div>
         <div className="ticket-detail-actions">
           {canManage && <button type="button" className="small" onClick={onClearChat}>Clear Chat</button>}
-          <button type="button" className="danger small" onClick={() => onDeleteTicket(ticket.ticketNumber)}>Delete</button>
+          {canDelete && <button type="button" className="danger small" onClick={() => onDeleteTicket(ticket.ticketNumber)}>Delete</button>}
           <button type="button" className="icon-button" aria-label="Close ticket detail" onClick={onClose}>x</button>
         </div>
       </div>
@@ -451,22 +475,42 @@ function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, 
         <div><span>Category</span><b>{ticket.category}</b></div>
         <div><span>Priority</span><b>{ticket.priority}</b></div>
         <div><span>Status</span><StatusBadge status={ticket.status} /></div>
+        <div><span>Related job</span><b>{ticket.jobTitle || 'General support'}</b></div>
+        <div><span>Department</span><b>{ticket.departmentName || 'No department'}</b></div>
+        <div><span>Assigned employee</span><b>{ticket.assignedToName || 'Unassigned'}</b></div>
         <div><span>Created date</span><b>{fmt(ticket.createdAt)}</b></div>
         {isAdmin && <div><span>User</span><b>{ticket.userName}</b></div>}
       </div>
-      {canManage && (
+      {(canManage || canAssign) && (
         <div className="admin-ticket-controls">
-          <label>Status
-            <select value={ticket.status} onChange={event => onUpdate({ status: event.target.value })}>
-              {statuses.map(status => <option key={status}>{status}</option>)}
-            </select>
-          </label>
-          <label>Priority
-            <select value={ticket.priority} onChange={event => onUpdate({ priority: event.target.value })}>
-              {priorities.map(priority => <option key={priority}>{priority}</option>)}
-            </select>
-          </label>
-          <button type="button" className="danger" onClick={() => onUpdate({ status: 'Closed' })} disabled={closed}>Close Ticket</button>
+          {canManage && <label>Status
+              <select value={ticket.status} onChange={event => onUpdate({ status: event.target.value })}>
+                {statuses.map(status => <option key={status}>{status}</option>)}
+              </select>
+            </label>}
+          {canManage && <label>Priority
+              <select value={ticket.priority} onChange={event => onUpdate({ priority: event.target.value })}>
+                {priorities.map(priority => <option key={priority}>{priority}</option>)}
+              </select>
+            </label>}
+          {canAssign && <label>Department
+              <select value={ticket.departmentId || ''} onChange={event => onUpdate({ departmentId: event.target.value, assignedToUserId: '' })}>
+                <option value="">No department</option>
+                {departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}
+              </select>
+            </label>}
+          {canAssign && <label>Assign Employee
+              <select value={ticket.assignedToUserId || ''} onChange={event => onUpdate({ assignedToUserId: event.target.value })}>
+                <option value="">Unassigned</option>
+                {scopedAssignees.map(user => <option value={user.id} key={user.id}>{[user.name, user.designationName || user.roleName, user.departmentName].filter(Boolean).join(' - ')}</option>)}
+              </select>
+            </label>}
+          {canAssign && <label>Assignment Note
+              <input defaultValue={ticket.assignmentNote || ''} onBlur={event => {
+                if (event.target.value !== (ticket.assignmentNote || '')) onUpdate({ assignmentNote: event.target.value });
+              }} placeholder="Optional note for employee" />
+            </label>}
+          {canManage && <button type="button" className="danger" onClick={() => onUpdate({ status: 'Closed' })} disabled={closed}>Close Ticket</button>}
         </div>
       )}
       <h3>Complete conversation</h3>

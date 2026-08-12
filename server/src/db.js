@@ -313,6 +313,12 @@ export async function initialiseDatabase() {
     user_id VARCHAR(100) NOT NULL,
     user_name VARCHAR(255) NOT NULL,
     client_id VARCHAR(100) NULL,
+    job_id VARCHAR(100) NULL,
+    department_id BIGINT UNSIGNED NULL,
+    assigned_to_user_id VARCHAR(100) NULL,
+    assigned_by_user_id VARCHAR(100) NULL,
+    assignment_note TEXT NULL,
+    assigned_at VARCHAR(40) NULL,
     subject VARCHAR(500) NOT NULL,
     category ENUM('Technical Issue','Account Issue','Job Posting Issue','Candidate Issue','Client Issue','Billing Issue','Feature Request','General Support') NOT NULL,
     priority ENUM('Low','Medium','High','Urgent') NOT NULL,
@@ -321,6 +327,9 @@ export async function initialiseDatabase() {
     updated_at VARCHAR(40) NOT NULL,
     closed_at VARCHAR(40) NULL,
     INDEX idx_tickets_user (user_id),
+    INDEX idx_tickets_job (job_id),
+    INDEX idx_tickets_department (department_id),
+    INDEX idx_tickets_assigned_to (assigned_to_user_id),
     INDEX idx_tickets_updated (updated_at),
     CONSTRAINT fk_tickets_user FOREIGN KEY (user_id) REFERENCES users(id)
       ON UPDATE CASCADE ON DELETE RESTRICT
@@ -353,6 +362,35 @@ export async function initialiseDatabase() {
       ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT fk_attachments_message FOREIGN KEY (message_id) REFERENCES support_ticket_messages(id)
       ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS internal_chat_threads (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    subject VARCHAR(500) NOT NULL,
+    department_id BIGINT UNSIGNED NULL,
+    created_by_user_id VARCHAR(100) NOT NULL,
+    last_message_at VARCHAR(40) NOT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    updated_at VARCHAR(40) NOT NULL,
+    INDEX idx_internal_chat_department (department_id),
+    INDEX idx_internal_chat_created_by (created_by_user_id),
+    INDEX idx_internal_chat_last_message (last_message_at),
+    CONSTRAINT fk_internal_chat_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS internal_chat_messages (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    thread_id BIGINT UNSIGNED NOT NULL,
+    author_id VARCHAR(100) NOT NULL,
+    author_name VARCHAR(255) NOT NULL,
+    body LONGTEXT NOT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    INDEX idx_internal_chat_messages_thread (thread_id,created_at),
+    CONSTRAINT fk_internal_chat_messages_thread FOREIGN KEY (thread_id) REFERENCES internal_chat_threads(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_internal_chat_messages_author FOREIGN KEY (author_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
   await initialiseRbacSchema();
@@ -532,6 +570,13 @@ async function initialiseRbacSchema() {
   await addColumnIfMissing('clients', 'account_owner_user_id', 'VARCHAR(100) NULL AFTER industry');
   await addColumnIfMissing('clients', 'created_by', 'VARCHAR(100) NULL AFTER account_owner_user_id');
   await addColumnIfMissing('clients', 'updated_at', 'DATETIME(3) NULL AFTER created_at');
+
+  await addColumnIfMissing('support_tickets', 'job_id', 'VARCHAR(100) NULL AFTER client_id');
+  await addColumnIfMissing('support_tickets', 'department_id', 'BIGINT UNSIGNED NULL AFTER job_id');
+  await addColumnIfMissing('support_tickets', 'assigned_to_user_id', 'VARCHAR(100) NULL AFTER department_id');
+  await addColumnIfMissing('support_tickets', 'assigned_by_user_id', 'VARCHAR(100) NULL AFTER assigned_to_user_id');
+  await addColumnIfMissing('support_tickets', 'assignment_note', 'TEXT NULL AFTER assigned_by_user_id');
+  await addColumnIfMissing('support_tickets', 'assigned_at', 'VARCHAR(40) NULL AFTER assignment_note');
 
   await addColumnIfMissing('jobs', 'created_by_user_id', 'VARCHAR(100) NULL AFTER posted_by');
   await addColumnIfMissing('jobs', 'assigned_to_user_id', 'VARCHAR(100) NULL AFTER created_by_user_id');
@@ -843,6 +888,9 @@ async function initialiseRbacSchema() {
   await addIndexIfMissing('users', 'idx_users_client_id', '(client_id)');
   await addIndexIfMissing('clients', 'idx_clients_owner', '(account_owner_user_id)');
   await addIndexIfMissing('clients', 'idx_clients_created_by', '(created_by)');
+  await addIndexIfMissing('support_tickets', 'idx_tickets_job', '(job_id)');
+  await addIndexIfMissing('support_tickets', 'idx_tickets_department', '(department_id)');
+  await addIndexIfMissing('support_tickets', 'idx_tickets_assigned_to', '(assigned_to_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_assigned_to', '(assigned_to_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_preferred_assignee', '(preferred_assignee_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_created_by', '(created_by_user_id)');
@@ -880,6 +928,11 @@ async function seedRbacDefaults() {
     `DELETE FROM role_permissions
       WHERE role_id='client'
         AND permission_id IN ('jobs.assign','jobs.reassign','jobs.dispatch.view','jobs.dispatch.assign','jobs.dispatch.reassign','jobs.dispatch.claim','jobs.dispatch.override','jobs.dispatch.manage_coordinators')`
+  );
+  await query(
+    `DELETE FROM role_permissions
+      WHERE role_id IN ('team_leader','employee','junior_employee')
+        AND permission_id IN ('support.create','support.view_all','support.manage')`
   );
 
   await query(`INSERT IGNORE INTO departments (name,code,description,status)

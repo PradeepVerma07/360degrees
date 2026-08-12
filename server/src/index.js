@@ -205,6 +205,11 @@ const maxAttachmentBytes = 10 * 1024 * 1024;
 const ticketNumberFor = (id) => `CI360-${String(id).padStart(6, '0')}`;
 const mapTicket = (row) => ({
     ticketNumber: row.ticket_number, userId: row.user_id, userName: row.user_name, clientId: row.client_id,
+    jobId: row.job_id || '', jobTitle: row.job_title || row.jobTitle || '',
+    departmentId: row.department_id || null, departmentName: row.department_name || row.departmentName || '',
+    assignedToUserId: row.assigned_to_user_id || '', assignedToName: row.assigned_to_name || row.assignedToName || '',
+    assignedByUserId: row.assigned_by_user_id || '', assignedByName: row.assigned_by_name || row.assignedByName || '',
+    assignmentNote: row.assignment_note || '', assignedAt: row.assigned_at || '',
     subject: row.subject, category: row.category, priority: row.priority, status: row.status,
     createdAt: row.created_at, updatedAt: row.updated_at, closedAt: row.closed_at
 });
@@ -219,6 +224,7 @@ const canManageCoordinators = user => hasPermission(user, 'jobs.dispatch.manage_
 const canViewAllClients = user => hasPermission(user, 'clients.view_all');
 const canViewOwnedClients = user => hasAnyPermission(user, ['clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.assign_owner']);
 const canManageSupport = user => hasPermission(user, 'support.manage') || hasPermission(user, 'support.view_all');
+const canAssignSupport = user => hasPermission(user, 'support.assign') || canManageSupport(user);
 const clientSelectFields = 'id,name,status,contact_name contactName,email,phone,industry,account_owner_user_id accountOwnerUserId,created_by createdBy,created_at createdAt';
 const cleanCode = value => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
 const cleanSlug = value => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);
@@ -343,8 +349,22 @@ const prepareAttachment = (attachment) => {
         throw new Error('Attachment must be 10 MB or smaller');
     return { fileName, mimeType: attachment.type || 'application/octet-stream', sizeBytes: bytes.length, dataBase64: bytes.toString('base64') };
 };
-const getTicketRow = ticketNumber => one('SELECT * FROM support_tickets WHERE ticket_number=?', [ticketNumber]);
-const canAccessTicket = (user, ticket) => canManageSupport(user) || ticket.user_id === user.id || (user.clientId && ticket.client_id === user.clientId);
+const supportTicketSelect = `SELECT t.*,
+    j.title job_title,
+    d.name department_name,
+    assigned.name assigned_to_name,
+    assigned_by.name assigned_by_name
+  FROM support_tickets t
+  LEFT JOIN jobs j ON j.id=t.job_id
+  LEFT JOIN departments d ON d.id=t.department_id
+  LEFT JOIN users assigned ON assigned.id=t.assigned_to_user_id
+  LEFT JOIN users assigned_by ON assigned_by.id=t.assigned_by_user_id`;
+const getTicketRow = ticketNumber => one(`${supportTicketSelect} WHERE t.ticket_number=?`, [ticketNumber]);
+const canAccessTicket = (user, ticket) => canManageSupport(user)
+    || ticket.user_id === user.id
+    || ticket.assigned_to_user_id === user.id
+    || (canAssignSupport(user) && user.departmentId && Number(ticket.department_id || 0) === Number(user.departmentId))
+    || (user.clientId && ticket.client_id === user.clientId);
 const canAccessJob = (user, job) => canViewAllJobs(user)
     || (user.clientId && job.client_id === user.clientId)
     || job.created_by_user_id === user.id
@@ -352,6 +372,16 @@ const canAccessJob = (user, job) => canViewAllJobs(user)
     || job.preferred_assignee_user_id === user.id
     || (canViewOwnedClients(user) && (job.client_owner_user_id === user.id || job.client_created_by === user.id))
     || (canViewDepartmentJobs(user) && user.departmentId && job.department_id === user.departmentId);
+const validateTicketJobForUser = async (user, jobId) => {
+    if (!jobId)
+        return { job: null };
+    const job = await one(`${jobSelect} WHERE j.id=?`, [jobId]);
+    if (!job)
+        return { status: 400, error: 'Related job not found' };
+    if (!canAccessJob(user, job))
+        return { status: 403, error: 'You cannot raise a ticket for this job' };
+    return { job };
+};
 const canAccessClientRecord = (user, client) => canViewAllClients(user)
     || (user.clientId && client.id === user.clientId)
     || (canViewOwnedClients(user) && (client.account_owner_user_id === user.id || client.created_by === user.id));
@@ -460,6 +490,12 @@ const validateDepartmentForUser = async (user, departmentId) => {
     if (user.accountType !== 'client' && !hasGlobalAssignmentScope(user) && Number(department.id) !== Number(user.departmentId || 0))
         return { status: 403, error: 'You can only assign jobs within your department' };
     return { departmentId: department.id };
+};
+const validateTicketAssigneeForUser = async (user, assignedToUserId) => {
+    const result = await validateAssigneeForUser(user, assignedToUserId);
+    if (result.error)
+        return { ...result, error: result.error.replace('jobs', 'tickets') };
+    return result;
 };
 const loadVisibleJobs = user => {
     if (canViewAllJobs(user))
@@ -1030,6 +1066,86 @@ const ticketDetail = async ticket => {
     }
     return { ...mapTicket(ticket), messages, attachments };
 };
+const mapInternalChatThread = row => ({
+    id: String(row.id),
+    subject: row.subject,
+    departmentId: row.department_id || null,
+    departmentName: row.department_name || '',
+    createdByUserId: row.created_by_user_id,
+    createdByName: row.created_by_name || '',
+    lastMessageAt: row.last_message_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastMessage: row.last_message || ''
+});
+const loadInternalChatThreads = async user => {
+    if (user.accountType === 'client')
+        return [];
+    const params = [];
+    let where = '';
+    if (!hasGlobalAssignmentScope(user)) {
+        if (!user.departmentId)
+            where = 'WHERE t.created_by_user_id=?';
+        else
+            where = 'WHERE t.department_id IS NULL OR t.department_id=? OR t.created_by_user_id=?';
+        if (!user.departmentId)
+            params.push(user.id);
+        else
+            params.push(user.departmentId, user.id);
+    }
+    const rows = await query(`SELECT t.*,
+        d.name department_name,
+        creator.name created_by_name,
+        (
+          SELECT m.body FROM internal_chat_messages m
+          WHERE m.thread_id=t.id
+          ORDER BY m.created_at DESC,m.id DESC
+          LIMIT 1
+        ) last_message
+      FROM internal_chat_threads t
+      LEFT JOIN departments d ON d.id=t.department_id
+      LEFT JOIN users creator ON creator.id=t.created_by_user_id
+      ${where}
+      ORDER BY t.last_message_at DESC,t.id DESC
+      LIMIT 80`, params);
+    return rows.map(mapInternalChatThread);
+};
+const loadVisibleSupportTickets = async user => {
+    if (canManageSupport(user))
+        return query(`${supportTicketSelect} ORDER BY t.updated_at DESC,t.id DESC`);
+    const clauses = ['t.user_id=?', 't.assigned_to_user_id=?'];
+    const params = [user.id, user.id];
+    if (user.clientId) {
+        clauses.push('t.client_id=?');
+        params.push(user.clientId);
+    }
+    if (canAssignSupport(user) && user.departmentId) {
+        clauses.push('t.department_id=?');
+        params.push(user.departmentId);
+    }
+    return query(`${supportTicketSelect} WHERE ${clauses.join(' OR ')} ORDER BY t.updated_at DESC,t.id DESC`, params);
+};
+const getInternalChatThread = id => one(`SELECT t.*,d.name department_name,creator.name created_by_name
+  FROM internal_chat_threads t
+  LEFT JOIN departments d ON d.id=t.department_id
+  LEFT JOIN users creator ON creator.id=t.created_by_user_id
+  WHERE t.id=?`, [id]);
+const canAccessInternalChatThread = (user, thread) => {
+    if (user.accountType === 'client')
+        return false;
+    if (hasGlobalAssignmentScope(user) || thread.created_by_user_id === user.id)
+        return true;
+    if (!thread.department_id)
+        return true;
+    return user.departmentId && Number(user.departmentId) === Number(thread.department_id);
+};
+const internalChatDetail = async thread => {
+    const messages = await query(`SELECT id,thread_id threadId,author_id authorId,author_name authorName,body,created_at createdAt
+      FROM internal_chat_messages
+      WHERE thread_id=?
+      ORDER BY created_at ASC,id ASC`, [thread.id]);
+    return { ...mapInternalChatThread(thread), messages: messages.map(message => ({ ...message, id: String(message.id), threadId: String(message.threadId) })) };
+};
 app.get('/api/health', async (_req, res) => res.status(databaseReady ? 200 : 503).json({
     ok: databaseReady,
     database: databaseReady ? 'ready' : (databaseInitError ? 'error' : 'starting'),
@@ -1073,21 +1189,18 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const visibleModuleIds = new Set((user.modules || []).map(module => module.id));
     const includeInternalJobFields = user.accountType !== 'client';
     const canReadJobs = visibleModuleIds.has('jobs') && hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
-    const canReadSupport = visibleModuleIds.has('support') && hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
+    const canReadSupport = visibleModuleIds.has('support') && hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage', 'support.assign']);
+    const canReadChat = visibleModuleIds.has('chat') && hasPermission(user, 'chat.view') && user.accountType !== 'client';
     const canReadSettings = (visibleModuleIds.has('settings') || visibleModuleIds.has('app_settings')) && hasAnyPermission(user, ['settings.view', 'settings.edit']);
     const canClientCreateJobs = user.accountType === 'client' && visibleModuleIds.has('submit') && hasPermission(user, 'jobs.create');
     const canReadDispatchQueue = visibleModuleIds.has('dispatch') && canViewDispatch(user);
     const jobRows = canReadJobs ? await loadVisibleJobs(user) : [];
     const clients = (user.accountType === 'client' || visibleModuleIds.has('clients') || visibleModuleIds.has('submit')) ? await loadVisibleClients(user) : [];
-    const ticketRows = !canReadSupport
-        ? []
-        : canManageSupport(user)
-            ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
-            : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    const assignees = user.accountType !== 'client' && (canAssignJobs(user) || canDispatchAssign(user) || canDispatchClaim(user))
+    const ticketRows = canReadSupport ? await loadVisibleSupportTickets(user) : [];
+    const assignees = user.accountType !== 'client' && (canAssignJobs(user) || canDispatchAssign(user) || canDispatchClaim(user) || canAssignSupport(user) || canReadChat)
         ? await loadAssignableUsers(user)
         : [];
-    const departments = canClientCreateJobs || canAssignJobs(user) || canViewDepartmentJobs(user) || canViewDispatch(user)
+    const departments = canClientCreateJobs || canAssignJobs(user) || canViewDepartmentJobs(user) || canViewDispatch(user) || canAssignSupport(user) || canReadChat
         ? await loadAssignableDepartments(user)
         : [];
     const clientOwners = hasPermission(user, 'clients.assign_owner')
@@ -1119,7 +1232,8 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         clientOwners,
         notifications: hasPermission(user, 'notifications.view') ? await loadNotifications(user) : [],
         assignmentRequests: await loadAssignmentRequests(user),
-        dispatchQueue: canReadDispatchQueue ? await loadDispatchQueue(user) : []
+        dispatchQueue: canReadDispatchQueue ? await loadDispatchQueue(user) : [],
+        chatThreads: canReadChat ? await loadInternalChatThreads(user) : []
     });
 });
 app.get('/api/job-options', requireAuth, requirePermission('jobs.create'), requireModuleAccess('submit'), async (req, res) => {
@@ -1842,8 +1956,11 @@ app.delete('/api/clients/:id', requireAuth, requirePermission('clients.delete'),
     res.json({ ok: true });
 });
 app.post('/api/support-tickets', requireAuth, requirePermission('support.create'), requireModuleAccess('support'), async (req, res) => {
+    if (req.user.accountType !== 'client')
+        return res.status(403).json({ error: 'Only clients can raise support tickets. Employees can reply to assigned ticket chats.' });
     const schema = z.object({
         subject: z.string().trim().min(3),
+        jobId: z.string().trim().optional().or(z.literal('')),
         category: z.enum(ticketCategories),
         priority: z.enum(ticketPriorities),
         description: z.string().trim().min(3),
@@ -1859,10 +1976,16 @@ app.post('/api/support-tickets', requireAuth, requirePermission('support.create'
         return res.status(400).json({ error: error.message });
     }
     const user = req.user;
+    const ticketJob = await validateTicketJobForUser(user, parsed.data.jobId || '');
+    if (ticketJob.error)
+        return res.status(ticketJob.status).json({ error: ticketJob.error });
+    const job = ticketJob.job;
     const now = new Date().toISOString();
     const ticketNumber = await transaction(async connection => {
-        const ticketInfo = await query(`INSERT INTO support_tickets (ticket_number,user_id,user_name,client_id,subject,category,priority,status,created_at,updated_at) VALUES (NULL,?,?,?,?,?,?,?,?,?)`,
-            [user.id, user.name, user.clientId, parsed.data.subject, parsed.data.category, parsed.data.priority, 'Open', now, now], connection);
+        const ticketInfo = await query(`INSERT INTO support_tickets
+          (ticket_number,user_id,user_name,client_id,job_id,department_id,subject,category,priority,status,created_at,updated_at)
+          VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?)`,
+            [user.id, user.name, user.clientId, job?.id || null, job?.department_id || null, parsed.data.subject, parsed.data.category, parsed.data.priority, 'Open', now, now], connection);
         const ticketId = Number(ticketInfo.insertId);
         const number = ticketNumberFor(ticketId);
         await query('UPDATE support_tickets SET ticket_number=? WHERE id=?', [number, ticketId], connection);
@@ -1873,7 +1996,7 @@ app.post('/api/support-tickets', requireAuth, requirePermission('support.create'
                 [ticketId, Number(messageInfo.insertId), attachment.fileName, attachment.mimeType, attachment.sizeBytes, attachment.dataBase64, now], connection);
         }
         await audit(user.id, 'create', 'support_ticket', number,
-            { subject: parsed.data.subject, category: parsed.data.category, priority: parsed.data.priority, attachment: attachment?.fileName }, connection);
+            { subject: parsed.data.subject, category: parsed.data.category, priority: parsed.data.priority, jobId: job?.id || null, attachment: attachment?.fileName }, connection);
         return number;
     });
     emitRefresh();
@@ -1886,7 +2009,7 @@ app.post('/api/support-tickets/bulk-delete', requireAuth, requirePermission('sup
     const ticketNumbers = [...new Set(parsed.data.ticketNumbers)];
     const placeholders = ticketNumbers.map(() => '?').join(',');
     const rows = await query(`SELECT id,ticket_number,user_id FROM support_tickets WHERE ticket_number IN (${placeholders})`, ticketNumbers);
-    const accessible = rows.filter(ticket => canAccessTicket(req.user, ticket));
+    const accessible = rows.filter(ticket => canManageSupport(req.user) || ticket.user_id === req.user.id);
     if (!accessible.length)
         return res.status(404).json({ error: 'No accessible tickets found' });
     await transaction(async connection => {
@@ -1898,7 +2021,7 @@ app.post('/api/support-tickets/bulk-delete', requireAuth, requirePermission('sup
     emitRefresh();
     res.json({ ok: true, deleted: accessible.length });
 });
-app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.view_all'), requireModuleAccess('support'), async (req, res) => {
+app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.view_all', 'support.assign'), requireModuleAccess('support'), async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
@@ -1935,7 +2058,7 @@ app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermi
         return res.status(400).json({ error: 'This ticket has been closed.' });
     const user = req.user;
     const now = new Date().toISOString();
-    const nextStatus = canManageSupport(user)
+    const nextStatus = user.accountType !== 'client'
         ? (ticket.status === 'Open' ? 'In Progress' : ticket.status)
         : (ticket.status === 'Waiting for User' || ticket.status === 'Resolved' ? 'Open' : ticket.status);
     await transaction(async connection => {
@@ -1947,8 +2070,14 @@ app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermi
     emitRefresh();
     res.status(201).json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
-app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.manage'), requireModuleAccess('support'), async (req, res) => {
-    const parsed = z.object({ status: z.enum(ticketStatuses).optional(), priority: z.enum(ticketPriorities).optional() }).safeParse(req.body);
+app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.manage', 'support.assign'), requireModuleAccess('support'), async (req, res) => {
+    const parsed = z.object({
+        status: z.enum(ticketStatuses).optional(),
+        priority: z.enum(ticketPriorities).optional(),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        assignedToUserId: z.string().trim().optional().or(z.literal('')),
+        assignmentNote: z.string().trim().max(1000).optional().or(z.literal(''))
+    }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
     const entries = Object.entries(parsed.data);
@@ -1957,22 +2086,70 @@ app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
+    if (!canAccessTicket(req.user, ticket))
+        return res.status(403).json({ error: 'Ticket access denied' });
     const sets = [];
     const values = [];
-    if (parsed.data.status) {
+    const onlyAssignmentKeys = entries.every(([key]) => ['departmentId', 'assignedToUserId', 'assignmentNote'].includes(key));
+    if (!canManageSupport(req.user) && !onlyAssignmentKeys)
+        return res.status(403).json({ error: 'Ticket management requires support.manage permission' });
+    if ((parsed.data.departmentId !== undefined || parsed.data.assignedToUserId !== undefined || parsed.data.assignmentNote !== undefined) && !canAssignSupport(req.user))
+        return res.status(403).json({ error: 'Support assignment permission required' });
+    if (parsed.data.status && canManageSupport(req.user)) {
         sets.push('status=?');
         values.push(parsed.data.status);
         sets.push('closed_at=?');
         values.push(parsed.data.status === 'Closed' ? new Date().toISOString() : null);
     }
-    if (parsed.data.priority) {
+    if (parsed.data.priority && canManageSupport(req.user)) {
         sets.push('priority=?');
         values.push(parsed.data.priority);
     }
+    if (parsed.data.departmentId !== undefined) {
+        const departmentResult = await validateDepartmentForUser(req.user, optionalId(parsed.data.departmentId));
+        if (departmentResult.error)
+            return res.status(departmentResult.status).json({ error: departmentResult.error });
+        sets.push('department_id=?');
+        values.push(departmentResult.departmentId);
+    }
+    if (parsed.data.assignedToUserId !== undefined) {
+        const assigneeId = parsed.data.assignedToUserId || null;
+        if (assigneeId) {
+            const assigneeResult = await validateTicketAssigneeForUser(req.user, assigneeId);
+            if (assigneeResult.error)
+                return res.status(assigneeResult.status).json({ error: assigneeResult.error });
+            sets.push('assigned_to_user_id=?', 'assigned_by_user_id=?', 'assigned_at=?');
+            values.push(assigneeResult.assignee.id, req.user.id, new Date().toISOString());
+            if (parsed.data.departmentId === undefined) {
+                sets.push('department_id=?');
+                values.push(assigneeResult.assignee.departmentId || ticket.department_id || null);
+            }
+        }
+        else {
+            sets.push('assigned_to_user_id=?', 'assigned_by_user_id=?', 'assigned_at=?');
+            values.push(null, null, null);
+        }
+    }
+    if (parsed.data.assignmentNote !== undefined) {
+        sets.push('assignment_note=?');
+        values.push(parsed.data.assignmentNote || '');
+    }
+    if (!sets.length)
+        return res.status(400).json({ error: 'No permitted changes supplied' });
     sets.push('updated_at=?');
     values.push(new Date().toISOString());
-    await query(`UPDATE support_tickets SET ${sets.join(',')} WHERE id=?`, [...values, ticket.id]);
-    await audit(req.user.id, 'update', 'support_ticket', ticket.ticket_number, parsed.data);
+    await transaction(async connection => {
+        await query(`UPDATE support_tickets SET ${sets.join(',')} WHERE id=?`, [...values, ticket.id], connection);
+        if (parsed.data.assignedToUserId) {
+            await notifyUser(parsed.data.assignedToUserId, {
+                title: 'Support ticket assigned',
+                body: `${ticket.ticket_number} is assigned to you.`,
+                type: 'support_ticket_assigned',
+                jobId: ticket.job_id || null
+            }, connection);
+        }
+        await audit(req.user.id, 'update', 'support_ticket', ticket.ticket_number, parsed.data, connection);
+    });
     emitRefresh();
     res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
@@ -1980,7 +2157,7 @@ app.delete('/api/support-tickets/:ticketNumber', requireAuth, requirePermission(
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
-    if (!canAccessTicket(req.user, ticket))
+    if (!(canManageSupport(req.user) || ticket.user_id === req.user.id))
         return res.status(403).json({ error: 'Ticket access denied' });
     await transaction(async connection => {
         await query('DELETE FROM support_tickets WHERE id=?', [ticket.id], connection);
@@ -1989,7 +2166,7 @@ app.delete('/api/support-tickets/:ticketNumber', requireAuth, requirePermission(
     emitRefresh();
     res.json({ ok: true });
 });
-app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireAuth, requirePermission('support.view_own', 'support.view_all'), requireModuleAccess('support'), async (req, res) => {
+app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireAuth, requirePermission('support.view_own', 'support.view_all', 'support.assign'), requireModuleAccess('support'), async (req, res) => {
     const row = await one(`SELECT a.*,t.ticket_number,t.user_id FROM support_ticket_attachments a JOIN support_tickets t ON t.id=a.ticket_id WHERE t.ticket_number=? AND a.id=?`,
         [req.params.ticketNumber, req.params.attachmentId]);
     if (!row)
@@ -2001,6 +2178,74 @@ app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireA
     res.setHeader('Content-Length', String(bytes.length));
     res.setHeader('Content-Disposition', `attachment; filename="${String(row.file_name).replace(/"/g, '')}"`);
     res.send(bytes);
+});
+
+app.get('/api/internal-chat', requireAuth, requirePermission('chat.view'), requireInternalUser, requireModuleAccess('chat'), async (req, res) => {
+    res.json({ threads: await loadInternalChatThreads(req.user) });
+});
+app.post('/api/internal-chat', requireAuth, requirePermission('chat.create'), requireInternalUser, requireModuleAccess('chat'), async (req, res) => {
+    const parsed = z.object({
+        subject: z.string().trim().min(3).max(500),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        body: z.string().trim().min(1).max(5000)
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const departmentResult = await validateDepartmentForUser(req.user, optionalId(parsed.data.departmentId));
+    if (departmentResult.error)
+        return res.status(departmentResult.status).json({ error: departmentResult.error });
+    const now = isoNow();
+    const threadId = await transaction(async connection => {
+        const result = await query(
+            `INSERT INTO internal_chat_threads
+              (subject,department_id,created_by_user_id,last_message_at,created_at,updated_at)
+              VALUES (?,?,?,?,?,?)`,
+            [parsed.data.subject, departmentResult.departmentId, req.user.id, now, now, now],
+            connection
+        );
+        const id = Number(result.insertId);
+        await query(
+            `INSERT INTO internal_chat_messages (thread_id,author_id,author_name,body,created_at)
+              VALUES (?,?,?,?,?)`,
+            [id, req.user.id, req.user.name, parsed.data.body, now],
+            connection
+        );
+        await audit(req.user.id, 'create', 'internal_chat', String(id), { subject: parsed.data.subject, departmentId: departmentResult.departmentId }, connection);
+        return id;
+    });
+    emitRefresh();
+    res.status(201).json({ thread: await internalChatDetail(await getInternalChatThread(threadId)) });
+});
+app.get('/api/internal-chat/:id', requireAuth, requirePermission('chat.view'), requireInternalUser, requireModuleAccess('chat'), async (req, res) => {
+    const thread = await getInternalChatThread(req.params.id);
+    if (!thread)
+        return res.status(404).json({ error: 'Chat thread not found' });
+    if (!canAccessInternalChatThread(req.user, thread))
+        return res.status(403).json({ error: 'Chat access denied' });
+    res.json({ thread: await internalChatDetail(thread) });
+});
+app.post('/api/internal-chat/:id/replies', requireAuth, requirePermission('chat.reply'), requireInternalUser, requireModuleAccess('chat'), async (req, res) => {
+    const parsed = z.object({ body: z.string().trim().min(1).max(5000) }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const thread = await getInternalChatThread(req.params.id);
+    if (!thread)
+        return res.status(404).json({ error: 'Chat thread not found' });
+    if (!canAccessInternalChatThread(req.user, thread))
+        return res.status(403).json({ error: 'Chat access denied' });
+    const now = isoNow();
+    await transaction(async connection => {
+        await query(
+            `INSERT INTO internal_chat_messages (thread_id,author_id,author_name,body,created_at)
+              VALUES (?,?,?,?,?)`,
+            [thread.id, req.user.id, req.user.name, parsed.data.body, now],
+            connection
+        );
+        await query('UPDATE internal_chat_threads SET last_message_at=?,updated_at=? WHERE id=?', [now, now, thread.id], connection);
+        await audit(req.user.id, 'reply', 'internal_chat', String(thread.id), {}, connection);
+    });
+    emitRefresh();
+    res.status(201).json({ thread: await internalChatDetail(await getInternalChatThread(thread.id)) });
 });
 
 app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), requireModuleAccess('users', 'employees'), async (req, res) => {
