@@ -633,3 +633,50 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 @media(max-width:1180px){
   .dashboard-shell .dashboard-menu{display:grid!important}
 }
+
+/* Professional login controls and dark mode */
+.auth-shell{position:relative;isolation:isolate}
+.auth-utility-bar{position:fixed;top:18px;right:22px;z-index:60;display:flex;align-items:center;gap:10px}
+.auth-theme-toggle,.auth-portal-select{height:42px;border:1px solid rgba(15,35,70,.12);border-radius:12px;background:rgba(255,255,255,.92);color:#0f2346;box-shadow:0 10px 28px rgba(15,35,70,.12);backdrop-filter:blur(14px)}
+.auth-theme-toggle{width:42px;padding:0;display:grid;place-items:center}
+.auth-theme-toggle:hover{background:#fff;transform:translateY(-1px)}
+.auth-portal-select{display:grid!important;grid-template-columns:18px minmax(0,1fr);align-items:center;gap:8px;margin:0!important;padding:0 10px!important;text-transform:none!important;letter-spacing:0!important;font-size:13px!important;font-weight:900!important}
+.auth-portal-select .dashboard-icon{width:18px;height:18px;color:#0f2346}
+.auth-portal-select select{height:100%;min-width:104px;border:0;background:transparent;color:#0f2346;font-weight:900;outline:0;cursor:pointer}
+.auth-shell .auth-card{position:relative}
+.auth-shell .auth-form h2{font-family:Inter,"DM Sans",Arial,sans-serif;letter-spacing:0}
+.auth-shell .auth-kicker{letter-spacing:.16em}
+.auth-shell .auth-primary{font-size:15px;font-weight:900}
+.auth-shell.theme-dark{background:#090f1e;color:#edf3ff}
+.auth-shell.theme-dark .auth-panel{background:#090f1e}
+.auth-shell.theme-dark .auth-card{background:#111a2c;border-color:#26334c;box-shadow:0 28px 80px rgba(0,0,0,.32)}
+.auth-shell.theme-dark .auth-form h2,.auth-shell.theme-dark .auth-form label,.auth-shell.theme-dark .text-button,.auth-shell.theme-dark .auth-footnote a{color:#edf3ff}
+.auth-shell.theme-dark .auth-subtitle,.auth-shell.theme-dark .auth-footnote,.auth-shell.theme-dark .remember-row{color:#9aa8bd!important}
+.auth-shell.theme-dark .auth-form input{background:#151f33;border-color:#2b3a55;color:#edf3ff}
+.auth-shell.theme-dark .auth-form input:focus{border-color:#6ea8ff;box-shadow:0 0 0 4px rgba(110,168,255,.16)}
+.auth-shell.theme-dark .password-field button,.auth-shell.theme-dark .google-button,.auth-shell.theme-dark .back-button{background:#151f33;color:#edf3ff;border-color:#2b3a55}
+.auth-shell.theme-dark .auth-theme-toggle,.auth-shell.theme-dark .auth-portal-select{background:rgba(17,26,44,.9);border-color:#2b3a55;color:#edf3ff;box-shadow:0 14px 34px rgba(0,0,0,.28)}
+.auth-shell.theme-dark .auth-portal-select .dashboard-icon,.auth-shell.theme-dark .auth-portal-select select,.auth-shell.theme-dark .auth-theme-toggle{color:#edf3ff}
+.auth-shell.theme-dark .auth-mobile-logo{background:#090f1e;border-color:#1f2c44}
+@media(min-width:721px){
+  .auth-shell .auth-card{padding-top:40px}
+  .auth-shell.auth-admin .auth-story{background:#0f2346}
+}
+@media(max-width:720px){
+  .auth-utility-bar{top:14px;right:14px;gap:8px}
+  .auth-theme-toggle{width:40px;height:40px;border-radius:11px}
+  .auth-portal-select{height:40px;border-radius:11px;padding:0 9px!important}
+  .auth-portal-select select{min-width:92px;font-size:12px}
+  .auth-shell .auth-mobile-logo{min-height:72px;display:flex;align-items:center;padding-right:178px}
+  .auth-shell .auth-card{padding-top:0}
+  .auth-shell .auth-form h2{font-size:28px}
+  .auth-shell .auth-form label{margin-bottom:13px}
+  .auth-shell .auth-form input{height:46px;border-radius:11px}
+}
+@media(max-width:420px){
+  .auth-utility-bar{right:10px}
+  .auth-portal-select{grid-template-columns:16px 74px;gap:6px}
+  .auth-portal-select select{min-width:0;width:74px}
+  .auth-shell .auth-mobile-logo{padding-right:154px}
+  .auth-shell .auth-form h2{font-size:26px}
+}

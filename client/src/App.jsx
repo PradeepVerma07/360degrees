@@ -66,30 +66,30 @@ const passwordChecks = password => ({
 const passwordScore = password => Object.values(passwordChecks(password)).filter(Boolean).length;
 const loginPortalOptions = {
     admin: {
-        label: 'Admin',
-        storyTitle: 'Admin control center.',
-        storyBody: 'Manage clients, users, departments, and delivery work from one secure console.',
-        kicker: 'ADMIN CONSOLE',
-        title: 'Admin Sign In',
-        subtitle: 'Access client, employee, and role management.',
-        foot: 'Users | Roles | Departments'
+        label: 'Login',
+        storyTitle: 'Workspace login.',
+        storyBody: 'Sign in to continue to your secure workspace.',
+        kicker: 'LOGIN',
+        title: 'Login',
+        subtitle: 'Enter your workspace credentials to continue.',
+        foot: 'Secure Workspace'
     },
     team: {
-        label: 'Team',
-        storyTitle: 'Team workdesk.',
+        label: 'Employee',
+        storyTitle: 'Employee workspace.',
         storyBody: 'Track assigned jobs, deadlines, support tickets, and delivery updates.',
-        kicker: 'EMPLOYEE DESK',
-        title: 'Team Sign In',
-        subtitle: 'Open your assigned jobs and team workspace.',
+        kicker: 'EMPLOYEE LOGIN',
+        title: 'Login',
+        subtitle: 'Open your workspace with your employee ID or email.',
         foot: 'Jobs | TAT | Support'
     },
     client: {
         label: 'Client',
         storyTitle: 'Client workspace.',
         storyBody: 'Submit jobs, upload asset links, and follow every request from one place.',
-        kicker: 'CLIENT PORTAL',
-        title: 'Client Sign In',
-        subtitle: 'Submit work requests and check live status.',
+        kicker: 'CLIENT LOGIN',
+        title: 'Login',
+        subtitle: 'Open your client portal with your ID or email.',
         foot: 'Requests | Assets | Updates'
     }
 };
@@ -101,7 +101,7 @@ const loginPortalFromPath = () => {
         return { portal: 'client', locked: true };
     if (firstSegment === 'admin')
         return { portal: 'admin', locked: true };
-    return { portal: 'admin', locked: false };
+    return { portal: 'team', locked: false };
 };
 const dashboardRoleFor = user => {
     if (user?.accountType === 'super_admin' || user?.roleSlug === 'super_admin')
@@ -224,14 +224,39 @@ export default function App() {
 function Login({ onLogin }) {
     const [mode, setMode] = useState(initialAuthMode);
     const [portalRoute] = useState(loginPortalFromPath);
-    const [portal] = useState(portalRoute.portal);
+    const [portal, setPortal] = useState(portalRoute.portal);
+    const [theme, setTheme] = useState(() => {
+        try {
+            return localStorage.getItem('ci360-theme') === 'dark' ? 'dark' : 'light';
+        }
+        catch {
+            return 'light';
+        }
+    });
+    useEffect(() => {
+        try {
+            localStorage.setItem('ci360-theme', theme);
+        }
+        catch { }
+    }, [theme]);
     const portalCopy = loginPortalOptions[portal];
+    const showPortalPicker = portal !== 'admin';
     const showMode = next => {
         setMode(next);
         if (next === 'login')
             window.history.replaceState(null, '', window.location.pathname);
     };
-    return _jsxs("div", { className: `auth-shell auth-${portal}`, children: [
+    return _jsxs("div", { className: `auth-shell auth-${portal} theme-${theme}`, children: [
+            _jsxs("div", { className: "auth-utility-bar", children: [
+                    showPortalPicker && _jsxs("label", { className: "auth-portal-select", "aria-label": "Choose login portal", children: [
+                            _jsx(DashboardIcon, { name: "users" }),
+                            _jsx("select", { value: portal, onChange: event => setPortal(event.target.value), children: [
+                                    _jsx("option", { value: "team", children: "Employee" }),
+                                    _jsx("option", { value: "client", children: "Client" })
+                                ] })
+                        ] }),
+                    _jsx("button", { type: "button", className: "auth-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) })
+                ] }),
             _jsxs("aside", { className: "auth-story", children: [
                     _jsx(AuthLogo, {}),
                     _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: portalCopy.storyTitle }), _jsx("p", { children: portalCopy.storyBody })] }),
@@ -291,7 +316,7 @@ function LoginForm({ onLogin, onMode, portal }) {
             _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
             _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
             error && _jsx("div", { className: "alert error", children: error }),
-            _jsx("button", { className: "primary auth-primary", children: "Log in Securely" }),
+            _jsx("button", { className: "primary auth-primary", children: "Login" }),
             _jsxs("div", { className: "auth-divider", children: [_jsx("span", {}), "OR", _jsx("span", {})] }),
             _jsxs("button", { type: "button", className: "google-button", onClick: () => setError('Google sign in requires OAuth credentials before it can be enabled.'), children: [_jsx(GoogleIcon, {}), "Continue with Google"] }),
             _jsxs("p", { className: "auth-footnote", children: ["Protected by secure authentication.", _jsx("br", {}), _jsx("a", { href: "#privacy", children: "Privacy Policy" }), " \u00B7 ", _jsx("a", { href: "#terms", children: "Terms" })] })
