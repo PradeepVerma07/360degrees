@@ -22,7 +22,7 @@ import {
     shouldRepairDemoLogin
 } from './db.js';
 import { requireAuth, signToken } from './auth.js';
-import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission, requireModuleAccess } from './permissions.js';
+import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission, requireModuleAccess, requireInternalUser } from './permissions.js';
 import {
     deleteModuleAccessRule,
     evaluateModuleAccess,
