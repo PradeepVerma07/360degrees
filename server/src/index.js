@@ -368,7 +368,7 @@ const assignmentScopeAllowsUser = (actor, target) => {
     return targetDesignationLevel <= actorDesignationLevel;
 };
 const loadAssignableUsers = async user => {
-    const rows = await query(`${internalAssignableUserSelect} ORDER BY d.name IS NULL,d.name,ds.hierarchy_level DESC,u.name`);
+    const rows = await query(`${internalAssignableUserSelect} ORDER BY r.level DESC,ds.hierarchy_level DESC,d.name IS NULL,d.name,u.name`);
     return rows.filter(candidate => assignmentScopeAllowsUser(user, candidate));
 };
 const loadAssignableDepartments = async user => {

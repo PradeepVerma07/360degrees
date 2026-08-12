@@ -203,7 +203,7 @@ export default function App() {
         : activeTab === 'submit' && can(data, 'jobs.create')
             ? _jsx(Submit, { data: data, reload: load })
             : activeTab === 'jobs' && canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'])
-                ? _jsx(Jobs, { data: data, reload: load })
+                ? _jsx(Jobs, { data: data, reload: load, setTab: setTab })
                 : activeTab === 'settings' && canAny(data, ['settings.view', 'settings.edit'])
                     ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
                     : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
@@ -718,7 +718,7 @@ function Metric({ label, value }) { return _jsxs("div", { className: "metric", c
 function Submit({ data, reload }) {
     const first = data.settings.categories[0]?.name || '';
     const activeClients = useMemo(() => data.clients.filter(c => c.status === 'active'), [data.clients]);
-    const assignees = data.assignees || [];
+    const assignees = useMemo(() => data.assignees || [], [data.assignees]);
     const departments = data.departments || [];
     const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
     const isClientPortal = data.user.accountType === 'client';
@@ -828,7 +828,7 @@ function Submit({ data, reload }) {
         </form>
     );
 }
-function Jobs({ data, reload }) {
+function Jobs({ data, reload, setTab }) {
     const [category, setCategory] = useState('');
     const [priority, setPriority] = useState('');
     const [client, setClient] = useState('');
@@ -860,6 +860,8 @@ function Jobs({ data, reload }) {
         }
         catch { }
     };
+    const isClientPortal = data.user.accountType === 'client';
+    const canLogJob = can(data, 'jobs.create') && (data.modules || []).some(module => module.id === 'submit');
     const filtered = useMemo(() => {
         const term = query.trim().toLowerCase();
         return data.jobs.filter(job => {
@@ -873,7 +875,14 @@ function Jobs({ data, reload }) {
     }), [filtered]);
     const completed = useMemo(() => filtered.filter(isCompletedJob).sort((a, b) => new Date(dateForMonth(b)).getTime() - new Date(dateForMonth(a)).getTime()), [filtered]);
     return _jsxs(_Fragment, { children: [
-            _jsx(CategoryLoadGrid, { data: data }),
+            isClientPortal && canLogJob && _jsxs("div", { className: "page-title jobs-action-head", children: [
+                    _jsxs("div", { children: [
+                            _jsx("h2", { children: "My Jobs" }),
+                            _jsx("p", { children: "Log a new job and track every request from this dashboard." })
+                        ] }),
+                    _jsxs("button", { type: "button", className: "overview-submit-button", onClick: () => setTab?.('submit'), children: [_jsx(DashboardIcon, { name: "plus" }), "Log a Job"] })
+                ] }),
+            !isClientPortal && _jsx(CategoryLoadGrid, { data: data }),
             _jsxs("div", { className: "filters", children: [
                     _jsx("input", { value: query, onChange: e => setQuery(e.target.value), placeholder: "Search jobs", "aria-label": "Search jobs" }),
                     _jsxs("select", { value: category, onChange: e => setCategory(e.target.value), children: [_jsx("option", { value: "", children: "All categories" }), data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name))] }),

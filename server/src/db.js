@@ -656,7 +656,10 @@ async function seedRbacDefaults() {
   await query(`INSERT IGNORE INTO departments (name,code,description,status)
     VALUES ('Operations','OPS','Default operations department','active')`);
   await query(`INSERT IGNORE INTO designations (name,code,description,hierarchy_level,status)
-    VALUES ('Team Member','TEAM_MEMBER','Default internal team designation',10,'active')`);
+    VALUES
+      ('Team Leader','TEAM_LEADER','Leads internal team members and juniors',60,'active'),
+      ('Team Member','TEAM_MEMBER','Default internal team designation',40,'active'),
+      ('Junior Employee','JUNIOR_EMPLOYEE','Junior internal team designation',20,'active')`);
 }
 
 async function mapExistingUsersToRbac() {
