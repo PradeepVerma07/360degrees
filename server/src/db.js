@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import { permissions, rolePermissions, roles } from './permissionCatalog.js';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
@@ -64,6 +65,69 @@ const productivityServiceSeedRows = [
   ['Paper Advertisement Design', 10],
   ['Other Design Interventions', 12],
   ['Photography / Filming', 24]
+];
+
+const productivityPersonnelSeeds = [
+  { name: 'Pramit', duties: 'Founder, Strategy, Business Development, Content Management', capacity: 48, status: 'active' },
+  { name: 'Aashit', duties: 'Founder, Business Development, Finance', capacity: 48, status: 'active' },
+  { name: 'Urna', duties: 'COO, CS, Content, Operations, Billing, Overall Supervision', capacity: 48, status: 'active' },
+  { name: 'Mansi', duties: 'Strategy, BD, Content, Backup to Pramit, CS', capacity: 48, status: 'active' },
+  { name: 'Chitra', duties: 'CS, SMO', capacity: 48, status: 'active' },
+  { name: 'Arushi', duties: 'SMO', capacity: 48, status: 'active' },
+  { name: 'Manan', duties: 'CS, Creative Lead', capacity: 48, status: 'active' },
+  { name: 'Mary', duties: 'Creatives, Animations, AI, Editing of Reels etc, Storytelling', capacity: 48, status: 'active' },
+  { name: 'Ajay', duties: 'Editing', capacity: 48, status: 'active' },
+  { name: 'Aarya', duties: 'Graphics, Creative', capacity: 48, status: 'active' },
+  { name: 'Aadya', duties: 'Graphics, Creative', capacity: 48, status: 'active' },
+  { name: 'John', duties: 'Websites - All of them, Quality Control', capacity: 48, status: 'active' },
+  { name: 'Meshwa', duties: 'Website Support', capacity: 48, status: 'active' },
+  { name: 'Dhawal', duties: 'Not currently functioning - part of the team', capacity: 48, status: 'inactive' },
+  { name: 'Ekta', duties: 'Accounts', capacity: 48, status: 'active' },
+  { name: 'Khushi', duties: 'Operations (intern, just joined)', capacity: 48, status: 'intern' },
+  { name: 'Reehan', duties: 'Websites - part of (intern)', capacity: 48, status: 'intern' },
+  { name: 'Pradeep', duties: 'Websites', capacity: 48, status: 'active' },
+  { name: 'Harshada', duties: 'SEO', capacity: 48, status: 'active' },
+  { name: 'Arjun', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active' },
+  { name: 'Shalini', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active' },
+  { name: 'External', duties: 'SEO and other requirements, as needed', capacity: 48, status: 'vendor' }
+];
+
+const productivityClientRosterSeeds = [
+  { clientName: 'Vardan', nature: 'Existing', difficulty: 5, comments: 'Maintenance', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Mary', copy: 'Urna', edit: 'Manan', shoot: '', seo: 'Harshada', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Shatayu', nature: 'Existing', difficulty: 4, comments: 'Maintenance', roles: { strategy: 'Urna', cs: 'Chitra', website: 'John', design: 'Mary', copy: 'Chitra, Urna', edit: 'Mary', shoot: '', seo: '', smo: 'Chitra', qc: 'John' } },
+  { clientName: 'Crave', nature: 'Existing', difficulty: 4, comments: 'Maintenance', roles: { strategy: 'Urna', cs: 'Chitra', website: '', design: 'Aadya', copy: 'Chitra, Urna', edit: 'Mary', shoot: '', seo: '', smo: 'Chitra', qc: 'John' } },
+  { clientName: 'VNA', nature: 'Existing', difficulty: 8, comments: 'Website work needs a lot of work as does Reels and content', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John', design: 'Aarya', copy: 'Pramit, Mansi', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Shree Sawa', nature: 'Existing', difficulty: 6, comments: 'Website needs to be completed in 3 weeks', roles: { strategy: 'Mansi', cs: 'Mansi', website: 'John', design: 'Aadya', copy: 'Mansi, Chitra', edit: 'External', shoot: 'External', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Thehrav', nature: 'Existing', difficulty: 4, comments: 'Occasional', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: '', copy: 'Pramit', edit: 'Manan', shoot: 'External', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'LEOZ', nature: 'Existing', difficulty: 6, comments: 'Need to change the website for payment to be made', roles: { strategy: 'Pramit, Mansi', cs: 'Pramit', website: 'John', design: '', copy: '', edit: '', shoot: '', seo: '', smo: '', qc: 'John' } },
+  { clientName: 'PIV', nature: 'Existing', difficulty: 9, comments: 'This will bring in huge pressures with time - loads of shoots, strategy and event', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John, External', design: 'Aarya, Manan', copy: 'Pramit, Mansi', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Chaitanya', nature: 'Existing', difficulty: 7, comments: 'This is also a high pressure time consuming account', roles: { strategy: 'Mansi', cs: 'Chitra', website: 'John', design: 'Aarya', copy: 'Chitra', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Media Buzz', nature: 'Existing', difficulty: 6, comments: 'This is for our sister company', roles: { strategy: 'Chitra', cs: 'Chitra', website: 'John', design: 'Mary', copy: 'Chitra', edit: 'Mary', shoot: 'External', seo: '', smo: 'Chitra', qc: 'John' } },
+  { clientName: 'Times Abroad', nature: 'Existing', difficulty: 3, comments: 'Ongoing', roles: { strategy: 'Mansi, Pramit', cs: 'Mansi', website: '', design: 'Aadya', copy: 'Pramit, Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Times Property', nature: 'Existing', difficulty: 4, comments: 'Ongoing', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Times MSME', nature: 'Existing', difficulty: 8, comments: 'Yet to launch', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Times Mike Drop', nature: 'Existing', difficulty: 8, comments: 'Yet to launch', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Pramit, Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Ananta', nature: 'Existing', difficulty: 7, comments: 'Website just launched - high pressure', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Manan', copy: 'Urna', edit: 'Ajay', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Ananta Aspen', nature: 'Existing', difficulty: 7, comments: 'Website just launched - high pressure', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Manan', copy: 'Urna', edit: 'Ajay', shoot: '', seo: '', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'IUF', nature: 'Existing', difficulty: 2, comments: 'Website launched', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: '', copy: 'Urna, John', edit: '', shoot: '', seo: '', smo: '', qc: 'John' } },
+  { clientName: 'Gaudiya', nature: 'Existing', difficulty: 9, comments: 'In Bengali, English, 3 websites - yet to be made - high pressure and high frequency', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Aarya', copy: 'Pramit, Urna', edit: 'Ajay', shoot: '', seo: 'External', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Brinzz', nature: 'Existing', difficulty: 6, comments: 'Brand approvals delayed due to government regulations. Will come back in full - SMO, website, brand book - by end of June', roles: { strategy: 'Pramit, Mansi, Urna', cs: 'Pramit', website: 'TBD', design: 'TBD', copy: 'Pramit', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'John' } },
+  { clientName: 'Station Satcom', nature: 'Existing', difficulty: 8, comments: 'New website to be delivered by 10th of July - rest in maintenance mode. E-Retail strategy etc to be submitted', roles: { strategy: 'Mansi, Pramit', cs: 'Mansi, Manan', website: 'John', design: 'Manan', copy: 'Mansi, Urna', edit: 'Ajay', shoot: '', seo: 'Harshada', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Gharenu', nature: 'Prospect', difficulty: 8, comments: 'Yet to launch', roles: { strategy: 'Pramit, Mansi, Urna', cs: 'Mansi', website: 'John, External', design: 'Manan', copy: 'Pramit, Mansi, Urna', edit: '', shoot: 'External', seo: 'External', smo: 'Arushi', qc: 'John' } },
+  { clientName: 'Goa', nature: 'Prospect', difficulty: 10, comments: 'In the pitching stage', roles: { strategy: 'Pramit, Arjun', cs: 'Mansi', website: '', design: 'TBD', copy: 'TBD', edit: 'External', shoot: 'External', seo: '', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'The Bottle Shop', nature: 'Prospect', difficulty: 8, comments: '6000 SKU website to be developed on Shopify by John - will take time. SMO as well', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Kumbh Mela', nature: 'Prospect', difficulty: 8, comments: 'Pre-pitch stage', roles: { strategy: 'Pramit, Arjun', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Haryana Projects', nature: 'Prospect', difficulty: 8, comments: 'Pre-pitch stage', roles: { strategy: 'Pramit, Arjun', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'MMCF', nature: 'Prospect', difficulty: 10, comments: 'Discussion stage. When it comes there will be 3 websites and SMO', roles: { strategy: 'Pramit, Aashit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Dhanda.ai', nature: 'Prospect', difficulty: 6, comments: 'Discussion stage', roles: { strategy: 'Pramit, Shalini', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Signo', nature: 'Prospect', difficulty: 8, comments: 'Pre-pitch stage', roles: { strategy: 'Pramit, Shalini', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Tolvv Sign', nature: 'Prospect', difficulty: 7, comments: 'Pre-pitch stage', roles: { strategy: 'Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Matrix Book Cover', nature: 'Prospect', difficulty: 6, comments: 'Pre-pitch stage', roles: { strategy: 'Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Samunnati', nature: 'Prospect', difficulty: 6, comments: 'Follow up stage', roles: { strategy: 'Urna, Pramit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Interview Box', nature: 'Prospect', difficulty: 6, comments: 'Follow up stage', roles: { strategy: 'Pramit, Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'Katrankari', nature: 'Prospect', difficulty: 6, comments: 'Pre-pitch stage', roles: { strategy: 'Pramit, Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } },
+  { clientName: 'IFB', nature: 'Prospect', difficulty: 10, comments: 'Pre-pitch stage', roles: { strategy: 'Pramit, Manan', cs: 'Manan', website: '', design: '', copy: '', edit: '', shoot: '', seo: 'TBD', smo: '', qc: 'TBD' } },
+  { clientName: 'Network 18', nature: 'Prospect', difficulty: 10, comments: 'Quotation submitted', roles: { strategy: 'Pramit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } }
 ];
 
 export async function query(sql, params = [], connection = pool) {
@@ -303,6 +367,7 @@ export async function initialiseDatabase() {
   if (envFlagEnabled(process.env.SEED_DEMO_USERS))
     await seedDemoUsers();
   await mapExistingUsersToRbac();
+  await seedProductivityClientsAndEmployees();
   await seedInitialJobCoordinators();
 }
 
@@ -830,6 +895,179 @@ async function mapExistingUsersToRbac() {
   await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' AND (role_id IS NULL OR role_id='')");
   await query("UPDATE users SET account_type='client', role_id='client' WHERE role='client' AND (role_id IS NULL OR role_id='')");
   await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
+}
+
+const seedSlug = value => String(value || '')
+  .trim()
+  .toLowerCase()
+  .replace(/&/g, 'and')
+  .replace(/[^a-z0-9]+/g, '_')
+  .replace(/^_+|_+$/g, '')
+  .slice(0, 80);
+
+const seedPasswordHashFor = async value => bcrypt.hash(crypto.createHash('sha256').update(`ci360:${value}`).digest('hex').slice(0, 20), 12);
+
+async function getDefaultDepartmentAndDesignation(connection) {
+  const department = await one("SELECT id FROM departments WHERE code='OPS'", [], connection);
+  const teamMember = await one("SELECT id FROM designations WHERE code='TEAM_MEMBER'", [], connection);
+  const teamLeader = await one("SELECT id FROM designations WHERE code='TEAM_LEADER'", [], connection);
+  const junior = await one("SELECT id FROM designations WHERE code='JUNIOR_EMPLOYEE'", [], connection);
+  return { department, teamMember, teamLeader, junior };
+}
+
+function roleForSeedPerson(person) {
+  const text = `${person.name} ${person.duties}`.toLowerCase();
+  if (text.includes('founder') || text.includes('coo') || ['urna', 'mansi'].includes(person.name.toLowerCase()))
+    return 'team_leader';
+  if (person.status === 'intern')
+    return 'junior_employee';
+  return 'employee';
+}
+
+function designationForSeedPerson(person, designations) {
+  const role = roleForSeedPerson(person);
+  if (role === 'team_leader')
+    return designations.teamLeader?.id || designations.teamMember?.id || null;
+  if (role === 'junior_employee')
+    return designations.junior?.id || designations.teamMember?.id || null;
+  return designations.teamMember?.id || null;
+}
+
+function productivityStatusForSeed(status) {
+  if (['inactive', 'intern', 'vendor'].includes(status))
+    return status;
+  return 'active';
+}
+
+function rosterAssignmentsForSeed(roster, userByName) {
+  const assignments = [];
+  for (const [responsibilityKey, rawNames] of Object.entries(roster.roles || {})) {
+    const names = String(rawNames || '').split(',').map(name => name.trim()).filter(Boolean);
+    for (const name of names) {
+      const normalized = name.toLowerCase();
+      if (!name || normalized === 'tbd') {
+        assignments.push({ responsibilityKey, assigneeType: 'tbd', userId: null, externalName: null });
+        continue;
+      }
+      const userId = userByName.get(normalized);
+      if (userId)
+        assignments.push({ responsibilityKey, assigneeType: 'employee', userId, externalName: null });
+      else
+        assignments.push({ responsibilityKey, assigneeType: 'external', userId: null, externalName: name });
+    }
+  }
+  return assignments;
+}
+
+async function seedProductivityClientsAndEmployees() {
+  const now = new Date();
+  await transaction(async connection => {
+    const designations = await getDefaultDepartmentAndDesignation(connection);
+    const userByName = new Map();
+
+    for (const person of productivityPersonnelSeeds) {
+      const id = seedSlug(person.name);
+      const existing = await one(
+        `SELECT id FROM users
+          WHERE (id=? OR LOWER(name)=LOWER(?))
+            AND COALESCE(account_type,role) <> 'client'
+          LIMIT 1`,
+        [id, person.name],
+        connection
+      );
+      const roleId = roleForSeedPerson(person);
+      let userId = existing?.id || id;
+      if (!existing) {
+        const idCollision = await one('SELECT id FROM users WHERE id=? LIMIT 1', [userId], connection);
+        if (idCollision)
+          userId = `employee_${id}`;
+        const passwordHash = await seedPasswordHashFor(userId);
+        await query(
+          `INSERT INTO users
+            (id,name,email,phone,password_hash,role,account_type,role_id,client_id,department_id,designation_id,manager_user_id,status,created_by,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            userId,
+            person.name,
+            `${userId}@ci360.local`,
+            null,
+            passwordHash,
+            'employee',
+            'employee',
+            roleId,
+            null,
+            designations.department?.id || null,
+            designationForSeedPerson(person, designations),
+            null,
+            person.status === 'inactive' ? 'inactive' : 'active',
+            null,
+            now
+          ],
+          connection
+        );
+        await query(
+          `INSERT INTO employee_profiles (user_id,employee_id,joining_date)
+            VALUES (?,?,NULL)
+            ON DUPLICATE KEY UPDATE employee_id=employee_id`,
+          [userId, `CI-${userId.toUpperCase().slice(0, 32)}`],
+          connection
+        );
+      }
+      await query(
+        `INSERT INTO productivity_employee_settings (user_id,weekly_capacity_hours,productivity_status)
+          VALUES (?,?,?)
+          ON DUPLICATE KEY UPDATE weekly_capacity_hours=weekly_capacity_hours,productivity_status=productivity_status`,
+        [userId, person.capacity || 48, productivityStatusForSeed(person.status)],
+        connection
+      );
+      userByName.set(person.name.toLowerCase(), userId);
+    }
+
+    for (const roster of productivityClientRosterSeeds) {
+      const clientId = seedSlug(roster.clientName);
+      const existingClient = await one('SELECT id FROM clients WHERE id=?', [clientId], connection);
+      if (!existingClient) {
+        const passwordHash = await seedPasswordHashFor(`client:${clientId}`);
+        await query(
+          `INSERT INTO clients
+            (id,name,contact_name,email,phone,industry,password_hash,status,account_owner_user_id,created_by,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+          [
+            clientId,
+            roster.clientName,
+            roster.clientName,
+            null,
+            null,
+            roster.nature === 'Prospect' ? 'Prospect Account' : 'Existing Account',
+            passwordHash,
+            'active',
+            null,
+            null,
+            now
+          ],
+          connection
+        );
+      }
+      const existingRoster = await one('SELECT id FROM productivity_account_rosters WHERE client_id=?', [clientId], connection);
+      if (existingRoster)
+        continue;
+      const result = await query(
+        'INSERT INTO productivity_account_rosters (client_id,nature,difficulty,comments) VALUES (?,?,?,?)',
+        [clientId, roster.nature, roster.difficulty, roster.comments || ''],
+        connection
+      );
+      const rosterId = result.insertId;
+      for (const assignment of rosterAssignmentsForSeed(roster, userByName)) {
+        await query(
+          `INSERT INTO productivity_account_roster_assignments
+            (roster_id,responsibility_key,assignee_type,user_id,external_name)
+            VALUES (?,?,?,?,?)`,
+          [rosterId, assignment.responsibilityKey, assignment.assigneeType, assignment.userId, assignment.externalName],
+          connection
+        );
+      }
+    }
+  });
 }
 
 async function seedInitialJobCoordinators() {
