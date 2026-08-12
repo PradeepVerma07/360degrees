@@ -2,15 +2,23 @@
   "name": "CI360 Workspace",
   "short_name": "CI360",
   "description": "CI360 client, team, and admin workspace.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "window-controls-overlay", "browser"],
   "background_color": "#f7f8fc",
   "theme_color": "#061b34",
   "icons": [
     {
-      "src": "/favicon.png",
-      "sizes": "600x600",
+      "src": "/icons/ci360-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/ci360-512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     }

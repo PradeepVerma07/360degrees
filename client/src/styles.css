@@ -433,3 +433,123 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 @media(max-width:980px){.management-header{display:grid;grid-template-columns:1fr;align-items:start}.management-stats-users{grid-template-columns:repeat(2,minmax(0,1fr))}.user-filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}.user-search-field{grid-column:1/-1}}
 @media(max-width:820px){.dashboard-shell .management-table-wrap{overflow:visible;border:0;background:transparent}.dashboard-shell .management-table,.dashboard-shell .management-table tbody,.dashboard-shell .management-table tr,.dashboard-shell .management-table td{display:block;width:100%;min-width:0}.dashboard-shell .management-table thead{display:none}.dashboard-shell .management-table tr{margin:0 0 12px;padding:12px;border:1px solid var(--ci-border);border-radius:10px;background:var(--ci-card);box-shadow:0 4px 16px rgba(16,32,68,.05)}.dashboard-shell .management-table td{display:grid;grid-template-columns:minmax(118px,34%) minmax(0,1fr);align-items:center;gap:10px;padding:8px 0;border:0}.dashboard-shell .management-table td+td{border-top:1px solid var(--ci-border)}.dashboard-shell .management-table td:before{content:attr(data-label);color:var(--ci-muted);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.dashboard-shell .management-table select,.dashboard-shell .management-table input{width:100%}.row-actions div{position:static;width:100%;margin-top:8px;box-shadow:none}}
 @media(max-width:620px){.dashboard-topbar-left strong{font-size:15px}.management-header h2{font-size:20px}.management-stats-users,.user-filter-bar{grid-template-columns:1fr}.management-tabs button{font-size:12px}.dashboard-shell .management-table td{grid-template-columns:1fr;gap:5px}.dashboard-shell .management-table td:before{font-size:9px}.user-cell{grid-template-columns:30px minmax(0,1fr)}.user-cell .dashboard-avatar{width:30px;height:30px}.app-loading{padding:20px}.app-loading-mark{width:78px;height:78px}.app-loading-mark img{width:50px;height:50px}}
+
+/* Dashboard-wide responsive completion pass */
+.dashboard-shell{font-size:13px;line-height:1.45}
+.dashboard-shell h2,.dashboard-shell h3,.dashboard-shell h4{letter-spacing:0}
+.dashboard-shell h2{font-size:clamp(19px,2vw,24px);line-height:1.18}
+.dashboard-shell h3{font-size:clamp(16px,1.5vw,19px);line-height:1.22}
+.dashboard-shell h4{font-size:15px;line-height:1.25}
+.dashboard-shell .muted,.dashboard-shell p,.dashboard-shell small{line-height:1.45}
+.dashboard-shell .dashboard-content{gap:18px}
+.dashboard-shell .dashboard-card,.dashboard-shell .card,.dashboard-shell .table-card,.dashboard-shell .form,.dashboard-shell .ticket-detail-page{border-radius:10px;box-shadow:0 3px 14px rgba(16,32,68,.05)}
+.dashboard-shell .dashboard-card,.dashboard-shell .card{padding:18px}
+.dashboard-shell .dashboard-card-head,.dashboard-shell .page-title,.dashboard-shell .modal-head{gap:14px;margin-bottom:14px}
+.dashboard-shell .dashboard-card-head h3,.dashboard-shell .page-title h2,.dashboard-shell .modal-head h2{margin:0}
+.dashboard-shell .dashboard-card-head p,.dashboard-shell .page-title p,.dashboard-shell .modal-head p{font-size:13px;margin-top:5px}
+.dashboard-shell .primary,.dashboard-shell button,.dashboard-shell .small{border-radius:8px;min-height:38px}
+.dashboard-shell .small{padding:0 11px;font-size:12px;font-weight:800}
+.dashboard-shell .danger{border:1px solid #efc5bd;background:#fff5f3;color:var(--ci-urgent)}
+.dashboard-shell .danger:hover{background:#ffe9e4}
+.dashboard-shell input,.dashboard-shell select,.dashboard-shell textarea{font-size:13px}
+.dashboard-shell .form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;max-width:none}
+.dashboard-shell .form h2,.dashboard-shell .form .alert,.dashboard-shell .form>label,.dashboard-shell .form>.row,.dashboard-shell .form>button{grid-column:1/-1}
+.dashboard-shell .form label,.dashboard-shell .card label,.dashboard-shell .modal-panel label{font-size:11px;font-weight:900;letter-spacing:.04em;color:var(--ci-primary)}
+.dashboard-shell .form input,.dashboard-shell .form select,.dashboard-shell .form textarea,.dashboard-shell .card input,.dashboard-shell .card select,.dashboard-shell .card textarea{margin-top:6px;min-height:40px;padding:9px 11px}
+.dashboard-shell .form textarea,.dashboard-shell .card textarea{min-height:112px}
+.dashboard-shell .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;align-items:end}
+.dashboard-shell .setting-row{display:grid;grid-template-columns:minmax(180px,1fr) 120px auto;gap:10px;align-items:center;margin-bottom:10px}
+.dashboard-shell .filters,.dashboard-shell .dashboard-filter-row{display:grid;grid-template-columns:minmax(220px,1.2fr) repeat(auto-fit,minmax(150px,.8fr));gap:10px;align-items:center;margin-bottom:16px}
+.dashboard-shell .filters input,.dashboard-shell .filters select,.dashboard-shell .filters button,.dashboard-shell .dashboard-filter-row select{width:100%;min-width:0;height:40px;margin:0;font-size:13px}
+.dashboard-shell .load-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px}
+.dashboard-shell .load{min-width:0;border-radius:10px;padding:12px}
+.dashboard-shell .load b{font-size:13px}
+.dashboard-shell .load span{font-size:11px}
+.dashboard-shell .jobs{display:grid;gap:12px}
+.dashboard-shell .job{display:grid;gap:11px;border-radius:10px;padding:16px}
+.dashboard-shell .job-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:start}
+.dashboard-shell .job h3{font-size:15px;line-height:1.25;margin:0 0 5px}
+.dashboard-shell .job-head p,.dashboard-shell .due,.dashboard-shell .team-note{font-size:11px;line-height:1.45}
+.dashboard-shell .description{font-size:13px;line-height:1.5}
+.dashboard-shell .badges{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.dashboard-shell .badge,.dashboard-shell .status-badge,.dashboard-shell .priority-badge{font-size:10px;padding:4px 8px;line-height:1.2}
+.dashboard-shell .editbar,.dashboard-shell .job-editbar{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:8px;align-items:center;margin-top:2px}
+.dashboard-shell .editbar input,.dashboard-shell .editbar select,.dashboard-shell .editbar button{height:36px;font-size:12px;min-width:0}
+.dashboard-shell .client-table-wrap,.dashboard-shell .responsive-table,.dashboard-shell .management-table-wrap{border:1px solid var(--ci-border);border-radius:10px;background:var(--ci-card);overflow:auto;-webkit-overflow-scrolling:touch}
+.dashboard-shell .client-table,.dashboard-shell .ticket-table,.dashboard-shell .management-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.dashboard-shell .client-table th,.dashboard-shell .client-table td,.dashboard-shell .ticket-table th,.dashboard-shell .ticket-table td,.dashboard-shell .management-table th,.dashboard-shell .management-table td{padding:9px 10px;line-height:1.3;vertical-align:middle}
+.dashboard-shell .client-table th,.dashboard-shell .ticket-table th,.dashboard-shell .management-table th{font-size:10px;letter-spacing:.06em;background:#f6f8fc;color:var(--ci-muted)}
+.dashboard-shell .client-table input,.dashboard-shell .client-table select,.dashboard-shell .ticket-table input,.dashboard-shell .ticket-table select,.dashboard-shell .management-table input,.dashboard-shell .management-table select{height:34px;font-size:12px;border-radius:7px}
+.dashboard-shell .client-actions,.dashboard-shell .ticket-row-actions,.dashboard-shell .ticket-detail-actions{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.dashboard-shell .client-actions button,.dashboard-shell .ticket-row-actions button{min-height:32px}
+.dashboard-shell .management-table{min-width:1100px;table-layout:fixed}
+.dashboard-shell .management-table .col-name{width:190px}
+.dashboard-shell .management-table .col-email{width:220px}
+.dashboard-shell .management-table .col-accountType{width:96px}
+.dashboard-shell .management-table .col-roleName,.dashboard-shell .management-table .col-departmentName,.dashboard-shell .management-table .col-designationName,.dashboard-shell .management-table .col-managerName{width:120px}
+.dashboard-shell .management-table .col-status{width:82px}
+.dashboard-shell .management-table .col-lastLogin{width:120px}
+.dashboard-shell .management-table .col-actions{width:102px}
+.dashboard-shell .management-tabs{display:flex;flex-wrap:wrap;gap:6px}
+.dashboard-shell .management-tabs button{flex:1 1 132px;white-space:nowrap}
+.dashboard-shell .system-settings-grid,.dashboard-shell .permission-group>div{grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr))}
+.dashboard-shell .support-page{display:grid;gap:14px}
+.dashboard-shell .ticket-toolbar{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding:12px}
+.dashboard-shell .ticket-meta{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.dashboard-shell .conversation{gap:10px}
+.dashboard-shell .message{border-radius:10px;padding:12px}
+.dashboard-shell .reply-composer{padding:14px}
+.dashboard-shell .reply-composer-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:start}
+.dashboard-shell .reply-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.dashboard-shell.role-super_admin .dashboard-topbar-left span{background:#6f42c1;color:#fff}
+.dashboard-shell.role-admin .dashboard-topbar-left span{background:#006cff;color:#fff}
+.dashboard-shell.role-employee .dashboard-topbar-left span{background:#198754;color:#fff}
+.dashboard-shell.role-client .dashboard-topbar-left span{background:#c58a00;color:#fff}
+.dashboard-shell.role-super_admin .overview-reference-head span{background:#6f42c1}
+.dashboard-shell.role-admin .overview-reference-head span{background:#006cff}
+.dashboard-shell.role-employee .overview-reference-head span{background:#198754}
+.dashboard-shell.role-client .overview-reference-head span{background:#c58a00}
+.dashboard-topbar-left span{display:inline-flex;width:max-content;max-width:100%;border-radius:999px;padding:3px 8px;font-size:10px;letter-spacing:.06em}
+.dashboard-shell.theme-dark .client-table th,.dashboard-shell.theme-dark .ticket-table th,.dashboard-shell.theme-dark .management-table th{background:#101827}
+@media(max-width:1180px){
+  .dashboard-shell .dashboard-content{padding:18px}
+  .dashboard-search{width:min(360px,34vw)}
+  .dashboard-shell .overview-metric-row{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:860px){
+  .dashboard-shell .dashboard-content{padding:16px}
+  .dashboard-topbar{gap:10px}
+  .dashboard-search{display:none}
+  .dashboard-shell .dashboard-card,.dashboard-shell .card{padding:16px}
+  .dashboard-shell .job-head{grid-template-columns:1fr}
+  .dashboard-shell .badges{justify-content:flex-start}
+  .dashboard-shell .setting-row{grid-template-columns:1fr}
+}
+@media(max-width:720px){
+  .dashboard-shell .form,.dashboard-shell .row,.dashboard-shell .filters,.dashboard-shell .dashboard-filter-row{grid-template-columns:1fr}
+  .dashboard-shell .client-table-wrap,.dashboard-shell .responsive-table,.dashboard-shell .management-table-wrap{overflow:visible;border:0;background:transparent}
+  .dashboard-shell .client-table,.dashboard-shell .ticket-table,.dashboard-shell .management-table,.dashboard-shell .client-table tbody,.dashboard-shell .ticket-table tbody,.dashboard-shell .management-table tbody,.dashboard-shell .client-table tr,.dashboard-shell .ticket-table tr,.dashboard-shell .management-table tr,.dashboard-shell .client-table td,.dashboard-shell .ticket-table td,.dashboard-shell .management-table td{display:block;width:100%;min-width:0}
+  .dashboard-shell .client-table thead,.dashboard-shell .ticket-table thead,.dashboard-shell .management-table thead{display:none}
+  .dashboard-shell .client-table tr,.dashboard-shell .ticket-table tr,.dashboard-shell .management-table tr{margin:0 0 11px;padding:12px;border:1px solid var(--ci-border);border-radius:10px;background:var(--ci-card);box-shadow:0 3px 14px rgba(16,32,68,.05)}
+  .dashboard-shell .client-table td,.dashboard-shell .ticket-table td,.dashboard-shell .management-table td{display:grid;grid-template-columns:minmax(98px,34%) minmax(0,1fr);gap:9px;align-items:center;padding:8px 0;border:0}
+  .dashboard-shell .client-table td+td,.dashboard-shell .ticket-table td+td,.dashboard-shell .management-table td+td{border-top:1px solid var(--ci-border)}
+  .dashboard-shell .client-table td:before,.dashboard-shell .ticket-table td:before,.dashboard-shell .management-table td:before{content:attr(data-label);color:var(--ci-muted);font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}
+  .dashboard-shell .client-actions,.dashboard-shell .ticket-row-actions,.dashboard-shell .ticket-detail-actions,.dashboard-shell .modal-actions,.dashboard-shell .reply-actions{display:grid;grid-template-columns:1fr;width:100%}
+  .dashboard-shell .client-actions button,.dashboard-shell .ticket-row-actions button,.dashboard-shell .ticket-detail-actions button,.dashboard-shell .modal-actions button,.dashboard-shell .reply-actions button{width:100%}
+  .dashboard-shell .overview-metric-row,.dashboard-shell .overview-analytics-grid,.dashboard-shell .overview-lower-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .dashboard-shell{font-size:12px}
+  .dashboard-shell .dashboard-content{padding:12px;gap:12px}
+  .dashboard-shell .dashboard-card,.dashboard-shell .card{padding:14px}
+  .dashboard-shell h2{font-size:19px}
+  .dashboard-shell h3{font-size:16px}
+  .dashboard-shell .dashboard-topbar-left strong{font-size:14px}
+  .dashboard-shell .dashboard-user-area{gap:6px}
+  .dashboard-shell .dashboard-theme-toggle,.dashboard-shell .dashboard-notification,.dashboard-shell .dashboard-menu{width:36px;min-height:36px}
+  .dashboard-shell .dashboard-avatar{width:32px;height:32px;font-size:11px}
+  .dashboard-shell .client-table td,.dashboard-shell .ticket-table td,.dashboard-shell .management-table td{grid-template-columns:1fr;gap:4px}
+  .dashboard-shell .client-table td:before,.dashboard-shell .ticket-table td:before,.dashboard-shell .management-table td:before{font-size:9px}
+  .dashboard-shell .job,.dashboard-shell .dashboard-overview-jobs .job{padding:13px}
+  .dashboard-shell .module-access-stepper button small{display:none}
+}
