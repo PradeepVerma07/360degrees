@@ -884,3 +884,108 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
   .dashboard-shell.role-client .client-mobile-icon-button,
   .dashboard-shell.role-client .client-mobile-avatar{width:40px!important;min-height:40px!important}
 }
+
+/* Native APK dashboard mode: Capacitor WebView can report a desktop-sized viewport,
+   so the installed app forces the compact mobile dashboard shell. */
+.ci360-native-app,
+.ci360-native-app body{width:100%;max-width:100%;overflow-x:hidden}
+.dashboard-shell.is-native-app{display:block!important;width:100%!important;max-width:100vw!important;min-height:100dvh!important;overflow-x:hidden!important}
+.dashboard-shell.is-native-app .dashboard-main{width:100%!important;margin-left:0!important;padding-top:70px!important;overflow-x:hidden!important}
+.dashboard-shell.is-native-app .dashboard-topbar{position:fixed!important;top:0!important;left:0!important;right:0!important;width:100%!important;min-height:70px!important;z-index:80!important;padding:0 10px!important;gap:8px!important}
+.dashboard-shell.is-native-app .dashboard-menu{display:grid!important;width:38px!important;min-height:38px!important}
+.dashboard-shell.is-native-app .dashboard-search{display:none!important}
+.dashboard-shell.is-native-app .dashboard-user-area{gap:6px!important}
+.dashboard-shell.is-native-app .dashboard-user-button>span:not(.dashboard-avatar){display:none!important}
+.dashboard-shell.is-native-app .dashboard-theme-toggle,
+.dashboard-shell.is-native-app .dashboard-notification{width:38px!important;min-height:38px!important}
+.dashboard-shell.is-native-app .dashboard-avatar{width:32px!important;height:32px!important;font-size:11px!important}
+.dashboard-shell.is-native-app .dashboard-sidebar{position:fixed!important;left:0!important;top:0!important;width:286px!important;max-width:calc(100vw - 38px)!important;height:100dvh!important;padding-top:86px!important;transform:translateX(-105%)!important;z-index:100!important;overflow-y:auto!important;box-shadow:18px 0 50px rgba(16,32,68,.18)!important;transition:transform 250ms ease!important}
+.dashboard-shell.is-native-app.sidebar-open .dashboard-sidebar{transform:translateX(0)!important}
+.dashboard-shell.is-native-app.sidebar-open .dashboard-backdrop{display:block!important;position:fixed!important;inset:0!important;z-index:90!important;background:rgba(16,32,68,.38)!important}
+.dashboard-shell.is-native-app .dashboard-brand-icon-only{position:absolute!important;top:18px!important;left:18px!important;right:18px!important;padding:0!important}
+.dashboard-shell.is-native-app .dashboard-brand-icon-only img{width:44px!important;height:44px!important}
+.dashboard-shell.is-native-app .dashboard-content{width:100%!important;max-width:100%!important;padding:14px!important;gap:14px!important}
+.dashboard-shell.is-native-app .dashboard-stats,
+.dashboard-shell.is-native-app .overview-metric-row,
+.dashboard-shell.is-native-app .overview-analytics-grid,
+.dashboard-shell.is-native-app .overview-workload-grid,
+.dashboard-shell.is-native-app .overview-lower-grid,
+.dashboard-shell.is-native-app .dashboard-work-grid,
+.dashboard-shell.is-native-app .dashboard-work-right{grid-template-columns:1fr!important}
+.dashboard-shell.is-native-app .dashboard-welcome-card,
+.dashboard-shell.is-native-app .dashboard-card,
+.dashboard-shell.is-native-app .card{padding:16px!important;border-radius:14px!important}
+.dashboard-shell.is-native-app .dashboard-overview-jobs .job-head,
+.dashboard-shell.is-native-app .job-head,
+.dashboard-shell.is-native-app .assignment-request-item,
+.dashboard-shell.is-native-app .notification-item,
+.dashboard-shell.is-native-app .coordinator-row{grid-template-columns:1fr!important}
+.dashboard-shell.is-native-app .badges,
+.dashboard-shell.is-native-app .dashboard-overview-jobs .badges{justify-content:flex-start!important}
+.dashboard-shell.is-native-app .form,
+.dashboard-shell.is-native-app .row,
+.dashboard-shell.is-native-app .filters,
+.dashboard-shell.is-native-app .dashboard-filter-row,
+.dashboard-shell.is-native-app .assignment-request-actions,
+.dashboard-shell.is-native-app .assignment-card-actions,
+.dashboard-shell.is-native-app .dispatch-controls,
+.dashboard-shell.is-native-app .modal-actions,
+.dashboard-shell.is-native-app .reply-actions{display:grid!important;grid-template-columns:1fr!important;width:100%!important}
+.dashboard-shell.is-native-app .filters select,
+.dashboard-shell.is-native-app .filters button,
+.dashboard-shell.is-native-app .dashboard-filter-row select,
+.dashboard-shell.is-native-app .assignment-request-actions button,
+.dashboard-shell.is-native-app .assignment-card-actions button,
+.dashboard-shell.is-native-app .dispatch-controls button,
+.dashboard-shell.is-native-app .dispatch-controls select,
+.dashboard-shell.is-native-app .modal-actions button,
+.dashboard-shell.is-native-app .reply-actions button{width:100%!important;min-width:0!important}
+.dashboard-shell.is-native-app .client-table-wrap,
+.dashboard-shell.is-native-app .responsive-table,
+.dashboard-shell.is-native-app .management-table-wrap{overflow:visible!important;border:0!important;background:transparent!important}
+.dashboard-shell.is-native-app .client-table,
+.dashboard-shell.is-native-app .ticket-table,
+.dashboard-shell.is-native-app .management-table,
+.dashboard-shell.is-native-app .client-table tbody,
+.dashboard-shell.is-native-app .ticket-table tbody,
+.dashboard-shell.is-native-app .management-table tbody,
+.dashboard-shell.is-native-app .client-table tr,
+.dashboard-shell.is-native-app .ticket-table tr,
+.dashboard-shell.is-native-app .management-table tr,
+.dashboard-shell.is-native-app .client-table td,
+.dashboard-shell.is-native-app .ticket-table td,
+.dashboard-shell.is-native-app .management-table td{display:block!important;width:100%!important;min-width:0!important}
+.dashboard-shell.is-native-app .client-table thead,
+.dashboard-shell.is-native-app .ticket-table thead,
+.dashboard-shell.is-native-app .management-table thead{display:none!important}
+.dashboard-shell.is-native-app .client-table tr,
+.dashboard-shell.is-native-app .ticket-table tr,
+.dashboard-shell.is-native-app .management-table tr{margin:0 0 11px!important;padding:12px!important;border:1px solid var(--ci-border)!important;border-radius:10px!important;background:var(--ci-card)!important;box-shadow:0 3px 14px rgba(16,32,68,.05)!important}
+.dashboard-shell.is-native-app .client-table td,
+.dashboard-shell.is-native-app .ticket-table td,
+.dashboard-shell.is-native-app .management-table td{display:grid!important;grid-template-columns:1fr!important;gap:4px!important;align-items:center!important;padding:8px 0!important;border:0!important}
+.dashboard-shell.is-native-app .client-table td+td,
+.dashboard-shell.is-native-app .ticket-table td+td,
+.dashboard-shell.is-native-app .management-table td+td{border-top:1px solid var(--ci-border)!important}
+.dashboard-shell.is-native-app .client-table td:before,
+.dashboard-shell.is-native-app .ticket-table td:before,
+.dashboard-shell.is-native-app .management-table td:before{content:attr(data-label)!important;color:var(--ci-muted)!important;font-size:9px!important;font-weight:900!important;text-transform:uppercase!important;letter-spacing:.05em!important}
+.dashboard-shell.is-native-app.role-client{background:#f7f9fc!important;color:#15213b!important}
+.dashboard-shell.is-native-app.role-client .dashboard-topbar,
+.dashboard-shell.is-native-app.role-client .dashboard-sidebar,
+.dashboard-shell.is-native-app.role-client .dashboard-backdrop{display:none!important}
+.dashboard-shell.is-native-app.role-client .dashboard-main{padding-top:0!important;padding-bottom:calc(92px + env(safe-area-inset-bottom))!important}
+.dashboard-shell.is-native-app.role-client .dashboard-content{padding:0 16px 18px!important;display:grid!important;gap:16px!important}
+.dashboard-shell.is-native-app.role-client .client-mobile-header{position:sticky!important;top:0!important;z-index:75!important;display:grid!important;grid-template-columns:52px minmax(0,1fr) 42px 44px!important;align-items:center!important;gap:10px!important;padding:16px!important;background:#f7f9fc!important;border:0!important}
+.dashboard-shell.is-native-app.role-client .client-mobile-overview{display:grid!important;gap:16px!important;width:100%!important;max-width:100%!important}
+.dashboard-shell.is-native-app.role-client .overview-reference{display:block!important;width:100%!important;max-width:100%!important}
+.dashboard-shell.is-native-app.role-client .overview-reference>.overview-reference-head,
+.dashboard-shell.is-native-app.role-client .overview-reference>.overview-metric-row,
+.dashboard-shell.is-native-app.role-client .overview-reference>.overview-analytics-grid,
+.dashboard-shell.is-native-app.role-client .overview-reference>.overview-workload-grid,
+.dashboard-shell.is-native-app.role-client .overview-reference>.overview-lower-grid{display:none!important}
+.dashboard-shell.is-native-app.role-client .client-mobile-card,
+.dashboard-shell.is-native-app.role-client .client-mobile-hero,
+.dashboard-shell.is-native-app.role-client .client-mobile-create{width:100%!important;max-width:100%!important}
+.dashboard-shell.is-native-app.role-client .client-mobile-kpis{max-width:100%!important;overflow-x:auto!important}
+.dashboard-shell.is-native-app.role-client .client-mobile-bottom-nav{display:flex!important;position:fixed!important;left:0!important;right:0!important;bottom:0!important;z-index:120!important}
