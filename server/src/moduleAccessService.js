@@ -1,10 +1,10 @@
 import { moduleCatalog } from './permissionCatalog.js';
 import { one, query } from './db.js';
 
-export const clientModuleAllowlist = new Set(['overview', 'submit', 'jobs', 'support']);
+export const clientModuleAllowlist = new Set(['overview', 'submit', 'jobs', 'support', 'notifications', 'profile']);
 export const protectedModuleKeys = new Set(['overview', 'users', 'audit', 'app_settings']);
 
-const accountTypes = new Set(['super_admin', 'admin', 'employee', 'client']);
+const accountTypes = new Set(['super_admin', 'admin', 'employee', 'client', 'junior_employee']);
 const conditionTypes = new Set(['account_type', 'role', 'department', 'designation', 'user', 'manager', 'client']);
 const triggerTypes = new Set(['on_login', 'job_assigned', 'client_assigned', 'support_ticket_assigned', 'date_range', 'day_of_week', 'manual_activation']);
 const advancedRuleTypes = new Set(['active_users_only', 'department', 'designation_level', 'reporting_hierarchy', 'client_ownership', 'job_scope', 'client_scope', 'time_window']);
@@ -14,12 +14,15 @@ const moduleDescriptions = {
   overview: 'Dashboard overview and KPIs',
   submit: 'Create and submit job requests',
   jobs: 'Job board and job management',
+  dispatch: 'Job dispatch queue and assignment offers',
   settings: 'TAT standards and turnaround rules',
   clients: 'Client account management',
   employees: 'Internal employee directory',
   users: 'Users, roles, permissions and hierarchy',
   productivity: 'Productivity analytics, targets, account rosters and salary-private efficiency',
   support: 'Support tickets and conversations',
+  notifications: 'Workflow notifications and assignment alerts',
+  profile: 'Personal account details',
   audit: 'Security and activity history',
   app_settings: 'Platform settings and controls'
 };
@@ -28,12 +31,15 @@ const moduleIcons = {
   overview: 'overview',
   submit: 'submit',
   jobs: 'jobs',
+  dispatch: 'briefcase',
   settings: 'clock',
   clients: 'users',
   employees: 'users',
   users: 'shield',
   productivity: 'total',
   support: 'support',
+  notifications: 'bell',
+  profile: 'users',
   audit: 'document',
   app_settings: 'settings'
 };

@@ -39,7 +39,14 @@ export const defaultSettings = {
   bufferHoursPerExtraJob: 8,
   startHour: 10.5,
   endHour: 19,
-  workDays: [1, 2, 3, 4, 5]
+  workDays: [1, 2, 3, 4, 5],
+  assignmentAcceptanceMinutes: 240,
+  assignmentReminderMinutes: 60,
+  enableAutoAssignment: true,
+  skipOverworked: true,
+  maxAutoAssignmentUtilization: 115,
+  allowDepartmentClaim: true,
+  allowClientPreferredEmployee: true
 };
 
 const productivityServiceSeedRows = [
@@ -118,6 +125,32 @@ export const shouldRepairDemoLogin = (loginId, password) => {
   const demo = demoUserCredentials();
   return demo.enabled && demo.password === password && demo.loginIds.has(cleanEnvValue(loginId).toLowerCase());
 };
+
+const mergePlainSettings = (current, defaults) => {
+  if (!current || typeof current !== 'object' || Array.isArray(current))
+    return defaults;
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (merged[key] === undefined)
+      merged[key] = value;
+  }
+  return merged;
+};
+
+async function mergeDefaultSettings() {
+  const row = await one('SELECT json FROM settings WHERE id=1');
+  if (!row)
+    return;
+  let parsed = {};
+  try {
+    parsed = JSON.parse(row.json || '{}');
+  } catch {
+    parsed = {};
+  }
+  const merged = mergePlainSettings(parsed, defaultSettings);
+  if (JSON.stringify(merged) !== JSON.stringify(parsed))
+    await query('UPDATE settings SET json=? WHERE id=1', [JSON.stringify(merged)]);
+}
 
 async function columnExists(tableName, columnName) {
   const row = await one(
@@ -262,6 +295,7 @@ export async function initialiseDatabase() {
   await seedRbacDefaults();
 
   await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
+  await mergeDefaultSettings();
   await ensureEnvironmentSuperAdmin();
   const row = await one('SELECT COUNT(*) AS count FROM clients');
   if (envFlagEnabled(process.env.SEED_DEMO_DATA) && Number(row.count) === 0)
@@ -269,6 +303,7 @@ export async function initialiseDatabase() {
   if (envFlagEnabled(process.env.SEED_DEMO_USERS))
     await seedDemoUsers();
   await mapExistingUsersToRbac();
+  await seedInitialJobCoordinators();
 }
 
 async function initialiseRbacSchema() {
@@ -436,9 +471,22 @@ async function initialiseRbacSchema() {
   await addColumnIfMissing('jobs', 'created_by_user_id', 'VARCHAR(100) NULL AFTER posted_by');
   await addColumnIfMissing('jobs', 'assigned_to_user_id', 'VARCHAR(100) NULL AFTER created_by_user_id');
   await addColumnIfMissing('jobs', 'assigned_by_user_id', 'VARCHAR(100) NULL AFTER assigned_to_user_id');
+  await addColumnIfMissing('jobs', 'preferred_assignee_user_id', 'VARCHAR(100) NULL AFTER assigned_by_user_id');
   await addColumnIfMissing('jobs', 'department_id', 'BIGINT UNSIGNED NULL AFTER assigned_by_user_id');
   await addColumnIfMissing('jobs', 'assignment_date', 'VARCHAR(40) NULL AFTER department_id');
   await addColumnIfMissing('jobs', 'assignment_note', 'TEXT NULL AFTER assignment_date');
+  await addColumnIfMissing('jobs', 'assignment_state', "VARCHAR(50) NOT NULL DEFAULT 'unassigned' AFTER status");
+  await addColumnIfMissing('jobs', 'submitted_at', 'VARCHAR(40) NULL AFTER date_posted');
+  await addColumnIfMissing('jobs', 'acceptance_deadline_at', 'VARCHAR(40) NULL AFTER submitted_at');
+  await addColumnIfMissing('jobs', 'accepted_at', 'VARCHAR(40) NULL AFTER acceptance_deadline_at');
+  await addColumnIfMissing('jobs', 'assignment_method', 'VARCHAR(50) NULL AFTER accepted_at');
+  await addColumnIfMissing('jobs', 'assignment_source_user_id', 'VARCHAR(100) NULL AFTER assignment_method');
+  await addColumnIfMissing('jobs', 'auto_assignment_attempted_at', 'VARCHAR(40) NULL AFTER assignment_source_user_id');
+  await addColumnIfMissing('jobs', 'requires_client_action', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER auto_assignment_attempted_at');
+  await addColumnIfMissing('jobs', 'progress_percent', 'INT NOT NULL DEFAULT 0 AFTER requires_client_action');
+  await addColumnIfMissing('jobs', 'desired_delivery_at', 'VARCHAR(40) NULL AFTER progress_percent');
+  await addColumnIfMissing('jobs', 'reference_links', 'LONGTEXT NULL AFTER desired_delivery_at');
+  await addColumnIfMissing('jobs', 'special_instructions', 'TEXT NULL AFTER reference_links');
 
   await query(`CREATE TABLE IF NOT EXISTS job_assignments (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -453,6 +501,114 @@ async function initialiseRbacSchema() {
     INDEX idx_job_assignments_job (job_id),
     INDEX idx_job_assignments_assignee (assigned_to_user_id),
     CONSTRAINT fk_job_assignments_job FOREIGN KEY (job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS job_coordinators (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    department_id BIGINT UNSIGNED NULL,
+    receive_all_client_jobs TINYINT(1) NOT NULL DEFAULT 1,
+    priority_order INT NOT NULL DEFAULT 100,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_job_coordinators_user (user_id),
+    INDEX idx_job_coordinators_department (department_id),
+    INDEX idx_job_coordinators_active (is_active),
+    CONSTRAINT fk_job_coordinators_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_job_coordinators_department FOREIGN KEY (department_id) REFERENCES departments(id)
+      ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_job_coordinators_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS job_assignment_offers (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id VARCHAR(100) NOT NULL,
+    offered_to_user_id VARCHAR(100) NOT NULL,
+    offered_by_user_id VARCHAR(100) NULL,
+    offer_type VARCHAR(40) NOT NULL DEFAULT 'preferred',
+    status VARCHAR(40) NOT NULL DEFAULT 'pending',
+    offered_at VARCHAR(40) NOT NULL,
+    expires_at VARCHAR(40) NULL,
+    accepted_at VARCHAR(40) NULL,
+    declined_at VARCHAR(40) NULL,
+    decline_reason TEXT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_assignment_offers_job (job_id),
+    INDEX idx_assignment_offers_user_status (offered_to_user_id,status),
+    INDEX idx_assignment_offers_expires (status,expires_at),
+    CONSTRAINT fk_assignment_offers_job FOREIGN KEY (job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_assignment_offers_user FOREIGN KEY (offered_to_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_assignment_offers_actor FOREIGN KEY (offered_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS notifications (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    type VARCHAR(80) NOT NULL DEFAULT 'info',
+    job_id VARCHAR(100) NULL,
+    is_read TINYINT(1) NOT NULL DEFAULT 0,
+    created_at VARCHAR(40) NOT NULL,
+    read_at VARCHAR(40) NULL,
+    INDEX idx_notifications_user_read (user_id,is_read,created_at),
+    INDEX idx_notifications_job (job_id),
+    CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_notifications_job FOREIGN KEY (job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS job_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    job_id VARCHAR(100) NOT NULL,
+    event_type VARCHAR(80) NOT NULL,
+    actor_user_id VARCHAR(100) NULL,
+    visibility VARCHAR(30) NOT NULL DEFAULT 'client',
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    metadata_json LONGTEXT NULL,
+    created_at VARCHAR(40) NOT NULL,
+    INDEX idx_job_events_job_created (job_id,created_at),
+    INDEX idx_job_events_visibility (visibility),
+    CONSTRAINT fk_job_events_job FOREIGN KEY (job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_job_events_actor FOREIGN KEY (actor_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS job_service_departments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    service_name VARCHAR(180) NOT NULL,
+    department_id BIGINT UNSIGNED NOT NULL,
+    is_default TINYINT(1) NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uniq_service_department (service_name,department_id),
+    INDEX idx_service_department_department (department_id),
+    CONSTRAINT fk_service_departments_department FOREIGN KEY (department_id) REFERENCES departments(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS employee_job_capabilities (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    service_name VARCHAR(180) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uniq_employee_capability (user_id,service_name),
+    INDEX idx_employee_capability_service (service_name,is_active),
+    CONSTRAINT fk_employee_capabilities_user FOREIGN KEY (user_id) REFERENCES users(id)
       ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
@@ -623,8 +779,11 @@ async function initialiseRbacSchema() {
   await addIndexIfMissing('clients', 'idx_clients_owner', '(account_owner_user_id)');
   await addIndexIfMissing('clients', 'idx_clients_created_by', '(created_by)');
   await addIndexIfMissing('jobs', 'idx_jobs_assigned_to', '(assigned_to_user_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_preferred_assignee', '(preferred_assignee_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_created_by', '(created_by_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_department', '(department_id)');
+  await addIndexIfMissing('jobs', 'idx_jobs_assignment_state', '(assignment_state)');
+  await addIndexIfMissing('jobs', 'idx_jobs_acceptance_deadline', '(assignment_state,acceptance_deadline_at)');
   await addIndexIfMissing('jobs', 'idx_jobs_updated', '(updated_at)');
 }
 
@@ -652,6 +811,11 @@ async function seedRbacDefaults() {
       await query('INSERT IGNORE INTO role_permissions (role_id,permission_id) VALUES (?,?)', [roleId, permissionId]);
     }
   }
+  await query(
+    `DELETE FROM role_permissions
+      WHERE role_id='client'
+        AND permission_id IN ('jobs.assign','jobs.reassign','jobs.dispatch.view','jobs.dispatch.assign','jobs.dispatch.reassign','jobs.dispatch.claim','jobs.dispatch.override','jobs.dispatch.manage_coordinators')`
+  );
 
   await query(`INSERT IGNORE INTO departments (name,code,description,status)
     VALUES ('Operations','OPS','Default operations department','active')`);
@@ -666,6 +830,45 @@ async function mapExistingUsersToRbac() {
   await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' AND (role_id IS NULL OR role_id='')");
   await query("UPDATE users SET account_type='client', role_id='client' WHERE role='client' AND (role_id IS NULL OR role_id='')");
   await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
+}
+
+async function seedInitialJobCoordinators() {
+  const coordinators = await query(
+    `SELECT id FROM users
+      WHERE status='active'
+        AND COALESCE(account_type,role)<>'client'
+        AND LOWER(name) IN ('urna','mansi')`
+  );
+  const dispatchPermissions = [
+    'jobs.dispatch.view',
+    'jobs.dispatch.assign',
+    'jobs.dispatch.reassign',
+    'jobs.dispatch.claim',
+    'notifications.view',
+    'profile.view'
+  ];
+  for (const coordinator of coordinators) {
+    const existing = await one(
+      'SELECT id FROM job_coordinators WHERE user_id=? AND department_id IS NULL LIMIT 1',
+      [coordinator.id]
+    );
+    if (!existing) {
+      await query(
+        `INSERT INTO job_coordinators
+          (user_id,department_id,receive_all_client_jobs,priority_order,is_active,created_by_user_id)
+          VALUES (?,NULL,1,50,1,NULL)`,
+        [coordinator.id]
+      );
+    }
+    for (const permissionId of dispatchPermissions) {
+      await query(
+        `INSERT INTO user_permission_overrides (user_id,permission_id,effect,created_by)
+          VALUES (?,?,'grant',NULL)
+          ON DUPLICATE KEY UPDATE effect='grant'`,
+        [coordinator.id, permissionId]
+      );
+    }
+  }
 }
 
 export async function ensureEnvironmentSuperAdmin() {

@@ -142,6 +142,7 @@ const categoryLoad = async () => {
 const jobSelect = `SELECT j.*,
     assigned.name assigned_to_name,
     assigned_by.name assigned_by_name,
+    preferred.name preferred_assignee_name,
     creator.name created_by_name,
     department.name department_name,
     client.account_owner_user_id client_owner_user_id,
@@ -149,25 +150,51 @@ const jobSelect = `SELECT j.*,
   FROM jobs j
   LEFT JOIN users assigned ON assigned.id=j.assigned_to_user_id
   LEFT JOIN users assigned_by ON assigned_by.id=j.assigned_by_user_id
+  LEFT JOIN users preferred ON preferred.id=j.preferred_assignee_user_id
   LEFT JOIN users creator ON creator.id=j.created_by_user_id
   LEFT JOIN departments department ON department.id=j.department_id
   LEFT JOIN clients client ON client.id=j.client_id`;
+const parseReferenceLinks = raw => {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    }
+    catch {
+        return [raw].filter(Boolean);
+    }
+};
 const mapJob = (row, includeInternal = true) => ({
     id: row.id, clientId: row.client_id, title: row.title, description: row.description, category: row.category,
     priority: row.priority, postedBy: row.posted_by, assetLink: row.asset_link, calculatedHours: row.calculated_hours,
     teamOverrideHours: row.team_override_hours, teamOverrideNote: row.team_override_note, status: row.status,
     datePosted: row.date_posted, dateCompleted: row.date_completed, updatedAt: row.updated_at,
+    assignedToUserId: row.assigned_to_user_id,
+    assignedToName: row.assigned_to_name,
+    preferredAssigneeUserId: row.preferred_assignee_user_id,
+    preferredAssigneeName: row.preferred_assignee_name,
+    departmentId: row.department_id,
+    departmentName: row.department_name,
+    assignmentState: row.assignment_state || (row.assigned_to_user_id ? 'assigned' : 'unassigned'),
+    submittedAt: row.submitted_at,
+    acceptanceDeadlineAt: row.acceptance_deadline_at,
+    acceptedAt: row.accepted_at,
+    desiredDeliveryAt: row.desired_delivery_at,
+    referenceLinks: parseReferenceLinks(row.reference_links),
+    specialInstructions: row.special_instructions || '',
+    progressPercent: Number(row.progress_percent || 0),
+    requiresClientAction: Boolean(row.requires_client_action),
     ...(includeInternal ? {
         createdByUserId: row.created_by_user_id,
         createdByName: row.created_by_name,
-        assignedToUserId: row.assigned_to_user_id,
-        assignedToName: row.assigned_to_name,
         assignedByUserId: row.assigned_by_user_id,
         assignedByName: row.assigned_by_name,
-        departmentId: row.department_id,
-        departmentName: row.department_name,
         assignmentDate: row.assignment_date,
-        assignmentNote: row.assignment_note
+        assignmentNote: row.assignment_note,
+        assignmentMethod: row.assignment_method,
+        assignmentSourceUserId: row.assignment_source_user_id,
+        autoAssignmentAttemptedAt: row.auto_assignment_attempted_at
     } : {})
 });
 const ticketCategories = ['Technical Issue', 'Account Issue', 'Job Posting Issue', 'Candidate Issue', 'Client Issue', 'Billing Issue', 'Feature Request', 'General Support'];
@@ -184,6 +211,11 @@ const mapTicket = (row) => ({
 const canViewAllJobs = user => hasPermission(user, 'jobs.view_all');
 const canViewDepartmentJobs = user => hasPermission(user, 'jobs.view_department');
 const canAssignJobs = user => hasAnyPermission(user, ['jobs.assign', 'jobs.reassign']);
+const canViewDispatch = user => hasPermission(user, 'jobs.dispatch.view');
+const canDispatchAssign = user => hasAnyPermission(user, ['jobs.dispatch.assign', 'jobs.dispatch.reassign']);
+const canDispatchClaim = user => hasPermission(user, 'jobs.dispatch.claim');
+const canDispatchOverride = user => hasPermission(user, 'jobs.dispatch.override');
+const canManageCoordinators = user => hasPermission(user, 'jobs.dispatch.manage_coordinators');
 const canViewAllClients = user => hasPermission(user, 'clients.view_all');
 const canViewOwnedClients = user => hasAnyPermission(user, ['clients.view', 'clients.create', 'clients.edit', 'clients.delete', 'clients.assign_owner']);
 const canManageSupport = user => hasPermission(user, 'support.manage') || hasPermission(user, 'support.view_all');
@@ -279,7 +311,7 @@ const productivitySalaryGradeSchema = z.object({
     minAmount: z.coerce.number().min(0),
     maxAmount: z.coerce.number().min(0)
 });
-const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'jobs.assign', 'support.view_own', 'support.create', 'support.reply']);
+const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'support.view_own', 'support.create', 'support.reply', 'notifications.view', 'profile.view']);
 const mapAttachment = (row) => ({
     id: String(row.id), ticketNumber: row.ticket_number, fileName: row.file_name,
     mimeType: row.mime_type, sizeBytes: row.size_bytes, messageId: row.message_id ? String(row.message_id) : null, createdAt: row.created_at
@@ -317,6 +349,7 @@ const canAccessJob = (user, job) => canViewAllJobs(user)
     || (user.clientId && job.client_id === user.clientId)
     || job.created_by_user_id === user.id
     || job.assigned_to_user_id === user.id
+    || job.preferred_assignee_user_id === user.id
     || (canViewOwnedClients(user) && (job.client_owner_user_id === user.id || job.client_created_by === user.id))
     || (canViewDepartmentJobs(user) && user.departmentId && job.department_id === user.departmentId);
 const canAccessClientRecord = (user, client) => canViewAllClients(user)
@@ -337,7 +370,7 @@ const canUseClientForJob = async (user, clientId) => {
     const client = await one('SELECT * FROM clients WHERE id=? AND status=?', [clientId, 'active']);
     return Boolean(client && canAccessClientRecord(user, client));
 };
-const hasGlobalAssignmentScope = user => isSuperAdmin(user) || canViewAllJobs(user) || user.accountType === 'client';
+const hasGlobalAssignmentScope = user => isSuperAdmin(user) || canViewAllJobs(user) || canDispatchOverride(user);
 const internalAssignableUserSelect = `SELECT u.id,u.name,COALESCE(u.account_type,u.role) accountType,
     u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
     d.name departmentName,ds.name designationName,ds.hierarchy_level designationLevel,
@@ -373,11 +406,40 @@ const loadAssignableUsers = async user => {
 };
 const loadAssignableDepartments = async user => {
     const departments = await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name");
+    if (user.accountType === 'client')
+        return departments;
     if (hasGlobalAssignmentScope(user))
         return departments;
     if (!user.departmentId)
         return [];
     return departments.filter(department => Number(department.id) === Number(user.departmentId));
+};
+const loadClientTeamMembers = async (departmentId, category = '') => {
+    if (!departmentId)
+        return [];
+    const rows = await query(`${internalAssignableUserSelect}
+      AND u.department_id=?
+      AND (
+        NOT EXISTS (
+          SELECT 1 FROM employee_job_capabilities ec
+          WHERE ec.user_id=u.id AND ec.is_active=1
+        )
+        OR u.id IN (
+          SELECT ec.user_id FROM employee_job_capabilities ec
+          WHERE ec.is_active=1 AND LOWER(ec.service_name)=LOWER(?)
+        )
+      )
+      ORDER BY r.level DESC,ds.hierarchy_level DESC,u.name`, [departmentId, category || '']);
+    return rows
+        .filter(row => Number(row.departmentId || 0) === Number(departmentId))
+        .map(row => ({
+            id: row.id,
+            name: row.name,
+            departmentId: row.departmentId,
+            departmentName: row.departmentName,
+            designationName: row.designationName,
+            roleName: row.roleName
+        }));
 };
 const validateAssigneeForUser = async (user, assignedToUserId) => {
     if (!assignedToUserId)
@@ -395,15 +457,20 @@ const validateDepartmentForUser = async (user, departmentId) => {
     const department = await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId]);
     if (!department)
         return { status: 400, error: 'Active department not found' };
-    if (!hasGlobalAssignmentScope(user) && Number(department.id) !== Number(user.departmentId || 0))
+    if (user.accountType !== 'client' && !hasGlobalAssignmentScope(user) && Number(department.id) !== Number(user.departmentId || 0))
         return { status: 403, error: 'You can only assign jobs within your department' };
     return { departmentId: department.id };
 };
 const loadVisibleJobs = user => {
     if (canViewAllJobs(user))
         return query(`${jobSelect} ORDER BY j.date_posted DESC`);
-    const clauses = ['j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
-    const params = [user.id, user.id];
+    const clauses = [
+        'j.created_by_user_id=?',
+        'j.assigned_to_user_id=?',
+        'j.preferred_assignee_user_id=?',
+        `EXISTS (SELECT 1 FROM job_assignment_offers offer WHERE offer.job_id=j.id AND offer.offered_to_user_id=? AND offer.status='pending')`
+    ];
+    const params = [user.id, user.id, user.id, user.id];
     if (user.clientId) {
         clauses.push('j.client_id=?');
         params.push(user.clientId);
@@ -421,8 +488,13 @@ const loadVisibleJobs = user => {
 const categoryLoadForUser = async user => {
     if (canViewAllJobs(user))
         return categoryLoad();
-    const clauses = ['j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
-    const params = [user.id, user.id];
+    const clauses = [
+        'j.created_by_user_id=?',
+        'j.assigned_to_user_id=?',
+        'j.preferred_assignee_user_id=?',
+        `EXISTS (SELECT 1 FROM job_assignment_offers offer WHERE offer.job_id=j.id AND offer.offered_to_user_id=? AND offer.status='pending')`
+    ];
+    const params = [user.id, user.id, user.id, user.id];
     if (user.clientId) {
         clauses.push('j.client_id=?');
         params.push(user.clientId);
@@ -440,6 +512,407 @@ const categoryLoadForUser = async user => {
       WHERE j.status!='completed' AND j.status!='cancelled' AND (${clauses.join(' OR ')})
       GROUP BY j.category`, params);
     return Object.fromEntries(rows.map(row => [row.category, row.count]));
+};
+const isoNow = () => new Date().toISOString();
+const addMinutesIso = minutes => {
+    const date = new Date();
+    date.setMinutes(date.getMinutes() + Number(minutes || 0));
+    return date.toISOString();
+};
+const normalizeReferenceLinks = value => {
+    const list = Array.isArray(value) ? value : [value];
+    return list.map(item => String(item || '').trim()).filter(Boolean);
+};
+const readAssignmentSettings = async () => {
+    const current = await settings();
+    return {
+        acceptanceMinutes: Number(current.assignmentAcceptanceMinutes || 240),
+        enableAutoAssignment: current.enableAutoAssignment !== false,
+        skipOverworked: current.skipOverworked !== false,
+        maxAutoAssignmentUtilization: Number(current.maxAutoAssignmentUtilization || 115),
+        allowClientPreferredEmployee: current.allowClientPreferredEmployee !== false
+    };
+};
+const mapNotification = row => ({
+    id: String(row.id),
+    userId: row.user_id,
+    title: row.title,
+    body: row.body,
+    type: row.type,
+    jobId: row.job_id,
+    isRead: Boolean(row.is_read),
+    createdAt: row.created_at,
+    readAt: row.read_at
+});
+const loadNotifications = async user => {
+    const rows = await query(`SELECT * FROM notifications
+      WHERE user_id=?
+      ORDER BY is_read ASC,created_at DESC,id DESC
+      LIMIT 50`, [user.id]);
+    return rows.map(mapNotification);
+};
+const notifyUser = async (userId, payload, connection = pool) => {
+    if (!userId)
+        return;
+    await query(`INSERT INTO notifications (user_id,title,body,type,job_id,created_at)
+      VALUES (?,?,?,?,?,?)`, [
+        userId,
+        payload.title || 'Notification',
+        payload.body || '',
+        payload.type || 'info',
+        payload.jobId || null,
+        payload.createdAt || isoNow()
+    ], connection);
+};
+const notifyUsers = async (userIds, payload, connection = pool) => {
+    const uniqueIds = [...new Set((userIds || []).filter(Boolean))];
+    for (const userId of uniqueIds)
+        await notifyUser(userId, payload, connection);
+};
+const notifyClientUsers = async (clientId, payload, connection = pool) => {
+    if (!clientId)
+        return;
+    const rows = await query("SELECT id FROM users WHERE status='active' AND (client_id=? OR id=?)", [clientId, clientId], connection);
+    await notifyUsers(rows.map(row => row.id).filter(id => id !== 'system'), payload, connection);
+};
+const notifyDepartmentUsers = async (departmentId, payload, connection = pool) => {
+    if (!departmentId)
+        return;
+    const rows = await query(
+        `SELECT id FROM users
+          WHERE status='active'
+            AND department_id=?
+            AND COALESCE(account_type,role)<>'client'
+            AND COALESCE(account_type,role)<>'super_admin'`,
+        [departmentId],
+        connection
+    );
+    await notifyUsers(rows.map(row => row.id), payload, connection);
+};
+const notifyCoordinatorsForJob = async (job, payload, connection = pool) => {
+    const rows = await query(
+        `SELECT DISTINCT jc.user_id id
+          FROM job_coordinators jc
+          JOIN users u ON u.id=jc.user_id AND u.status='active'
+          WHERE jc.is_active=1
+            AND (jc.receive_all_client_jobs=1 OR jc.department_id IS NULL OR jc.department_id=?)`,
+        [job.department_id || null],
+        connection
+    );
+    await notifyUsers(rows.map(row => row.id), payload, connection);
+};
+const createJobEvent = async ({ jobId, eventType, actorUserId = null, visibility = 'client', title, body = '', metadata = {} }, connection = pool) => {
+    await query(`INSERT INTO job_events
+      (job_id,event_type,actor_user_id,visibility,title,body,metadata_json,created_at)
+      VALUES (?,?,?,?,?,?,?,?)`, [
+        jobId,
+        eventType,
+        actorUserId,
+        visibility,
+        title,
+        body,
+        JSON.stringify(metadata || {}),
+        isoNow()
+    ], connection);
+};
+const mapAssignmentOffer = row => ({
+    id: String(row.id),
+    jobId: row.job_id || row.jobId,
+    offeredToUserId: row.offered_to_user_id || row.offeredToUserId,
+    offeredToName: row.offered_to_name || row.offeredToName,
+    offeredByUserId: row.offered_by_user_id || row.offeredByUserId,
+    offeredByName: row.offered_by_name || row.offeredByName,
+    offerType: row.offer_type || row.offerType,
+    status: row.status,
+    offeredAt: row.offered_at || row.offeredAt,
+    expiresAt: row.expires_at || row.expiresAt,
+    acceptedAt: row.accepted_at || row.acceptedAt,
+    declinedAt: row.declined_at || row.declinedAt,
+    declineReason: row.decline_reason || row.declineReason || '',
+    jobTitle: row.job_title || row.jobTitle,
+    clientId: row.client_id || row.clientId,
+    category: row.category,
+    priority: row.priority,
+    departmentName: row.department_name || row.departmentName
+});
+const loadAssignmentRequests = async user => {
+    if (user.accountType === 'client')
+        return [];
+    const rows = await query(`SELECT offer.id,offer.job_id,offer.offered_to_user_id,offer.offered_by_user_id,
+        offer.offer_type,offer.status,offer.offered_at,offer.expires_at,offer.accepted_at,offer.declined_at,offer.decline_reason,
+        offered_to.name offered_to_name,offered_by.name offered_by_name,
+        j.title job_title,j.client_id,j.category,j.priority,department.name department_name
+      FROM job_assignment_offers offer
+      JOIN jobs j ON j.id=offer.job_id
+      LEFT JOIN users offered_to ON offered_to.id=offer.offered_to_user_id
+      LEFT JOIN users offered_by ON offered_by.id=offer.offered_by_user_id
+      LEFT JOIN departments department ON department.id=j.department_id
+      WHERE offer.offered_to_user_id=?
+        AND offer.status='pending'
+        AND j.status NOT IN ('completed','cancelled')
+      ORDER BY offer.expires_at IS NULL,offer.expires_at,offer.id DESC`, [user.id]);
+    return rows.map(mapAssignmentOffer);
+};
+const loadJobEvents = async (jobId, includeInternal = true) => {
+    const visibilityClause = includeInternal ? '' : "AND visibility='client'";
+    const rows = await query(`SELECT e.id,e.job_id jobId,e.event_type eventType,e.actor_user_id actorUserId,
+        actor.name actorName,e.visibility,e.title,e.body,e.metadata_json metadataJson,e.created_at createdAt
+      FROM job_events e
+      LEFT JOIN users actor ON actor.id=e.actor_user_id
+      WHERE e.job_id=? ${visibilityClause}
+      ORDER BY e.created_at DESC,e.id DESC`, [jobId]);
+    return rows.map(row => {
+        let metadata = {};
+        try {
+            metadata = JSON.parse(row.metadataJson || '{}');
+        }
+        catch {
+            metadata = {};
+        }
+        return { ...row, id: String(row.id), metadata };
+    });
+};
+const createAssignmentOffer = async ({ jobId, offeredToUserId, offeredByUserId = null, offerType = 'preferred', expiresAt = null }, connection = pool) => {
+    const existing = await one(
+        "SELECT id FROM job_assignment_offers WHERE job_id=? AND offered_to_user_id=? AND status='pending' LIMIT 1",
+        [jobId, offeredToUserId],
+        connection
+    );
+    if (existing)
+        return existing.id;
+    const result = await query(`INSERT INTO job_assignment_offers
+      (job_id,offered_to_user_id,offered_by_user_id,offer_type,status,offered_at,expires_at)
+      VALUES (?,?,?,?,?,?,?)`, [jobId, offeredToUserId, offeredByUserId, offerType, 'pending', isoNow(), expiresAt], connection);
+    return result.insertId;
+};
+const assignmentQueueWhere = `j.status NOT IN ('completed','cancelled')
+  AND (j.assigned_to_user_id IS NULL OR j.assignment_state IN ('pending_acceptance','needs_assignment','declined'))
+  AND (j.assignment_state IN ('unassigned','pending_acceptance','needs_assignment','declined') OR j.status IN ('submitted','pending_acceptance','needs_assignment'))`;
+const loadDispatchQueue = async user => {
+    if (!canViewDispatch(user))
+        return [];
+    const params = [];
+    const scopeClauses = [];
+    if (hasGlobalAssignmentScope(user)) {
+        scopeClauses.push('1=1');
+    }
+    else {
+        const coordinatorRows = await query('SELECT department_id departmentId,receive_all_client_jobs receiveAllClientJobs FROM job_coordinators WHERE user_id=? AND is_active=1', [user.id]);
+        if (coordinatorRows.some(row => Boolean(row.receiveAllClientJobs) || row.departmentId == null)) {
+            scopeClauses.push('1=1');
+        }
+        else {
+            const departments = [...new Set([
+                user.departmentId,
+                ...coordinatorRows.map(row => row.departmentId)
+            ].filter(Boolean).map(Number))];
+            if (departments.length) {
+                scopeClauses.push(`j.department_id IN (${departments.map(() => '?').join(',')})`);
+                params.push(...departments);
+            }
+        }
+    }
+    if (!scopeClauses.length)
+        return [];
+    const rows = await query(`${jobSelect}
+      WHERE ${assignmentQueueWhere} AND (${scopeClauses.join(' OR ')})
+      ORDER BY j.acceptance_deadline_at IS NULL,j.acceptance_deadline_at,j.date_posted DESC
+      LIMIT 120`, params);
+    return rows.map(row => mapJob(row, true));
+};
+const dispatchScopeAllowsJob = async (user, job) => {
+    if (!canViewDispatch(user))
+        return false;
+    if (hasGlobalAssignmentScope(user))
+        return true;
+    if (user.departmentId && Number(user.departmentId) === Number(job.department_id || 0))
+        return true;
+    const rows = await query('SELECT department_id departmentId,receive_all_client_jobs receiveAllClientJobs FROM job_coordinators WHERE user_id=? AND is_active=1', [user.id]);
+    return rows.some(row => Boolean(row.receiveAllClientJobs) || row.departmentId == null || Number(row.departmentId) === Number(job.department_id || 0));
+};
+const validateClientPreferredAssignee = async ({ preferredAssigneeUserId, departmentId, category }) => {
+    if (!preferredAssigneeUserId)
+        return { assignee: null };
+    const candidates = await loadClientTeamMembers(departmentId, category);
+    const assignee = candidates.find(candidate => candidate.id === preferredAssigneeUserId);
+    if (!assignee)
+        return { status: 400, error: 'Preferred employee is not available for the selected department' };
+    return { assignee };
+};
+const loadRankedAssignmentCandidates = async (job, options = {}) => {
+    const settingsForAssignment = options.settings || await readAssignmentSettings();
+    const params = [];
+    let departmentFilter = '';
+    if (job.department_id) {
+        departmentFilter = 'AND u.department_id=?';
+        params.push(job.department_id);
+    }
+    const candidates = await query(`${internalAssignableUserSelect}
+      ${departmentFilter}
+      ORDER BY r.level DESC,ds.hierarchy_level DESC,u.name`, params);
+    const enriched = [];
+    for (const candidate of candidates) {
+        const active = await one(
+            `SELECT COUNT(*) count FROM jobs
+              WHERE assigned_to_user_id=?
+                AND status NOT IN ('completed','cancelled')`,
+            [candidate.id]
+        );
+        const capacity = await one('SELECT weekly_capacity_hours weeklyCapacityHours FROM productivity_employee_settings WHERE user_id=?', [candidate.id]);
+        const weeklyCapacityHours = Number(capacity?.weeklyCapacityHours || 40);
+        const activeJobCount = Number(active?.count || 0);
+        const estimatedHours = activeJobCount * 8;
+        const utilization = weeklyCapacityHours ? Math.round((estimatedHours / weeklyCapacityHours) * 100) : 0;
+        enriched.push({ ...candidate, activeJobCount, weeklyCapacityHours, utilization });
+    }
+    const filtered = settingsForAssignment.skipOverworked
+        ? enriched.filter(candidate => candidate.utilization <= settingsForAssignment.maxAutoAssignmentUtilization)
+        : enriched;
+    return (filtered.length ? filtered : enriched)
+        .sort((a, b) => a.activeJobCount - b.activeJobCount
+            || a.utilization - b.utilization
+            || Number(b.roleLevel || 0) - Number(a.roleLevel || 0)
+            || String(a.name).localeCompare(String(b.name)));
+};
+const assignJobToUser = async ({ jobId, assigneeUserId, actorUserId = null, note = '', method = 'manual', allowReassign = false }, connection = pool) => {
+    const job = await one(`${jobSelect} WHERE j.id=? FOR UPDATE`, [jobId], connection);
+    if (!job)
+        return { status: 404, error: 'Job not found' };
+    if (['completed', 'cancelled'].includes(job.status))
+        return { status: 409, error: 'Completed or cancelled jobs cannot be assigned' };
+    if (job.assigned_to_user_id && !allowReassign)
+        return { status: 409, error: 'Job is already assigned' };
+    const assignee = await one(`${internalAssignableUserSelect} AND u.id=?`, [assigneeUserId], connection);
+    if (!assignee)
+        return { status: 400, error: 'Active internal assignee not found' };
+    const now = isoNow();
+    const nextDepartmentId = assignee.departmentId || job.department_id || null;
+    await query(`UPDATE jobs
+      SET assigned_to_user_id=?,assigned_by_user_id=?,department_id=?,assignment_date=?,
+        assignment_note=?,assignment_state='assigned',status=?,
+        accepted_at=?,assignment_method=?,assignment_source_user_id=?,updated_at=?
+      WHERE id=?`, [
+        assignee.id,
+        actorUserId,
+        nextDepartmentId,
+        now,
+        note || '',
+        ['submitted', 'pending_acceptance', 'needs_assignment'].includes(job.status) ? 'assigned' : job.status,
+        now,
+        method,
+        actorUserId || assignee.id,
+        now,
+        jobId
+    ], connection);
+    await query(`INSERT INTO job_assignments
+      (job_id,previous_assignee_user_id,assigned_to_user_id,assigned_by_user_id,previous_department_id,department_id,note)
+      VALUES (?,?,?,?,?,?,?)`, [
+        jobId,
+        job.assigned_to_user_id || null,
+        assignee.id,
+        actorUserId,
+        job.department_id || null,
+        nextDepartmentId,
+        note || ''
+    ], connection);
+    await query("UPDATE job_assignment_offers SET status='cancelled' WHERE job_id=? AND status='pending' AND offered_to_user_id<>?", [jobId, assignee.id], connection);
+    await createJobEvent({
+        jobId,
+        eventType: 'job_assigned',
+        actorUserId,
+        visibility: 'client',
+        title: 'Job assigned',
+        body: `${assignee.name} has been assigned to this job.`,
+        metadata: { assigneeUserId: assignee.id, method }
+    }, connection);
+    await notifyUser(assignee.id, {
+        title: 'New job assigned',
+        body: `${job.title} is now assigned to you.`,
+        type: 'job_assigned',
+        jobId
+    }, connection);
+    await notifyClientUsers(job.client_id, {
+        title: 'Your job is assigned',
+        body: `${job.title} is assigned to ${assignee.name}.`,
+        type: 'job_assigned',
+        jobId
+    }, connection);
+    return { jobId, assignee };
+};
+let autoAssignmentRunning = false;
+const processExpiredAssignmentOffers = async () => {
+    if (!databaseReady || autoAssignmentRunning)
+        return;
+    autoAssignmentRunning = true;
+    try {
+        const assignmentSettings = await readAssignmentSettings();
+        if (!assignmentSettings.enableAutoAssignment)
+            return;
+        const now = isoNow();
+        const rows = await query(`${jobSelect}
+          WHERE j.assigned_to_user_id IS NULL
+            AND j.assignment_state='pending_acceptance'
+            AND j.acceptance_deadline_at IS NOT NULL
+            AND j.acceptance_deadline_at<=?
+            AND j.status NOT IN ('completed','cancelled')
+          ORDER BY j.acceptance_deadline_at
+          LIMIT 20`, [now]);
+        for (const job of rows) {
+            await transaction(async connection => {
+                const lockedJob = await one(`${jobSelect} WHERE j.id=? FOR UPDATE`, [job.id], connection);
+                if (!lockedJob || lockedJob.assigned_to_user_id || lockedJob.assignment_state !== 'pending_acceptance')
+                    return;
+                await query("UPDATE job_assignment_offers SET status='expired' WHERE job_id=? AND status='pending' AND (expires_at IS NULL OR expires_at<=?)", [lockedJob.id, now], connection);
+                const candidates = await loadRankedAssignmentCandidates(lockedJob, { settings: assignmentSettings });
+                const declinedRows = await query("SELECT offered_to_user_id id FROM job_assignment_offers WHERE job_id=? AND status IN ('declined','expired')", [lockedJob.id], connection);
+                const declined = new Set(declinedRows.map(row => row.id));
+                const candidate = candidates.find(item => !declined.has(item.id)) || candidates[0];
+                if (!candidate) {
+                    await query(`UPDATE jobs
+                      SET assignment_state='needs_assignment',status='needs_assignment',auto_assignment_attempted_at=?,updated_at=?
+                      WHERE id=?`, [now, now, lockedJob.id], connection);
+                    await notifyCoordinatorsForJob(lockedJob, {
+                        title: 'Auto assignment needs review',
+                        body: `${lockedJob.title} has no eligible employee available.`,
+                        type: 'auto_assignment_failed',
+                        jobId: lockedJob.id
+                    }, connection);
+                    await createJobEvent({
+                        jobId: lockedJob.id,
+                        eventType: 'auto_assignment_failed',
+                        visibility: 'internal',
+                        title: 'Auto assignment needs review',
+                        body: 'No eligible employee was available for automatic assignment.'
+                    }, connection);
+                    return;
+                }
+                await assignJobToUser({
+                    jobId: lockedJob.id,
+                    assigneeUserId: candidate.id,
+                    actorUserId: null,
+                    note: 'Automatically assigned after acceptance deadline',
+                    method: 'auto_assignment',
+                    allowReassign: false
+                }, connection);
+                await query('UPDATE jobs SET auto_assignment_attempted_at=? WHERE id=?', [now, lockedJob.id], connection);
+                await notifyCoordinatorsForJob(lockedJob, {
+                    title: 'Job auto assigned',
+                    body: `${lockedJob.title} was auto assigned to ${candidate.name}.`,
+                    type: 'auto_assignment',
+                    jobId: lockedJob.id
+                }, connection);
+                await audit('system', 'job_auto_assigned', 'job', lockedJob.id, { assignedToUserId: candidate.id }, connection);
+            });
+        }
+        if (rows.length)
+            emitRefresh();
+    }
+    catch (error) {
+        console.error('Auto assignment worker failed', error);
+    }
+    finally {
+        autoAssignmentRunning = false;
+    }
 };
 const managerCreatesCycle = async (userId, managerUserId) => {
     if (!managerUserId)
@@ -598,10 +1071,12 @@ app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
     const visibleModuleIds = new Set((user.modules || []).map(module => module.id));
-    const includeInternalJobFields = user.accountType !== 'client' || canAssignJobs(user);
+    const includeInternalJobFields = user.accountType !== 'client';
     const canReadJobs = visibleModuleIds.has('jobs') && hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
     const canReadSupport = visibleModuleIds.has('support') && hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
     const canReadSettings = (visibleModuleIds.has('settings') || visibleModuleIds.has('app_settings')) && hasAnyPermission(user, ['settings.view', 'settings.edit']);
+    const canClientCreateJobs = user.accountType === 'client' && visibleModuleIds.has('submit') && hasPermission(user, 'jobs.create');
+    const canReadDispatchQueue = visibleModuleIds.has('dispatch') && canViewDispatch(user);
     const jobRows = canReadJobs ? await loadVisibleJobs(user) : [];
     const clients = (user.accountType === 'client' || visibleModuleIds.has('clients') || visibleModuleIds.has('submit')) ? await loadVisibleClients(user) : [];
     const ticketRows = !canReadSupport
@@ -609,8 +1084,10 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         : canManageSupport(user)
             ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
             : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    const assignees = canAssignJobs(user) ? await loadAssignableUsers(user) : [];
-    const departments = canAssignJobs(user) || canViewDepartmentJobs(user)
+    const assignees = user.accountType !== 'client' && (canAssignJobs(user) || canDispatchAssign(user) || canDispatchClaim(user))
+        ? await loadAssignableUsers(user)
+        : [];
+    const departments = canClientCreateJobs || canAssignJobs(user) || canViewDepartmentJobs(user) || canViewDispatch(user)
         ? await loadAssignableDepartments(user)
         : [];
     const clientOwners = hasPermission(user, 'clients.assign_owner')
@@ -639,8 +1116,286 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         categoryLoad: !canReadJobs || user.accountType === 'client' ? {} : await categoryLoadForUser(user),
         assignees,
         departments,
-        clientOwners
+        clientOwners,
+        notifications: hasPermission(user, 'notifications.view') ? await loadNotifications(user) : [],
+        assignmentRequests: await loadAssignmentRequests(user),
+        dispatchQueue: canReadDispatchQueue ? await loadDispatchQueue(user) : []
     });
+});
+app.get('/api/job-options', requireAuth, requirePermission('jobs.create'), requireModuleAccess('submit'), async (req, res) => {
+    const departmentId = optionalId(req.query.departmentId);
+    if (Number.isNaN(departmentId))
+        return res.status(400).json({ error: 'Department is invalid' });
+    const currentSettings = await settings();
+    const departments = req.user.accountType === 'client'
+        ? await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name")
+        : await loadAssignableDepartments(req.user);
+    const teamMembers = req.user.accountType === 'client'
+        ? await loadClientTeamMembers(departmentId, String(req.query.category || ''))
+        : departmentId
+            ? (await loadAssignableUsers(req.user)).filter(user => Number(user.departmentId || 0) === Number(departmentId))
+            : [];
+    res.json({
+        categories: (currentSettings.categories || []).map(category => ({ name: category.name })),
+        departments,
+        teamMembers
+    });
+});
+app.get('/api/notifications', requireAuth, requirePermission('notifications.view'), requireModuleAccess('notifications'), async (req, res) => {
+    res.json({ notifications: await loadNotifications(req.user) });
+});
+app.post('/api/notifications/:id/read', requireAuth, requirePermission('notifications.view'), requireModuleAccess('notifications'), async (req, res) => {
+    await query('UPDATE notifications SET is_read=1,read_at=? WHERE id=? AND user_id=?', [isoNow(), req.params.id, req.user.id]);
+    res.json({ ok: true });
+});
+app.post('/api/notifications/read-all', requireAuth, requirePermission('notifications.view'), requireModuleAccess('notifications'), async (req, res) => {
+    await query('UPDATE notifications SET is_read=1,read_at=? WHERE user_id=? AND is_read=0', [isoNow(), req.user.id]);
+    res.json({ ok: true });
+});
+app.get('/api/jobs/assignment-requests', requireAuth, requirePermission('jobs.view_own'), requireModuleAccess('jobs'), async (req, res) => {
+    res.json({ assignmentRequests: await loadAssignmentRequests(req.user) });
+});
+app.get('/api/jobs/dispatch-queue', requireAuth, requirePermission('jobs.dispatch.view'), requireModuleAccess('dispatch'), async (req, res) => {
+    res.json({ dispatchQueue: await loadDispatchQueue(req.user) });
+});
+app.post('/api/jobs/:id/accept', requireAuth, requirePermission('jobs.view_own'), requireModuleAccess('jobs'), async (req, res) => {
+    const offer = await one(
+        `SELECT offer.*,j.title job_title,j.assigned_to_user_id
+          FROM job_assignment_offers offer
+          JOIN jobs j ON j.id=offer.job_id
+          WHERE offer.job_id=? AND offer.offered_to_user_id=? AND offer.status='pending'
+          ORDER BY offer.id DESC LIMIT 1`,
+        [req.params.id, req.user.id]
+    );
+    if (!offer)
+        return res.status(404).json({ error: 'Pending assignment request not found' });
+    if (offer.expires_at && new Date(offer.expires_at).getTime() < Date.now())
+        return res.status(409).json({ error: 'This assignment request has expired' });
+    const result = await transaction(async connection => {
+        const assignResult = await assignJobToUser({
+            jobId: req.params.id,
+            assigneeUserId: req.user.id,
+            actorUserId: req.user.id,
+            note: 'Accepted assignment request',
+            method: 'employee_accept',
+            allowReassign: offer.offer_type === 'reassignment'
+        }, connection);
+        if (assignResult.error)
+            return assignResult;
+        await query("UPDATE job_assignment_offers SET status='accepted',accepted_at=? WHERE id=?", [isoNow(), offer.id], connection);
+        await createJobEvent({
+            jobId: req.params.id,
+            eventType: 'assignment_accepted',
+            actorUserId: req.user.id,
+            visibility: 'client',
+            title: 'Assignment accepted',
+            body: `${req.user.name} accepted the job assignment.`
+        }, connection);
+        await audit(req.user.id, 'assignment_accepted', 'job', req.params.id, {}, connection);
+        return assignResult;
+    });
+    if (result.error)
+        return res.status(result.status || 409).json({ error: result.error });
+    emitRefresh();
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), true) });
+});
+app.post('/api/jobs/:id/decline', requireAuth, requirePermission('jobs.view_own'), requireModuleAccess('jobs'), async (req, res) => {
+    const parsed = z.object({ reason: z.string().trim().max(1000).optional().default('') }).safeParse(req.body || {});
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const offer = await one(
+        `SELECT offer.*,j.title job_title,j.client_id,j.department_id
+          FROM job_assignment_offers offer
+          JOIN jobs j ON j.id=offer.job_id
+          WHERE offer.job_id=? AND offer.offered_to_user_id=? AND offer.status='pending'
+          ORDER BY offer.id DESC LIMIT 1`,
+        [req.params.id, req.user.id]
+    );
+    if (!offer)
+        return res.status(404).json({ error: 'Pending assignment request not found' });
+    await transaction(async connection => {
+        await query("UPDATE job_assignment_offers SET status='declined',declined_at=?,decline_reason=? WHERE id=?", [isoNow(), parsed.data.reason, offer.id], connection);
+        const pending = await one("SELECT COUNT(*) count FROM job_assignment_offers WHERE job_id=? AND status='pending'", [req.params.id], connection);
+        if (!Number(pending?.count || 0)) {
+            await query(`UPDATE jobs SET assignment_state='needs_assignment',status='needs_assignment',updated_at=? WHERE id=? AND assigned_to_user_id IS NULL`, [isoNow(), req.params.id], connection);
+        }
+        await createJobEvent({
+            jobId: req.params.id,
+            eventType: 'assignment_declined',
+            actorUserId: req.user.id,
+            visibility: 'internal',
+            title: 'Assignment declined',
+            body: parsed.data.reason || `${req.user.name} declined the assignment.`
+        }, connection);
+        await notifyCoordinatorsForJob(offer, {
+            title: 'Assignment declined',
+            body: `${req.user.name} declined ${offer.job_title}.`,
+            type: 'assignment_declined',
+            jobId: req.params.id
+        }, connection);
+        await audit(req.user.id, 'assignment_declined', 'job', req.params.id, { reason: parsed.data.reason }, connection);
+    });
+    emitRefresh();
+    res.json({ ok: true });
+});
+app.post('/api/jobs/:id/dispatch-offer', requireAuth, requirePermission('jobs.dispatch.assign', 'jobs.dispatch.reassign'), requireModuleAccess('dispatch'), async (req, res) => {
+    const parsed = z.object({
+        userId: z.string().trim().min(1),
+        note: z.string().trim().max(1000).optional().default(''),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable()
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const row = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    if (!row)
+        return res.status(404).json({ error: 'Job not found' });
+    if (!(await dispatchScopeAllowsJob(req.user, row)))
+        return res.status(403).json({ error: 'Dispatch scope denied' });
+    if (row.assigned_to_user_id && !hasPermission(req.user, 'jobs.dispatch.reassign'))
+        return res.status(403).json({ error: 'Dispatch reassignment permission required' });
+    const assigneeValidation = await validateAssigneeForUser(req.user, parsed.data.userId);
+    if (assigneeValidation.error)
+        return res.status(assigneeValidation.status).json({ error: assigneeValidation.error });
+    const departmentId = parsed.data.departmentId === undefined ? row.department_id || assigneeValidation.assignee?.departmentId || null : optionalId(parsed.data.departmentId);
+    if (Number.isNaN(departmentId))
+        return res.status(400).json({ error: 'Department is invalid' });
+    const departmentValidation = await validateDepartmentForUser(req.user, departmentId);
+    if (departmentValidation.error)
+        return res.status(departmentValidation.status).json({ error: departmentValidation.error });
+    const assignmentSettings = await readAssignmentSettings();
+    const expiresAt = addMinutesIso(assignmentSettings.acceptanceMinutes);
+    await transaction(async connection => {
+        await createAssignmentOffer({
+            jobId: req.params.id,
+            offeredToUserId: parsed.data.userId,
+            offeredByUserId: req.user.id,
+            offerType: row.assigned_to_user_id ? 'reassignment' : 'coordinator',
+            expiresAt
+        }, connection);
+        await query(`UPDATE jobs
+          SET preferred_assignee_user_id=?,department_id=?,assignment_state='pending_acceptance',
+            status='pending_acceptance',acceptance_deadline_at=?,assignment_method='coordinator_offer',
+            assignment_source_user_id=?,assignment_note=?,updated_at=?
+          WHERE id=?`, [parsed.data.userId, departmentValidation.departmentId, expiresAt, req.user.id, parsed.data.note, isoNow(), req.params.id], connection);
+        await createJobEvent({
+            jobId: req.params.id,
+            eventType: 'assignment_offer_sent',
+            actorUserId: req.user.id,
+            visibility: 'client',
+            title: 'Assignment request sent',
+            body: `The job was sent to ${assigneeValidation.assignee.name} for acceptance.`
+        }, connection);
+        await notifyUser(parsed.data.userId, {
+            title: 'Job assignment request',
+            body: `${row.title} is waiting for your acceptance.`,
+            type: 'assignment_request',
+            jobId: req.params.id
+        }, connection);
+        await audit(req.user.id, 'dispatch_offer_created', 'job', req.params.id, parsed.data, connection);
+    });
+    emitRefresh();
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), true) });
+});
+app.post('/api/jobs/:id/assign-to-me', requireAuth, requirePermission('jobs.dispatch.claim'), requireModuleAccess('dispatch'), async (req, res) => {
+    const row = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    if (!row)
+        return res.status(404).json({ error: 'Job not found' });
+    if (!(await dispatchScopeAllowsJob(req.user, row)))
+        return res.status(403).json({ error: 'Dispatch scope denied' });
+    const result = await transaction(async connection => {
+        const assignResult = await assignJobToUser({
+            jobId: req.params.id,
+            assigneeUserId: req.user.id,
+            actorUserId: req.user.id,
+            note: 'Claimed from dispatch queue',
+            method: 'coordinator_claim',
+            allowReassign: false
+        }, connection);
+        if (!assignResult.error)
+            await audit(req.user.id, 'dispatch_job_claimed', 'job', req.params.id, {}, connection);
+        return assignResult;
+    });
+    if (result.error)
+        return res.status(result.status || 409).json({ error: result.error });
+    emitRefresh();
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), true) });
+});
+app.get('/api/job-coordinators', requireAuth, requirePermission('jobs.dispatch.view'), requireModuleAccess('dispatch'), async (_req, res) => {
+    const coordinators = await query(`SELECT jc.id,jc.user_id userId,u.name userName,jc.department_id departmentId,
+        d.name departmentName,jc.receive_all_client_jobs receiveAllClientJobs,jc.priority_order priorityOrder,
+        jc.is_active isActive,jc.created_at createdAt,jc.updated_at updatedAt
+      FROM job_coordinators jc
+      JOIN users u ON u.id=jc.user_id
+      LEFT JOIN departments d ON d.id=jc.department_id
+      ORDER BY jc.is_active DESC,jc.priority_order,u.name`);
+    res.json({ coordinators: coordinators.map(row => ({ ...row, id: String(row.id), isActive: Boolean(row.isActive), receiveAllClientJobs: Boolean(row.receiveAllClientJobs) })) });
+});
+app.post('/api/job-coordinators', requireAuth, requirePermission('jobs.dispatch.manage_coordinators'), requireModuleAccess('dispatch'), async (req, res) => {
+    const parsed = z.object({
+        userId: z.string().trim().min(1),
+        departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        receiveAllClientJobs: z.boolean().optional().default(true),
+        priorityOrder: z.coerce.number().int().min(1).max(999).optional().default(100),
+        isActive: z.boolean().optional().default(true)
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const userRow = await one(`${internalAssignableUserSelect} AND u.id=?`, [parsed.data.userId]);
+    if (!userRow)
+        return res.status(400).json({ error: 'Active internal coordinator user not found' });
+    const departmentId = parsed.data.departmentId === undefined || parsed.data.departmentId === null || parsed.data.departmentId === ''
+        ? null
+        : optionalId(parsed.data.departmentId);
+    if (Number.isNaN(departmentId))
+        return res.status(400).json({ error: 'Department is invalid' });
+    if (departmentId && !(await one("SELECT id FROM departments WHERE id=? AND status='active'", [departmentId])))
+        return res.status(400).json({ error: 'Active department not found' });
+    const existing = await one('SELECT id FROM job_coordinators WHERE user_id=? AND (department_id <=> ?) LIMIT 1', [parsed.data.userId, departmentId]);
+    if (existing)
+        return res.status(409).json({ error: 'Coordinator already exists for this scope' });
+    const result = await query(`INSERT INTO job_coordinators
+      (user_id,department_id,receive_all_client_jobs,priority_order,is_active,created_by_user_id)
+      VALUES (?,?,?,?,?,?)`, [parsed.data.userId, departmentId, parsed.data.receiveAllClientJobs ? 1 : 0, parsed.data.priorityOrder, parsed.data.isActive ? 1 : 0, req.user.id]);
+    const coordinatorPermissions = ['jobs.dispatch.view', 'jobs.dispatch.assign', 'jobs.dispatch.reassign', 'jobs.dispatch.claim', 'notifications.view', 'profile.view'];
+    for (const permissionId of coordinatorPermissions) {
+        await query(
+            "INSERT INTO user_permission_overrides (user_id,permission_id,effect,created_by) VALUES (?,?, 'grant', ?) ON DUPLICATE KEY UPDATE effect='grant',created_by=VALUES(created_by)",
+            [parsed.data.userId, permissionId, req.user.id]
+        );
+    }
+    await audit(req.user.id, 'job_coordinator_created', 'job_coordinator', String(result.insertId), parsed.data);
+    emitPermissionsUpdated();
+    res.status(201).json({ id: String(result.insertId) });
+});
+app.patch('/api/job-coordinators/:id', requireAuth, requirePermission('jobs.dispatch.manage_coordinators'), requireModuleAccess('dispatch'), async (req, res) => {
+    const parsed = z.object({
+        receiveAllClientJobs: z.boolean().optional(),
+        priorityOrder: z.coerce.number().int().min(1).max(999).optional(),
+        isActive: z.boolean().optional()
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const sets = [];
+    const params = [];
+    if (parsed.data.receiveAllClientJobs !== undefined) {
+        sets.push('receive_all_client_jobs=?');
+        params.push(parsed.data.receiveAllClientJobs ? 1 : 0);
+    }
+    if (parsed.data.priorityOrder !== undefined) {
+        sets.push('priority_order=?');
+        params.push(parsed.data.priorityOrder);
+    }
+    if (parsed.data.isActive !== undefined) {
+        sets.push('is_active=?');
+        params.push(parsed.data.isActive ? 1 : 0);
+    }
+    if (!sets.length)
+        return res.json({ ok: true });
+    params.push(req.params.id);
+    await query(`UPDATE job_coordinators SET ${sets.join(',')} WHERE id=?`, params);
+    await audit(req.user.id, 'job_coordinator_updated', 'job_coordinator', req.params.id, parsed.data);
+    emitPermissionsUpdated();
+    res.json({ ok: true });
 });
 app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), requireModuleAccess('jobs'), async (req, res) => {
     const schema = z.object({
@@ -658,7 +1413,7 @@ app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_
     if (!schema.success)
         return res.status(400).json({ error: schema.error.issues[0].message });
     const filters = schema.data;
-    const includeInternalJobFields = req.user.accountType !== 'client' || canAssignJobs(req.user);
+    const includeInternalJobFields = req.user.accountType !== 'client';
     let jobs = (await loadVisibleJobs(req.user)).map(row => mapJob(row, includeInternalJobFields));
     if (filters.search) {
         const needle = filters.search.toLowerCase();
@@ -691,7 +1446,7 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
         return res.status(404).json({ error: 'Job not found' });
     if (!canAccessJob(req.user, row))
         return res.status(403).json({ error: 'Job access denied' });
-    const includeInternalJobFields = req.user.accountType !== 'client' || canAssignJobs(req.user);
+    const includeInternalJobFields = req.user.accountType !== 'client';
     const job = mapJob(row, includeInternalJobFields);
     const assignmentHistory = includeInternalJobFields
         ? await query(`SELECT ja.id,ja.job_id jobId,ja.previous_assignee_user_id previousAssigneeUserId,
@@ -714,7 +1469,8 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
           WHERE ja.job_id=?
           ORDER BY ja.created_at DESC,ja.id DESC`, [req.params.id])
         : [];
-    res.json({ job, assignmentHistory });
+    const events = await loadJobEvents(req.params.id, includeInternalJobFields);
+    res.json({ job, assignmentHistory, events });
 });
 app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModuleAccess('submit'), async (req, res) => {
     const schema = z.object({
@@ -726,8 +1482,12 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModu
         postedBy: z.string().min(2),
         assetLink: z.string().default(''),
         assignedToUserId: z.string().trim().optional().or(z.literal('')),
+        preferredAssigneeUserId: z.string().trim().optional().or(z.literal('')),
         departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
-        assignmentNote: z.string().trim().max(1000).optional().or(z.literal(''))
+        assignmentNote: z.string().trim().max(1000).optional().or(z.literal('')),
+        desiredDeliveryAt: z.string().trim().optional().or(z.literal('')),
+        referenceLinks: z.union([z.array(z.string()), z.string()]).optional(),
+        specialInstructions: z.string().trim().max(5000).optional().or(z.literal(''))
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
@@ -738,30 +1498,53 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModu
         return res.status(400).json({ error: 'Client is required' });
     if (!(await canUseClientForJob(user, clientId)))
         return res.status(403).json({ error: 'You are not allowed to create jobs for this client' });
+    const isClientSubmission = user.accountType === 'client';
     const assignmentFields = ['assignedToUserId', 'departmentId', 'assignmentNote'];
     const assignmentRequested = assignmentFields.some(key => parsed.data[key] !== undefined);
-    if (assignmentRequested && !canAssignJobs(user))
+    if (!isClientSubmission && assignmentRequested && !canAssignJobs(user))
         return res.status(403).json({ error: 'Job assignment permission required' });
-    const assignedToUserId = parsed.data.assignedToUserId || null;
+    const assignedToUserId = isClientSubmission ? null : parsed.data.assignedToUserId || null;
     const requestedDepartmentId = parsed.data.departmentId === undefined ? null : optionalId(parsed.data.departmentId);
     if (Number.isNaN(requestedDepartmentId))
         return res.status(400).json({ error: 'Department is invalid' });
-    const assigneeValidation = await validateAssigneeForUser(user, assignedToUserId);
+    if (isClientSubmission && !requestedDepartmentId)
+        return res.status(400).json({ error: 'Department is required for client jobs' });
+    const assigneeValidation = isClientSubmission ? { assignee: null } : await validateAssigneeForUser(user, assignedToUserId);
     if (assigneeValidation.error)
         return res.status(assigneeValidation.status).json({ error: assigneeValidation.error });
     const departmentId = requestedDepartmentId || assigneeValidation.assignee?.departmentId || null;
     const departmentValidation = await validateDepartmentForUser(user, departmentId);
     if (departmentValidation.error)
         return res.status(departmentValidation.status).json({ error: departmentValidation.error });
-    const assignmentNote = assignmentRequested ? (parsed.data.assignmentNote || '') : null;
-    const assignmentActivity = assignmentRequested && Boolean(assignedToUserId || departmentValidation.departmentId || assignmentNote);
+    const assignmentSettings = await readAssignmentSettings();
+    const preferredAssigneeUserId = isClientSubmission && assignmentSettings.allowClientPreferredEmployee
+        ? parsed.data.preferredAssigneeUserId || parsed.data.assignedToUserId || null
+        : null;
+    const preferredValidation = isClientSubmission
+        ? await validateClientPreferredAssignee({ preferredAssigneeUserId, departmentId: departmentValidation.departmentId, category: parsed.data.category })
+        : { assignee: null };
+    if (preferredValidation.error)
+        return res.status(preferredValidation.status).json({ error: preferredValidation.error });
+    const assignmentNote = !isClientSubmission && assignmentRequested ? (parsed.data.assignmentNote || '') : null;
+    const assignmentActivity = !isClientSubmission && assignmentRequested && Boolean(assignedToUserId || departmentValidation.departmentId || assignmentNote);
     const id = 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    const now = new Date().toISOString();
+    const now = isoNow();
+    const acceptanceDeadlineAt = isClientSubmission ? addMinutesIso(assignmentSettings.acceptanceMinutes) : null;
+    const referenceLinks = normalizeReferenceLinks(parsed.data.referenceLinks !== undefined ? parsed.data.referenceLinks : parsed.data.assetLink);
+    const assignmentState = isClientSubmission
+        ? (preferredAssigneeUserId ? 'pending_acceptance' : 'needs_assignment')
+        : assignedToUserId ? 'assigned' : departmentValidation.departmentId ? 'unassigned' : 'unassigned';
+    const status = isClientSubmission
+        ? (preferredAssigneeUserId ? 'pending_acceptance' : 'needs_assignment')
+        : assignedToUserId ? 'assigned' : 'submitted';
     const calculatedHours = calculateHours(await settings(), await categoryLoad(), parsed.data.category, parsed.data.priority);
     await transaction(async connection => {
         await query(`INSERT INTO jobs
-            (id,client_id,title,description,category,priority,posted_by,created_by_user_id,assigned_to_user_id,assigned_by_user_id,department_id,assignment_date,assignment_note,asset_link,calculated_hours,team_override_hours,team_override_note,status,date_posted,updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`,
+            (id,client_id,title,description,category,priority,posted_by,created_by_user_id,
+              assigned_to_user_id,assigned_by_user_id,preferred_assignee_user_id,department_id,assignment_date,assignment_note,
+              asset_link,calculated_hours,team_override_hours,team_override_note,status,assignment_state,date_posted,submitted_at,
+              acceptance_deadline_at,accepted_at,assignment_method,assignment_source_user_id,desired_delivery_at,reference_links,special_instructions,updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
             [
                 id,
                 clientId,
@@ -773,6 +1556,7 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModu
                 user.id,
                 assignedToUserId,
                 assignmentActivity ? user.id : null,
+                preferredAssigneeUserId,
                 departmentValidation.departmentId,
                 assignmentActivity ? now : null,
                 assignmentNote,
@@ -780,7 +1564,17 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModu
                 calculatedHours,
                 null,
                 '',
+                status,
+                assignmentState,
                 now,
+                now,
+                acceptanceDeadlineAt,
+                assignedToUserId ? now : null,
+                assignedToUserId ? 'direct' : (preferredAssigneeUserId ? 'client_preference' : null),
+                user.id,
+                parsed.data.desiredDeliveryAt || null,
+                JSON.stringify(referenceLinks),
+                parsed.data.specialInstructions || '',
                 now
             ],
             connection);
@@ -791,10 +1585,57 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModu
                 [id, null, assignedToUserId, user.id, null, departmentValidation.departmentId, assignmentNote || '', new Date()],
                 connection);
         }
+        if (preferredAssigneeUserId) {
+            await createAssignmentOffer({
+                jobId: id,
+                offeredToUserId: preferredAssigneeUserId,
+                offeredByUserId: user.id,
+                offerType: 'client_preferred',
+                expiresAt: acceptanceDeadlineAt
+            }, connection);
+            await notifyUser(preferredAssigneeUserId, {
+                title: 'New job assignment request',
+                body: `${parsed.data.title} was requested by ${parsed.data.postedBy}.`,
+                type: 'assignment_request',
+                jobId: id
+            }, connection);
+        }
+        if (isClientSubmission) {
+            const jobForNotify = { id, department_id: departmentValidation.departmentId, client_id: clientId, title: parsed.data.title };
+            await notifyDepartmentUsers(departmentValidation.departmentId, {
+                title: 'New client job',
+                body: `${parsed.data.title} is waiting in your department queue.`,
+                type: 'client_job_submitted',
+                jobId: id
+            }, connection);
+            await notifyCoordinatorsForJob(jobForNotify, {
+                title: 'New job in dispatch queue',
+                body: `${parsed.data.title} needs dispatch review.`,
+                type: 'dispatch_queue',
+                jobId: id
+            }, connection);
+            await notifyClientUsers(clientId, {
+                title: preferredAssigneeUserId ? 'Job submitted for acceptance' : 'Job submitted for dispatch',
+                body: preferredAssigneeUserId
+                    ? 'Your preferred employee request has been sent for acceptance.'
+                    : 'Your job has been sent to the dispatch team.',
+                type: 'job_submitted',
+                jobId: id
+            }, connection);
+        }
+        await createJobEvent({
+            jobId: id,
+            eventType: 'job_submitted',
+            actorUserId: user.id,
+            visibility: 'client',
+            title: 'Job submitted',
+            body: isClientSubmission ? 'The job request has been received.' : 'The job was created internally.',
+            metadata: { departmentId: departmentValidation.departmentId, preferredAssigneeUserId }
+        }, connection);
         await audit(user.id, 'create', 'job', id, parsed.data, connection);
     });
     emitRefresh();
-    res.status(201).json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [id]), user.accountType !== 'client' || canAssignJobs(user)) });
+    res.status(201).json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [id]), user.accountType !== 'client') });
 });
 app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), requireModuleAccess('jobs'), async (req, res) => {
     const schema = z.object({
@@ -802,7 +1643,7 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
         description: z.string().optional(),
         category: z.string().optional(),
         priority: z.enum(['Low', 'Medium', 'High', 'Urgent']).optional(),
-        status: z.enum(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold', 'completed', 'cancelled']).optional(),
+        status: z.enum(['submitted', 'pending_acceptance', 'needs_assignment', 'assigned', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'review', 'on_hold', 'completed', 'cancelled']).optional(),
         assetLink: z.string().optional(),
         teamOverrideHours: z.number().positive().nullable().optional(),
         teamOverrideNote: z.string().optional(),
@@ -873,6 +1714,10 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
     if (assignmentRequested) {
         sets.push('assigned_by_user_id=?', 'assignment_date=?');
         values.push(req.user.id, now);
+        if (assignedToUserId) {
+            sets.push("assignment_state='assigned'", "status=IF(status IN ('submitted','pending_acceptance','needs_assignment'), 'assigned', status)", 'accepted_at=?', "assignment_method='direct'", 'assignment_source_user_id=?');
+            values.push(now, req.user.id);
+        }
     }
     await transaction(async connection => {
         await query(`UPDATE jobs SET ${sets.join(',')} WHERE id=?`, [...values, req.params.id], connection);
@@ -892,21 +1737,47 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
                 ],
                 connection
             );
+            if (assignedToUserId)
+                await query("UPDATE job_assignment_offers SET status='cancelled' WHERE job_id=? AND status='pending' AND offered_to_user_id<>?", [req.params.id, assignedToUserId], connection);
+            await createJobEvent({
+                jobId: req.params.id,
+                eventType: 'job_updated',
+                actorUserId: req.user.id,
+                visibility: assignmentChanged ? 'client' : 'internal',
+                title: assignmentChanged && assignedToUserId ? 'Job assigned' : 'Job updated',
+                body: assignmentChanged && assigneeValidation.assignee ? `${assigneeValidation.assignee.name} has been assigned to this job.` : 'The job details were updated.'
+            }, connection);
         }
         await audit(req.user.id, 'update', 'job', req.params.id, parsed.data, connection);
     });
     emitRefresh();
-    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client' || canAssignJobs(req.user)) });
+    res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client') });
 });
 app.put('/api/settings', requireAuth, requirePermission('settings.edit'), requireModuleAccess('settings', 'app_settings'), async (req, res) => {
-    const schema = z.object({ categories: z.array(z.object({ name: z.string().min(1), baseHours: z.number().positive() })).min(1), capacityPerCategory: z.number().int().positive(), bufferHoursPerExtraJob: z.number().nonnegative(), startHour: z.number().min(0).max(24), endHour: z.number().min(0).max(24), workDays: z.array(z.number().int().min(0).max(6)).min(1) });
+    const schema = z.object({
+        categories: z.array(z.object({ name: z.string().min(1), baseHours: z.number().positive() })).min(1),
+        capacityPerCategory: z.number().int().positive(),
+        bufferHoursPerExtraJob: z.number().nonnegative(),
+        startHour: z.number().min(0).max(24),
+        endHour: z.number().min(0).max(24),
+        workDays: z.array(z.number().int().min(0).max(6)).min(1),
+        assignmentAcceptanceMinutes: z.coerce.number().int().positive().optional(),
+        assignmentReminderMinutes: z.coerce.number().int().positive().optional(),
+        enableAutoAssignment: z.boolean().optional(),
+        skipOverworked: z.boolean().optional(),
+        maxAutoAssignmentUtilization: z.coerce.number().int().positive().optional(),
+        allowDepartmentClaim: z.boolean().optional(),
+        allowClientPreferredEmployee: z.boolean().optional()
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
-    await query('UPDATE settings SET json=? WHERE id=1', [JSON.stringify(parsed.data)]);
+    const currentSettings = await settings();
+    const nextSettings = { ...currentSettings, ...parsed.data };
+    await query('UPDATE settings SET json=? WHERE id=1', [JSON.stringify(nextSettings)]);
     await audit(req.user.id, 'update', 'settings', '1', parsed.data);
     emitRefresh();
-    res.json({ settings: parsed.data });
+    res.json({ settings: nextSettings });
 });
 app.post('/api/clients', requireAuth, requirePermission('clients.create'), requireModuleAccess('clients'), async (req, res) => {
     const parsed = z.object({ id: z.string().regex(/^[a-z0-9_-]+$/), name: z.string().min(2), password: z.string().min(6) }).safeParse(req.body);
@@ -2004,6 +2875,9 @@ if (publicDir) {
     });
 }
 io.on('connection', socket => { socket.emit('connected', { at: new Date().toISOString() }); });
+setInterval(() => {
+    void processExpiredAssignmentOffers();
+}, 60 * 1000);
 app.use((error, _req, res, _next) => {
     console.error(error);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });

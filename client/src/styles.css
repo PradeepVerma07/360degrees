@@ -680,3 +680,43 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
   .auth-shell .auth-mobile-logo{padding-right:154px}
   .auth-shell .auth-form h2{font-size:26px}
 }
+
+/* Client job dispatch workflow */
+.client-job-routing{align-items:end}
+.assignment-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px;padding:12px;border:1px solid var(--ci-border);border-radius:10px;background:rgba(15,35,70,.025)}
+.assignment-summary span{display:grid;gap:3px;color:var(--ci-text);font-size:13px}
+.assignment-summary b{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ci-muted)}
+.assignment-deadline{color:#9a5b00}
+.job-links{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.job-links a{font-size:13px;font-weight:900;color:#0d6efd}
+.assignment-card-actions,.assignment-request-actions,.dispatch-controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.assignment-card-actions{margin-top:12px}
+.assignment-request-panel,.notifications-panel,.profile-panel,.coordinator-card{display:grid;gap:14px}
+.assignment-request-list,.notification-list,.coordinator-list{display:grid;gap:10px}
+.assignment-request-item,.notification-item,.coordinator-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px;border:1px solid var(--ci-border);border-radius:10px;background:var(--ci-card)}
+.assignment-request-item small,.notification-item small,.coordinator-row small{display:block;color:var(--ci-muted);font-size:12px;margin-top:3px}
+.notification-item.unread{border-color:rgba(13,110,253,.25);box-shadow:0 8px 24px rgba(13,110,253,.08)}
+.notification-item.read{opacity:.75}
+.profile-hero{display:flex;gap:14px;align-items:center;padding-bottom:14px;border-bottom:1px solid var(--ci-border)}
+.profile-avatar{width:56px!important;height:56px!important;font-size:16px!important}
+.profile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.profile-grid div{display:grid;gap:4px;padding:12px;border:1px solid var(--ci-border);border-radius:10px;background:rgba(15,35,70,.025)}
+.profile-grid span{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--ci-muted);font-weight:900}
+.dispatch-page{display:grid;gap:16px}
+.dispatch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(360px,100%),1fr));gap:14px}
+.dispatch-job-card{display:grid;gap:12px}
+.dispatch-job-card>p{margin:0;color:var(--ci-muted);line-height:1.5}
+.dispatch-controls select{min-width:min(260px,100%)}
+.coordinator-row{grid-template-columns:minmax(0,1fr) auto}
+.section-title-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.section-title-row h2,.section-title-row h3{margin:0}
+.section-title-row p{margin:4px 0 0;color:var(--ci-muted)}
+.dashboard-shell.theme-dark .assignment-summary,.dashboard-shell.theme-dark .profile-grid div{background:rgba(255,255,255,.035)}
+.dashboard-shell.theme-dark .assignment-request-item,.dashboard-shell.theme-dark .notification-item,.dashboard-shell.theme-dark .coordinator-row{background:#111a2c;border-color:#26334c}
+@media(max-width:720px){
+  .assignment-request-item,.notification-item,.coordinator-row{grid-template-columns:1fr}
+  .assignment-request-actions,.assignment-card-actions,.dispatch-controls{display:grid;grid-template-columns:1fr;width:100%}
+  .assignment-request-actions button,.assignment-card-actions button,.dispatch-controls button,.dispatch-controls select{width:100%}
+  .dispatch-grid{grid-template-columns:1fr}
+  .profile-hero{align-items:flex-start}
+}

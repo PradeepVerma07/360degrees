@@ -6,9 +6,22 @@ import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import ci360LogoMark from './assets/ci360-logo-mark.png';
 import './styles.css';
-const statusLabels = { submitted: 'Submitted', under_review: 'Under Review', in_progress: 'In Progress', waiting_client: 'Waiting for Client', revision_requested: 'Revision Requested', on_hold: 'On Hold', completed: 'Completed', cancelled: 'Cancelled' };
+const statusLabels = {
+    submitted: 'Submitted',
+    pending_acceptance: 'Pending Acceptance',
+    needs_assignment: 'Needs Assignment',
+    assigned: 'Assigned',
+    under_review: 'Under Review',
+    in_progress: 'In Progress',
+    waiting_client: 'Waiting for Client',
+    revision_requested: 'Revision Requested',
+    review: 'In Review',
+    on_hold: 'On Hold',
+    completed: 'Completed',
+    cancelled: 'Cancelled'
+};
 const fmt = (value) => new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const openStatuses = new Set(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold']);
+const openStatuses = new Set(['submitted', 'pending_acceptance', 'needs_assignment', 'assigned', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'review', 'on_hold']);
 const priorityRank = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
 const isPendingJob = job => openStatuses.has(job.status);
 const isCompletedJob = job => job.status === 'completed';
@@ -36,18 +49,21 @@ const knownDashboardTabs = {
     overview: 'Overview',
     submit: 'Submit a Job',
     jobs: 'By Category',
+    dispatch: 'Job Dispatch',
     settings: 'TAT Standards',
     clients: 'Manage Clients',
     employees: 'Employees',
     users: 'Users & Roles',
     productivity: 'Productivity Intelligence',
     support: 'Support Tickets',
+    notifications: 'Notifications',
+    profile: 'Profile',
     audit: 'Audit Logs',
     app_settings: 'Settings'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
-    : [['overview', 'Overview'], ['submit', data.user?.accountType === 'client' ? 'Log a Job' : 'Submit a Job'], ['jobs', 'My Jobs'], ['support', 'Support Tickets']];
+    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['dispatch', 'Job Dispatch'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['notifications', 'Notifications'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
+    : [['overview', 'Overview'], ['submit', data.user?.accountType === 'client' ? 'Log a Job' : 'Submit a Job'], ['jobs', 'My Jobs'], ['notifications', 'Notifications'], ['support', 'Support Tickets'], ['profile', 'Profile']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('reset_token'))
@@ -208,19 +224,25 @@ export default function App() {
                     ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
                     : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
                         ? _jsx(Clients, { data: data, reload: load })
-                        : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
-                            ? _jsx(Employees, { data: data, setTab: setTab })
-                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'])
-                                ? _jsx(UsersRoles, { data: data, reload: load })
-                                : activeTab === 'productivity' && can(data, 'productivity.view')
-                                    ? _jsx(ProductivityIntelligence, { data: data })
-                                    : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
-                                        ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
-                                        : activeTab === 'audit' && can(data, 'audit.view')
-                                            ? _jsx(AuditLogs, {})
-                                            : activeTab === 'app_settings' && canAny(data, ['settings.view', 'settings.edit'])
-                                                ? _jsx(SystemSettings, { data: data })
-                                                : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
+                        : activeTab === 'dispatch' && can(data, 'jobs.dispatch.view')
+                            ? _jsx(DispatchQueue, { data: data, reload: load })
+                            : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
+                                ? _jsx(Employees, { data: data, setTab: setTab })
+                                : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'])
+                                    ? _jsx(UsersRoles, { data: data, reload: load })
+                                    : activeTab === 'productivity' && can(data, 'productivity.view')
+                                        ? _jsx(ProductivityIntelligence, { data: data })
+                                        : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
+                                            ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
+                                            : activeTab === 'notifications' && can(data, 'notifications.view')
+                                                ? _jsx(NotificationsPanel, { data: data, reload: load })
+                                                : activeTab === 'profile' && can(data, 'profile.view')
+                                                    ? _jsx(ProfilePanel, { data: data })
+                                                    : activeTab === 'audit' && can(data, 'audit.view')
+                                                        ? _jsx(AuditLogs, {})
+                                                        : activeTab === 'app_settings' && canAny(data, ['settings.view', 'settings.edit'])
+                                                            ? _jsx(SystemSettings, { data: data })
+                                                            : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
     return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
@@ -384,17 +406,20 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', productivity: 'total', support: 'support', audit: 'document', app_settings: 'settings' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', dispatch: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', productivity: 'total', support: 'support', notifications: 'bell', profile: 'users', audit: 'document', app_settings: 'settings' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
     jobs: 'Browse every job',
+    dispatch: 'Assignment queue',
     settings: 'Turnaround rules',
     clients: 'Client access',
     employees: 'Internal team',
     users: 'Roles and access',
     productivity: 'Team intelligence',
     support: 'Help and tickets',
+    notifications: 'Alerts and updates',
+    profile: 'Account details',
     audit: 'Activity history',
     app_settings: 'System controls'
 };
@@ -732,11 +757,32 @@ function Submit({ data, reload }) {
         postedBy: '',
         assetLink: '',
         assignedToUserId: '',
+        preferredAssigneeUserId: '',
         departmentId: '',
-        assignmentNote: ''
+        assignmentNote: '',
+        desiredDeliveryAt: '',
+        specialInstructions: ''
     };
     const [form, setForm] = useState(emptyForm);
+    const [clientTeamMembers, setClientTeamMembers] = useState([]);
+    const [teamLoading, setTeamLoading] = useState(false);
     const [message, setMessage] = useState('');
+    useEffect(() => {
+        if (!isClientPortal || !form.departmentId) {
+            setClientTeamMembers([]);
+            return;
+        }
+        let alive = true;
+        setTeamLoading(true);
+        api.jobOptions({ departmentId: form.departmentId, category: form.category })
+            .then(result => { if (alive)
+            setClientTeamMembers(result.teamMembers || []); })
+            .catch(() => { if (alive)
+            setClientTeamMembers([]); })
+            .finally(() => { if (alive)
+            setTeamLoading(false); });
+        return () => { alive = false; };
+    }, [form.departmentId, form.category, isClientPortal]);
     const setAssignee = assignedToUserId => {
         const selected = assignees.find(user => user.id === assignedToUserId);
         setForm(current => ({
@@ -748,7 +794,20 @@ function Submit({ data, reload }) {
     const submit = async (e) => {
         e.preventDefault();
         try {
-            await api.createJob(canAssign ? form : {
+            await api.createJob(isClientPortal ? {
+                clientId: form.clientId,
+                title: form.title,
+                description: form.description,
+                category: form.category,
+                priority: form.priority,
+                postedBy: form.postedBy,
+                assetLink: form.assetLink,
+                departmentId: form.departmentId,
+                preferredAssigneeUserId: form.preferredAssigneeUserId,
+                desiredDeliveryAt: form.desiredDeliveryAt,
+                referenceLinks: form.assetLink ? [form.assetLink] : [],
+                specialInstructions: form.specialInstructions
+            } : canAssign ? form : {
                 clientId: form.clientId,
                 title: form.title,
                 description: form.description,
@@ -757,8 +816,9 @@ function Submit({ data, reload }) {
                 postedBy: form.postedBy,
                 assetLink: form.assetLink
             });
-            setMessage(form.assignedToUserId ? 'Job submitted and assigned successfully.' : isClientPortal ? 'Job logged successfully. Your team will receive the update instantly.' : 'Job submitted successfully. All logged-in users will receive the update instantly.');
+            setMessage(form.preferredAssigneeUserId ? 'Job logged and sent for employee acceptance.' : form.assignedToUserId ? 'Job submitted and assigned successfully.' : isClientPortal ? 'Job logged and sent to dispatch.' : 'Job submitted successfully. All logged-in users will receive the update instantly.');
             setForm(current => ({ ...emptyForm, clientId: current.clientId, category: current.category, priority: current.priority }));
+            setClientTeamMembers([]);
             await reload();
         }
         catch (err) {
@@ -797,7 +857,31 @@ function Submit({ data, reload }) {
                     </select>
                 </label>
             </div>
-            {canAssign && (
+            {isClientPortal && (
+                <>
+                    <div className="row client-job-routing">
+                        <label>Department
+                            <select required value={form.departmentId} onChange={e => setForm({ ...form, departmentId: e.target.value, preferredAssigneeUserId: '' })}>
+                                <option value="">Select department</option>
+                                {departments.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
+                            </select>
+                        </label>
+                        <label>Preferred team member
+                            <select value={form.preferredAssigneeUserId} onChange={e => setForm({ ...form, preferredAssigneeUserId: e.target.value })} disabled={!form.departmentId || teamLoading}>
+                                <option value="">{teamLoading ? 'Loading team...' : 'No preference'}</option>
+                                {clientTeamMembers.map(user => <option value={user.id} key={user.id}>{[user.name, user.designationName].filter(Boolean).join(' - ')}</option>)}
+                            </select>
+                        </label>
+                    </div>
+                    <label>Desired delivery date
+                        <input type="date" value={form.desiredDeliveryAt} onChange={e => setForm({ ...form, desiredDeliveryAt: e.target.value })} />
+                    </label>
+                    <label>Special instructions
+                        <textarea value={form.specialInstructions} onChange={e => setForm({ ...form, specialInstructions: e.target.value })} placeholder="Notes, links, access details, or any context the team should know" />
+                    </label>
+                </>
+            )}
+            {!isClientPortal && canAssign && (
                 <>
                     <div className="row">
                         <label>Assign to employee
@@ -874,6 +958,7 @@ function Jobs({ data, reload, setTab }) {
         return priorityDiff || new Date(a.datePosted).getTime() - new Date(b.datePosted).getTime();
     }), [filtered]);
     const completed = useMemo(() => filtered.filter(isCompletedJob).sort((a, b) => new Date(dateForMonth(b)).getTime() - new Date(dateForMonth(a)).getTime()), [filtered]);
+    const assignmentRequests = data.assignmentRequests || [];
     return _jsxs(_Fragment, { children: [
             isClientPortal && canLogJob && _jsxs("div", { className: "page-title jobs-action-head", children: [
                     _jsxs("div", { children: [
@@ -882,6 +967,7 @@ function Jobs({ data, reload, setTab }) {
                         ] }),
                     _jsxs("button", { type: "button", className: "overview-submit-button", onClick: () => setTab?.('submit'), children: [_jsx(DashboardIcon, { name: "plus" }), "Log a Job"] })
                 ] }),
+            !isClientPortal && assignmentRequests.length > 0 && _jsx(AssignmentRequestsPanel, { requests: assignmentRequests, reload: reload }),
             !isClientPortal && _jsx(CategoryLoadGrid, { data: data }),
             _jsxs("div", { className: "filters", children: [
                     _jsx("input", { value: query, onChange: e => setQuery(e.target.value), placeholder: "Search jobs", "aria-label": "Search jobs" }),
@@ -904,6 +990,46 @@ function CategoryLoadGrid({ data }) {
             return _jsxs("div", { className: `load ${count > capacity ? 'over' : ''}`, children: [_jsx("b", { children: category.name }), _jsx("div", { className: "meter", children: _jsx("i", { style: { width: pct + '%' } }) }), _jsxs("span", { children: [count, " pending \u00B7 comfortable capacity ", capacity] })] }, category.name);
         }) });
 }
+function AssignmentRequestsPanel({ requests, reload }) {
+    const [busy, setBusy] = useState('');
+    const [message, setMessage] = useState('');
+    const act = async (request, action) => {
+        setBusy(`${action}-${request.id}`);
+        setMessage('');
+        try {
+            if (action === 'accept')
+                await api.acceptJobAssignment(request.jobId);
+            else
+                await api.declineJobAssignment(request.jobId);
+            setMessage(action === 'accept' ? 'Assignment accepted.' : 'Assignment declined.');
+            await reload();
+        }
+        catch (err) {
+            setMessage(err.message);
+        }
+        finally {
+            setBusy('');
+        }
+    };
+    return _jsxs("section", { className: "dashboard-card assignment-request-panel", children: [
+            _jsxs("div", { className: "section-title-row", children: [
+                    _jsxs("div", { children: [_jsx("h3", { children: "Assignment Requests" }), _jsx("p", { children: "Jobs waiting for your acceptance." })] }),
+                    _jsx("span", { className: "badge status", children: requests.length })
+                ] }),
+            message && _jsx("div", { className: "alert", children: message }),
+            _jsx("div", { className: "assignment-request-list", children: requests.map(request => _jsxs("article", { className: "assignment-request-item", children: [
+                        _jsxs("div", { children: [
+                                _jsx("b", { children: request.jobTitle || request.jobId }),
+                                _jsxs("small", { children: [request.clientId, " · ", request.category, " · ", request.departmentName || 'No department'] }),
+                                request.expiresAt && _jsxs("small", { children: ["Respond by ", shortDateTime(request.expiresAt)] })
+                            ] }),
+                        _jsxs("div", { className: "assignment-request-actions", children: [
+                                _jsx("button", { type: "button", className: "primary", disabled: Boolean(busy), onClick: () => act(request, 'accept'), children: busy === `accept-${request.id}` ? 'Accepting...' : 'Accept' }),
+                                _jsx("button", { type: "button", className: "danger ghost", disabled: Boolean(busy), onClick: () => act(request, 'decline'), children: busy === `decline-${request.id}` ? 'Declining...' : 'Decline' })
+                            ] })
+                    ] }, request.id)) })
+        ] });
+}
 function JobCard({ job, data, editable = false, reload }) {
     const [status, setStatus] = useState(job.status);
     const [hours, setHours] = useState(job.teamOverrideHours ?? job.calculatedHours);
@@ -911,6 +1037,8 @@ function JobCard({ job, data, editable = false, reload }) {
     const [assignee, setAssignee] = useState(job.assignedToUserId || '');
     const [department, setDepartment] = useState(job.departmentId || '');
     const [assignmentNote, setAssignmentNote] = useState(job.assignmentNote || '');
+    const [actionBusy, setActionBusy] = useState('');
+    const [actionMessage, setActionMessage] = useState('');
     const effectiveHours = job.teamOverrideHours ?? job.calculatedHours;
     const due = addWorkingHours(new Date(job.datePosted), effectiveHours, data.settings);
     const completed = isCompletedJob(job);
@@ -920,6 +1048,7 @@ function JobCard({ job, data, editable = false, reload }) {
     const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
     const canChangeStatus = canAny(data, ['jobs.edit', 'jobs.update_status']);
     const canOverrideTat = can(data, 'jobs.override_tat');
+    const request = (data.assignmentRequests || []).find(item => item.jobId === job.id);
     const changeAssignee = assignedToUserId => {
         const selected = (data.assignees || []).find(user => user.id === assignedToUserId);
         setAssignee(assignedToUserId);
@@ -942,6 +1071,24 @@ function JobCard({ job, data, editable = false, reload }) {
         await api.updateJob(job.id, patch);
         await reload?.();
     };
+    const respondToRequest = async action => {
+        setActionBusy(action);
+        setActionMessage('');
+        try {
+            if (action === 'accept')
+                await api.acceptJobAssignment(job.id);
+            else
+                await api.declineJobAssignment(job.id);
+            setActionMessage(action === 'accept' ? 'Assignment accepted.' : 'Assignment declined.');
+            await reload?.();
+        }
+        catch (err) {
+            setActionMessage(err.message);
+        }
+        finally {
+            setActionBusy('');
+        }
+    };
     return _jsxs("article", { className: `job priority-${job.priority} ${completed ? 'completed' : ''}`, children: [
             _jsxs("div", { className: "job-head", children: [
                     _jsxs("div", { children: [_jsx("h3", { children: job.title }), _jsxs("p", { children: ["Posted by ", _jsx("b", { children: job.postedBy }), " on ", fmt(job.datePosted)] })] }),
@@ -949,6 +1096,7 @@ function JobCard({ job, data, editable = false, reload }) {
                             can(data, 'jobs.view_all') && _jsx("span", { className: "badge client", children: client }),
                             job.assignedToName && _jsx("span", { className: "badge team", children: job.assignedToName }),
                             job.departmentName && _jsx("span", { className: "badge category", children: job.departmentName }),
+                            job.preferredAssigneeName && !job.assignedToName && _jsxs("span", { className: "badge team", children: ["Preferred: ", job.preferredAssigneeName] }),
                             _jsx("span", { className: "badge category", children: job.category }),
                             _jsx("span", { className: `badge ${job.priority}`, children: job.priority }),
                             teamSet && _jsx("span", { className: "badge team", children: "Team-set TAT" }),
@@ -957,9 +1105,22 @@ function JobCard({ job, data, editable = false, reload }) {
                 ] }),
             job.description && _jsx("p", { className: "description", children: job.description }),
             job.assetLink && _jsx("a", { href: job.assetLink, target: "_blank", rel: "noreferrer", children: "View assets \u2197" }),
+            job.referenceLinks?.length > 0 && _jsx("div", { className: "job-links", children: job.referenceLinks.map(link => _jsx("a", { href: link, target: "_blank", rel: "noreferrer", children: "Reference link" }, link)) }),
             completed ? _jsxs("p", { className: "due", children: ["Completed on ", _jsx("b", { children: fmt(dateForMonth(job)) })] }) : _jsxs("p", { className: "due", children: [teamSet ? "Team TAT: " : "System TAT: ", _jsxs("b", { children: [effectiveHours, " hrs"] }), " - due by ", _jsx("b", { children: fmt(due) }), overdue && _jsx("span", { className: "overdue", children: " (overdue)" })] }),
+            job.acceptanceDeadlineAt && job.status === 'pending_acceptance' && _jsxs("p", { className: "due assignment-deadline", children: ["Acceptance deadline: ", _jsx("b", { children: shortDateTime(job.acceptanceDeadlineAt) })] }),
+            (job.assignedToName || job.departmentName || job.assignmentState) && _jsxs("div", { className: "assignment-summary", children: [
+                    _jsxs("span", { children: [_jsx("b", { children: "State" }), statusLabels[job.assignmentState] || job.assignmentState || 'Unassigned'] }),
+                    job.departmentName && _jsxs("span", { children: [_jsx("b", { children: "Department" }), job.departmentName] }),
+                    job.assignedToName && _jsxs("span", { children: [_jsx("b", { children: "Assignee" }), job.assignedToName] })
+                ] }),
+            job.specialInstructions && _jsxs("div", { className: "team-note", children: ["Instructions: ", job.specialInstructions] }),
             job.teamOverrideNote && _jsxs("div", { className: "team-note", children: ["Team note: ", job.teamOverrideNote] }),
             job.assignmentNote && _jsxs("div", { className: "team-note", children: ["Assignment note: ", job.assignmentNote] }),
+            actionMessage && _jsx("div", { className: "alert", children: actionMessage }),
+            request && _jsxs("div", { className: "assignment-card-actions", children: [
+                    _jsx("button", { type: "button", className: "primary", disabled: Boolean(actionBusy), onClick: () => respondToRequest('accept'), children: actionBusy === 'accept' ? 'Accepting...' : 'Accept Assignment' }),
+                    _jsx("button", { type: "button", className: "danger ghost", disabled: Boolean(actionBusy), onClick: () => respondToRequest('decline'), children: actionBusy === 'decline' ? 'Declining...' : 'Decline' })
+                ] }),
             editable && canAny(data, ['jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign']) && _jsxs("div", { className: "editbar job-editbar", children: [
                     canChangeStatus && _jsx("select", { value: status, onChange: e => setStatus(e.target.value), children: Object.entries(statusLabels).map(([v, l]) => _jsx("option", { value: v, children: l }, v)) }),
                     canOverrideTat && _jsx("input", { type: "number", min: "1", value: hours, onChange: e => setHours(Number(e.target.value)), "aria-label": "TAT hours" }),
@@ -968,6 +1129,130 @@ function JobCard({ job, data, editable = false, reload }) {
                     canAssign && _jsxs("select", { value: department, onChange: e => setDepartment(e.target.value), "aria-label": "Job department", children: [_jsx("option", { value: "", children: "No department" }), (data.departments || []).map(item => _jsx("option", { value: item.id, children: item.name }, item.id))] }),
                     canAssign && _jsx("input", { value: assignmentNote, onChange: e => setAssignmentNote(e.target.value), placeholder: "Assignment note" }),
                     _jsx("button", { type: "button", onClick: save, children: "Save" })
+                ] })
+        ] });
+}
+function NotificationsPanel({ data, reload }) {
+    const notifications = data.notifications || [];
+    const [busy, setBusy] = useState('');
+    const unread = notifications.filter(item => !item.isRead).length;
+    const markRead = async id => {
+        setBusy(id);
+        await api.markNotificationRead(id);
+        await reload();
+        setBusy('');
+    };
+    const markAll = async () => {
+        setBusy('all');
+        await api.markAllNotificationsRead();
+        await reload();
+        setBusy('');
+    };
+    return _jsxs("section", { className: "dashboard-card notifications-panel", children: [
+            _jsxs("div", { className: "section-title-row", children: [
+                    _jsxs("div", { children: [_jsx("h2", { children: "Notifications" }), _jsxs("p", { children: [unread, " unread update", unread === 1 ? '' : 's'] })] }),
+                    _jsx("button", { type: "button", disabled: !unread || busy === 'all', onClick: markAll, children: busy === 'all' ? 'Marking...' : 'Mark all read' })
+                ] }),
+            notifications.length ? _jsx("div", { className: "notification-list", children: notifications.map(item => _jsxs("article", { className: `notification-item ${item.isRead ? 'read' : 'unread'}`, children: [
+                        _jsxs("div", { children: [
+                                _jsx("b", { children: item.title }),
+                                _jsx("p", { children: item.body }),
+                                _jsx("small", { children: shortDateTime(item.createdAt) })
+                            ] }),
+                        !item.isRead && _jsx("button", { type: "button", disabled: busy === item.id, onClick: () => markRead(item.id), children: busy === item.id ? 'Saving...' : 'Read' })
+                    ] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No notifications", body: "Workflow updates and assignment alerts will appear here." })
+        ] });
+}
+function ProfilePanel({ data }) {
+    const user = data.user || {};
+    return _jsxs("section", { className: "dashboard-card profile-panel", children: [
+            _jsxs("div", { className: "profile-hero", children: [
+                    _jsx("span", { className: "dashboard-avatar profile-avatar", children: initialsFor(user.name) }),
+                    _jsxs("div", { children: [_jsx("h2", { children: user.name || 'User' }), _jsx("p", { children: user.roleName || user.accountType || 'Workspace user' })] })
+                ] }),
+            _jsxs("div", { className: "profile-grid", children: [
+                    _jsxs("div", { children: [_jsx("span", { children: "User ID" }), _jsx("b", { children: user.id || '-' })] }),
+                    _jsxs("div", { children: [_jsx("span", { children: "Email" }), _jsx("b", { children: user.email || '-' })] }),
+                    _jsxs("div", { children: [_jsx("span", { children: "Phone" }), _jsx("b", { children: user.phone || '-' })] }),
+                    _jsxs("div", { children: [_jsx("span", { children: "Department" }), _jsx("b", { children: user.departmentName || '-' })] }),
+                    _jsxs("div", { children: [_jsx("span", { children: "Designation" }), _jsx("b", { children: user.designationName || '-' })] }),
+                    _jsxs("div", { children: [_jsx("span", { children: "Status" }), _jsx("b", { children: user.status || '-' })] })
+                ] })
+        ] });
+}
+function DispatchQueue({ data, reload }) {
+    const [queue, setQueue] = useState(data.dispatchQueue || []);
+    const [coordinators, setCoordinators] = useState([]);
+    const [selectedUser, setSelectedUser] = useState('');
+    const [message, setMessage] = useState('');
+    const canManage = can(data, 'jobs.dispatch.manage_coordinators');
+    const loadDispatch = useCallback(async () => {
+        const [queueResult, coordinatorResult] = await Promise.all([
+            api.dispatchQueue(),
+            can(data, 'jobs.dispatch.view') ? api.jobCoordinators().catch(() => ({ coordinators: [] })) : Promise.resolve({ coordinators: [] })
+        ]);
+        setQueue(queueResult.dispatchQueue || []);
+        setCoordinators(coordinatorResult.coordinators || []);
+    }, [data]);
+    useEffect(() => { loadDispatch().catch(() => { }); }, [loadDispatch]);
+    const dispatchOffer = async (job, userId) => {
+        if (!userId)
+            return setMessage('Choose an employee first.');
+        await api.createDispatchOffer(job.id, { userId, departmentId: job.departmentId || '' });
+        setMessage('Assignment offer sent.');
+        await Promise.all([loadDispatch(), reload()]);
+    };
+    const claim = async job => {
+        await api.assignJobToMe(job.id);
+        setMessage('Job assigned to you.');
+        await Promise.all([loadDispatch(), reload()]);
+    };
+    const addCoordinator = async () => {
+        if (!selectedUser)
+            return setMessage('Choose a coordinator user.');
+        await api.createJobCoordinator({ userId: selectedUser, receiveAllClientJobs: true, priorityOrder: 50, isActive: true });
+        setSelectedUser('');
+        setMessage('Coordinator added.');
+        await loadDispatch();
+    };
+    return _jsxs("section", { className: "dispatch-page", children: [
+            _jsxs("div", { className: "management-header", children: [
+                    _jsxs("div", { children: [_jsx("span", { children: "Job Dispatch" }), _jsx("h2", { children: "Dispatch Queue" }), _jsx("p", { children: "Review client jobs, send acceptance requests, or claim work from your queue." })] }),
+                    _jsx("button", { type: "button", onClick: () => loadDispatch(), children: "Refresh" })
+                ] }),
+            message && _jsx("div", { className: "alert", children: message }),
+            canManage && _jsxs("article", { className: "dashboard-card coordinator-card", children: [
+                    _jsxs("div", { className: "section-title-row", children: [_jsxs("div", { children: [_jsx("h3", { children: "Job Coordinators" }), _jsx("p", { children: "Urna and Mansi are seeded automatically if their users exist." })] })] }),
+                    _jsxs("div", { className: "dispatch-controls", children: [
+                            _jsxs("select", { value: selectedUser, onChange: e => setSelectedUser(e.target.value), children: [_jsx("option", { value: "", children: "Choose internal user" }), (data.assignees || []).map(user => _jsx("option", { value: user.id, children: assigneeLabelFor(user) }, user.id))] }),
+                            _jsx("button", { type: "button", className: "primary", onClick: addCoordinator, children: "Add Coordinator" })
+                        ] }),
+                    _jsx("div", { className: "coordinator-list", children: coordinators.map(item => _jsxs("div", { className: "coordinator-row", children: [
+                                _jsxs("div", { children: [_jsx("b", { children: item.userName }), _jsx("small", { children: item.departmentName || 'All departments' })] }),
+                                _jsx("span", { className: `badge ${item.isActive ? 'status' : ''}`, children: item.isActive ? 'Active' : 'Inactive' })
+                            ] }, item.id)) })
+                ] }),
+            queue.length ? _jsx("div", { className: "dispatch-grid", children: queue.map(job => _jsx(DispatchJobCard, { job: job, data: data, onOffer: dispatchOffer, onClaim: claim }, job.id)) }) : _jsx(DashboardEmptyState, { title: "Dispatch queue clear", body: "New client jobs needing assignment will appear here." })
+        ] });
+}
+function DispatchJobCard({ job, data, onOffer, onClaim }) {
+    const [userId, setUserId] = useState(job.preferredAssigneeUserId || '');
+    const scopedAssignees = (data.assignees || []).filter(user => !job.departmentId || Number(user.departmentId || 0) === Number(job.departmentId));
+    return _jsxs("article", { className: "dashboard-card dispatch-job-card", children: [
+            _jsxs("div", { className: "job-head", children: [
+                    _jsxs("div", { children: [_jsx("h3", { children: job.title }), _jsxs("p", { children: [clientNameFor(data, job.clientId), " | ", job.category, " | ", job.priority] })] }),
+                    _jsx("span", { className: "badge status", children: statusLabels[job.status] || job.status })
+                ] }),
+            _jsx("p", { children: job.description || 'No description provided.' }),
+            _jsxs("div", { className: "assignment-summary", children: [
+                    _jsxs("span", { children: [_jsx("b", { children: "Department" }), job.departmentName || 'No department'] }),
+                    _jsxs("span", { children: [_jsx("b", { children: "Preferred" }), job.preferredAssigneeName || 'None'] }),
+                    job.acceptanceDeadlineAt && _jsxs("span", { children: [_jsx("b", { children: "Deadline" }), shortDateTime(job.acceptanceDeadlineAt)] })
+                ] }),
+            _jsxs("div", { className: "dispatch-controls", children: [
+                    _jsxs("select", { value: userId, onChange: e => setUserId(e.target.value), children: [_jsx("option", { value: "", children: "Choose employee" }), scopedAssignees.map(user => _jsx("option", { value: user.id, children: assigneeLabelFor(user) }, user.id))] }),
+                    canAny(data, ['jobs.dispatch.assign', 'jobs.dispatch.reassign']) && _jsx("button", { type: "button", className: "primary", onClick: () => onOffer(job, userId), children: "Send Offer" }),
+                    can(data, 'jobs.dispatch.claim') && _jsx("button", { type: "button", onClick: () => onClaim(job), children: "Assign to Me" })
                 ] })
         ] });
 }

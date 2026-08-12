@@ -6,6 +6,12 @@ export const permissions = [
   ['jobs.edit', 'jobs', 'edit', 'Edit jobs'],
   ['jobs.assign', 'jobs', 'assign', 'Assign jobs'],
   ['jobs.reassign', 'jobs', 'reassign', 'Reassign jobs'],
+  ['jobs.dispatch.view', 'jobs', 'dispatch_view', 'View dispatch queue'],
+  ['jobs.dispatch.assign', 'jobs', 'dispatch_assign', 'Send job assignment offers'],
+  ['jobs.dispatch.reassign', 'jobs', 'dispatch_reassign', 'Reassign dispatch jobs'],
+  ['jobs.dispatch.claim', 'jobs', 'dispatch_claim', 'Claim jobs from dispatch'],
+  ['jobs.dispatch.override', 'jobs', 'dispatch_override', 'Override dispatch rules'],
+  ['jobs.dispatch.manage_coordinators', 'jobs', 'dispatch_manage_coordinators', 'Manage job coordinators'],
   ['jobs.view_department', 'jobs', 'view_department', 'View department jobs'],
   ['jobs.update_status', 'jobs', 'update_status', 'Update job status'],
   ['jobs.override_tat', 'jobs', 'override_tat', 'Override job TAT'],
@@ -34,6 +40,8 @@ export const permissions = [
   ['support.reply', 'support', 'reply', 'Reply to support tickets'],
   ['support.assign', 'support', 'assign', 'Assign support tickets'],
   ['support.manage', 'support', 'manage', 'Manage support tickets'],
+  ['notifications.view', 'notifications', 'view', 'View notifications'],
+  ['profile.view', 'profile', 'view', 'View own profile'],
   ['settings.view', 'settings', 'view', 'View settings'],
   ['settings.edit', 'settings', 'edit', 'Edit settings'],
   ['modules.view_access_rules', 'modules', 'view_access_rules', 'View module access rules'],
@@ -71,6 +79,12 @@ export const rolePermissions = {
     'jobs.edit',
     'jobs.assign',
     'jobs.reassign',
+    'jobs.dispatch.view',
+    'jobs.dispatch.assign',
+    'jobs.dispatch.reassign',
+    'jobs.dispatch.claim',
+    'jobs.dispatch.override',
+    'jobs.dispatch.manage_coordinators',
     'jobs.view_department',
     'jobs.update_status',
     'jobs.override_tat',
@@ -98,6 +112,8 @@ export const rolePermissions = {
     'support.reply',
     'support.assign',
     'support.manage',
+    'notifications.view',
+    'profile.view',
     'settings.view',
     'settings.edit',
     'audit.view'
@@ -109,11 +125,17 @@ export const rolePermissions = {
     'jobs.create',
     'jobs.assign',
     'jobs.reassign',
+    'jobs.dispatch.view',
+    'jobs.dispatch.assign',
+    'jobs.dispatch.reassign',
+    'jobs.dispatch.claim',
     'jobs.update_status',
     'clients.view',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'notifications.view',
+    'profile.view'
   ],
   employee: [
     'dashboard.view',
@@ -122,23 +144,28 @@ export const rolePermissions = {
     'clients.view',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'notifications.view',
+    'profile.view'
   ],
   client: [
     'dashboard.view',
     'jobs.view_own',
     'jobs.create',
-    'jobs.assign',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'notifications.view',
+    'profile.view'
   ],
   junior_employee: [
     'dashboard.view',
     'jobs.view_own',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'notifications.view',
+    'profile.view'
   ]
 };
 
@@ -146,12 +173,25 @@ export const moduleCatalog = [
   { id: 'overview', label: 'Overview', permissionAny: ['dashboard.view'] },
   { id: 'submit', label: 'Submit a Job', permissionAny: ['jobs.create'] },
   { id: 'jobs', label: 'By Category', permissionAny: ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'] },
+  {
+    id: 'dispatch',
+    label: 'Job Dispatch',
+    permissionAny: [
+      'jobs.dispatch.view',
+      'jobs.dispatch.assign',
+      'jobs.dispatch.reassign',
+      'jobs.dispatch.claim',
+      'jobs.dispatch.override'
+    ]
+  },
   { id: 'settings', label: 'TAT Standards', permissionAny: ['settings.view', 'settings.edit'] },
   { id: 'clients', label: 'Manage Clients', permissionAny: ['clients.view_all', 'clients.view', 'clients.create'] },
   { id: 'employees', label: 'Employees', permissionAny: ['employees.view', 'employees.create', 'employees.edit'] },
   { id: 'users', label: 'Users & Roles', permissionAny: ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'] },
   { id: 'productivity', label: 'Productivity Intelligence', permissionAny: ['productivity.view'] },
   { id: 'support', label: 'Support Tickets', permissionAny: ['support.view_all', 'support.view_own', 'support.create'] },
+  { id: 'notifications', label: 'Notifications', permissionAny: ['notifications.view'] },
+  { id: 'profile', label: 'Profile', permissionAny: ['profile.view'] },
   { id: 'audit', label: 'Audit Logs', permissionAny: ['audit.view'] },
   { id: 'app_settings', label: 'Settings', permissionAny: ['settings.view', 'settings.edit'] }
 ];

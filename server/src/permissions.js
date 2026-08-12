@@ -10,6 +10,12 @@ const legacyPermissionFallback = {
     'jobs.edit',
     'jobs.assign',
     'jobs.reassign',
+    'jobs.dispatch.view',
+    'jobs.dispatch.assign',
+    'jobs.dispatch.reassign',
+    'jobs.dispatch.claim',
+    'jobs.dispatch.override',
+    'jobs.dispatch.manage_coordinators',
     'jobs.view_department',
     'jobs.update_status',
     'jobs.override_tat',
@@ -37,6 +43,8 @@ const legacyPermissionFallback = {
     'support.reply',
     'support.assign',
     'support.manage',
+    'notifications.view',
+    'profile.view',
     'settings.view',
     'settings.edit',
     'audit.view'
@@ -45,10 +53,11 @@ const legacyPermissionFallback = {
     'dashboard.view',
     'jobs.view_own',
     'jobs.create',
-    'jobs.assign',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'notifications.view',
+    'profile.view'
   ])
 };
 
