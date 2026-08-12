@@ -38,6 +38,16 @@ export const permissions = [
   ['settings.edit', 'settings', 'edit', 'Edit settings'],
   ['modules.view_access_rules', 'modules', 'view_access_rules', 'View module access rules'],
   ['modules.manage_access', 'modules', 'manage_access', 'Manage module access rules'],
+  ['productivity.view', 'productivity', 'view', 'View Productivity Intelligence'],
+  ['productivity.jobs.create', 'productivity', 'jobs_create', 'Log productivity jobs'],
+  ['productivity.jobs.manage', 'productivity', 'jobs_manage', 'Manage productivity jobs'],
+  ['productivity.accounts.manage', 'productivity', 'accounts_manage', 'Manage productivity account rosters'],
+  ['productivity.targets.manage', 'productivity', 'targets_manage', 'Manage productivity targets'],
+  ['productivity.services.manage', 'productivity', 'services_manage', 'Manage productivity services'],
+  ['productivity.settings.manage', 'productivity', 'settings_manage', 'Manage productivity employee settings'],
+  ['productivity.salaries.view', 'productivity', 'salaries_view', 'View private salary grades'],
+  ['productivity.salaries.manage', 'productivity', 'salaries_manage', 'Manage private salary grades'],
+  ['productivity.export', 'productivity', 'export', 'Export productivity data'],
   ['audit.view', 'audit', 'view', 'View audit logs']
 ];
 
@@ -140,6 +150,7 @@ export const moduleCatalog = [
   { id: 'clients', label: 'Manage Clients', permissionAny: ['clients.view_all', 'clients.view', 'clients.create'] },
   { id: 'employees', label: 'Employees', permissionAny: ['employees.view', 'employees.create', 'employees.edit'] },
   { id: 'users', label: 'Users & Roles', permissionAny: ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'] },
+  { id: 'productivity', label: 'Productivity Intelligence', permissionAny: ['productivity.view'] },
   { id: 'support', label: 'Support Tickets', permissionAny: ['support.view_all', 'support.view_own', 'support.create'] },
   { id: 'audit', label: 'Audit Logs', permissionAny: ['audit.view'] },
   { id: 'app_settings', label: 'Settings', permissionAny: ['settings.view', 'settings.edit'] }

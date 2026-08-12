@@ -18,6 +18,7 @@ const moduleDescriptions = {
   clients: 'Client account management',
   employees: 'Internal employee directory',
   users: 'Users, roles, permissions and hierarchy',
+  productivity: 'Productivity analytics, targets, account rosters and salary-private efficiency',
   support: 'Support tickets and conversations',
   audit: 'Security and activity history',
   app_settings: 'Platform settings and controls'
@@ -31,6 +32,7 @@ const moduleIcons = {
   clients: 'users',
   employees: 'users',
   users: 'shield',
+  productivity: 'total',
   support: 'support',
   audit: 'document',
   app_settings: 'settings'

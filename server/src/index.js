@@ -33,6 +33,28 @@ import {
     saveModuleAccessRule,
     validateModuleAccessRule
 } from './moduleAccessService.js';
+import {
+    createOrUpdateProductivityJob,
+    deleteProductivityJob,
+    getAccounts,
+    getAllJobs,
+    getAnalysis,
+    getByClient,
+    getByPerson,
+    getDailyLog,
+    getDashboard,
+    getReports,
+    getTargets,
+    loadProductivityJobs,
+    productivityMeta,
+    productivityResponsibilities,
+    reassignRosterAccounts,
+    resolveProductivityPeriod,
+    salaryGradesForOwner,
+    saveRoster,
+    saveTarget,
+    validateProductivityDates
+} from './productivityService.js';
 import { calculateHours } from './tat.js';
 const app = express();
 app.set('trust proxy', 1);
@@ -85,6 +107,7 @@ app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
 const emitPermissionsUpdated = () => io.emit('permissions:updated', { at: new Date().toISOString() });
+const emitProductivityChanged = (payload = {}) => io.emit('productivity:changed', { at: new Date().toISOString(), ...payload });
 const loginRateKey = req => `${req.ip || req.socket.remoteAddress || 'unknown'}:${String(req.body?.id || '').trim().toLowerCase().slice(0, 120)}`;
 const checkLoginRateLimit = (req, res, next) => {
     const key = loginRateKey(req);
@@ -202,6 +225,59 @@ const moduleAccessPayloadSchema = z.object({
     conditions: z.array(accessConditionSchema).optional().default([]),
     triggers: z.array(accessTriggerSchema).optional().default([]),
     advancedRules: z.array(accessAdvancedRuleSchema).optional().default([])
+});
+const numericId = z.union([z.string(), z.number()]).transform(value => Number(value)).pipe(z.number().int().positive());
+const productivityJobPayloadSchema = z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+    coreJobId: z.string().trim().optional().nullable().default(''),
+    clientId: z.string().trim().min(1),
+    startDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
+    completionDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable().or(z.literal('')).default(''),
+    valueAmount: z.coerce.number().nonnegative(),
+    description: z.string().trim().max(5000).optional().default(''),
+    serviceIds: z.array(numericId).min(1),
+    assignments: z.array(z.object({
+        userId: z.string().trim().min(1),
+        revenuePercent: z.coerce.number().min(0).max(100),
+        hoursSpent: z.coerce.number().min(0)
+    })).min(1)
+});
+const productivityRosterPayloadSchema = z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+    clientId: z.string().trim().min(1),
+    nature: z.enum(['Existing', 'Prospect']).default('Existing'),
+    difficulty: z.coerce.number().int().min(1).max(10),
+    comments: z.string().trim().max(5000).optional().default(''),
+    assignments: z.array(z.object({
+        responsibilityKey: z.string().trim().min(1),
+        assigneeType: z.enum(['employee', 'external', 'tbd']).default('tbd'),
+        userId: z.string().trim().optional().nullable().default(''),
+        externalName: z.string().trim().optional().nullable().default('')
+    })).default([])
+});
+const productivityTargetPayloadSchema = z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+    userId: z.string().trim().min(1),
+    serviceId: numericId,
+    quantity: z.coerce.number().positive(),
+    unit: z.enum(['count', 'hours']).default('count'),
+    period: z.enum(['day', 'week', 'month']).default('week'),
+    isActive: z.boolean().optional().default(true)
+});
+const productivityServicePayloadSchema = z.object({
+    name: z.string().trim().min(2).max(180),
+    referenceHours: z.coerce.number().min(0).default(0),
+    isActive: z.boolean().optional().default(true)
+});
+const productivityEmployeeSettingsSchema = z.object({
+    userId: z.string().trim().min(1),
+    weeklyCapacityHours: z.coerce.number().positive().max(168),
+    productivityStatus: z.enum(['active', 'intern', 'vendor', 'inactive']).default('active')
+});
+const productivitySalaryGradeSchema = z.object({
+    label: z.string().trim().min(1).max(80),
+    minAmount: z.coerce.number().min(0),
+    maxAmount: z.coerce.number().min(0)
 });
 const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'jobs.assign', 'support.view_own', 'support.create', 'support.reply']);
 const mapAttachment = (row) => ({
@@ -418,6 +494,57 @@ const validatePermissionIds = async (permissionIds, roleType) => {
             return { error: 'Client roles cannot receive internal administrative permissions' };
     }
     return { permissionIds: uniqueIds };
+};
+const productivityInternal = (req, res, next) => {
+    if (req.user.accountType === 'client')
+        return res.status(403).json({ error: 'Productivity Intelligence is internal only' });
+    next();
+};
+const productivityRange = req => resolveProductivityPeriod(req.query);
+const emitProductivityMutation = (entity, id) => {
+    emitProductivityChanged({ entity, id });
+    emitRefresh();
+};
+const validateProductivityReferences = async payload => {
+    const client = await one("SELECT id FROM clients WHERE id=? AND status='active'", [payload.clientId]);
+    if (!client)
+        return 'Active client not found';
+    const serviceIds = [...new Set(payload.serviceIds || [])];
+    const services = await query(`SELECT id FROM productivity_services WHERE id IN (${serviceIds.map(() => '?').join(',')}) AND is_active=1`, serviceIds);
+    if (services.length !== serviceIds.length)
+        return 'One or more active productivity services were not found';
+    const userIds = [...new Set((payload.assignments || []).map(assignment => assignment.userId))];
+    const users = await query(`SELECT id FROM users WHERE id IN (${userIds.map(() => '?').join(',')}) AND status='active' AND COALESCE(account_type,role)<>'client'`, userIds);
+    if (users.length !== userIds.length)
+        return 'One or more active internal assignees were not found';
+    const dateError = validateProductivityDates(payload);
+    if (dateError)
+        return dateError;
+    const totalPercent = payload.assignments.reduce((sum, assignment) => sum + Number(assignment.revenuePercent || 0), 0);
+    if (Math.abs(totalPercent - 100) > 0.01)
+        return 'Revenue allocation must total exactly 100%';
+    return '';
+};
+const normalizeRosterAssignments = assignments => assignments.flatMap(assignment => {
+    if (!productivityResponsibilities.some(([key]) => key === assignment.responsibilityKey))
+        return [];
+    if (assignment.assigneeType === 'employee' && assignment.userId)
+        return [{ ...assignment, externalName: '' }];
+    if (assignment.assigneeType === 'external' && assignment.externalName)
+        return [{ ...assignment, userId: '' }];
+    return [{ responsibilityKey: assignment.responsibilityKey, assigneeType: 'tbd', userId: '', externalName: '' }];
+});
+const validateRosterReferences = async payload => {
+    const client = await one("SELECT id FROM clients WHERE id=? AND status='active'", [payload.clientId]);
+    if (!client)
+        return 'Active client not found';
+    const userIds = [...new Set(payload.assignments.filter(item => item.assigneeType === 'employee' && item.userId).map(item => item.userId))];
+    if (userIds.length) {
+        const users = await query(`SELECT id FROM users WHERE id IN (${userIds.map(() => '?').join(',')}) AND status='active' AND COALESCE(account_type,role)<>'client'`, userIds);
+        if (users.length !== userIds.length)
+            return 'One or more roster employees were not found';
+    }
+    return '';
 };
 const ticketDetail = async ticket => {
     const messages = (await query('SELECT * FROM support_ticket_messages WHERE ticket_id=? ORDER BY created_at ASC,id ASC', [ticket.id])).map(mapMessage);
@@ -1586,6 +1713,266 @@ app.post('/api/module-access/:moduleKey/evaluate', requireAuth, requirePermissio
         moduleKey: req.params.moduleKey,
         result
     });
+});
+
+const productivityAccess = [requireAuth, productivityInternal, requirePermission('productivity.view'), requireModuleAccess('productivity')];
+app.get('/api/productivity/meta', ...productivityAccess, async (req, res) => {
+    res.json(await productivityMeta(req.user));
+});
+app.get('/api/productivity/dashboard', ...productivityAccess, async (req, res) => {
+    res.json(await getDashboard({ range: productivityRange(req) }));
+});
+app.get('/api/productivity/analysis', ...productivityAccess, async (_req, res) => {
+    res.json(await getAnalysis({}));
+});
+app.get('/api/productivity/jobs', ...productivityAccess, async (req, res) => {
+    res.json(await getAllJobs({ range: productivityRange(req) }));
+});
+app.post('/api/productivity/jobs', ...productivityAccess, requirePermission('productivity.jobs.create', 'productivity.jobs.manage'), async (req, res) => {
+    const parsed = productivityJobPayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const payload = { ...parsed.data, completionDate: parsed.data.completionDate || null };
+    const validationError = await validateProductivityReferences(payload);
+    if (validationError)
+        return res.status(400).json({ error: validationError });
+    const job = await transaction(async connection => {
+        const saved = await createOrUpdateProductivityJob(payload, req.user.id, connection);
+        await audit(req.user.id, payload.id ? 'productivity_job_updated' : 'productivity_job_created', 'productivity_job', saved.id,
+            { clientId: saved.clientId, valueAmount: saved.valueAmount, services: saved.services.map(service => service.id) }, connection);
+        return saved;
+    });
+    emitProductivityMutation('job', job.id);
+    res.status(201).json({ job });
+});
+app.get('/api/productivity/jobs/:id', ...productivityAccess, async (req, res) => {
+    const jobs = await loadProductivityJobs(resolveProductivityPeriod({ period: 'all' }));
+    const job = jobs.find(item => item.id === String(req.params.id));
+    if (!job)
+        return res.status(404).json({ error: 'Productivity job not found' });
+    res.json({ job });
+});
+app.put('/api/productivity/jobs/:id', ...productivityAccess, requirePermission('productivity.jobs.manage'), async (req, res) => {
+    const parsed = productivityJobPayloadSchema.safeParse({ ...req.body, id: req.params.id });
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const payload = { ...parsed.data, completionDate: parsed.data.completionDate || null };
+    const validationError = await validateProductivityReferences(payload);
+    if (validationError)
+        return res.status(400).json({ error: validationError });
+    const job = await transaction(async connection => {
+        const saved = await createOrUpdateProductivityJob(payload, req.user.id, connection);
+        await audit(req.user.id, 'productivity_job_updated', 'productivity_job', saved.id, { clientId: saved.clientId }, connection);
+        return saved;
+    });
+    emitProductivityMutation('job', job.id);
+    res.json({ job });
+});
+app.delete('/api/productivity/jobs/:id', ...productivityAccess, requirePermission('productivity.jobs.manage'), async (req, res) => {
+    await transaction(async connection => {
+        await deleteProductivityJob(req.params.id, connection);
+        await audit(req.user.id, 'productivity_job_deleted', 'productivity_job', req.params.id, {}, connection);
+    });
+    emitProductivityMutation('job', req.params.id);
+    res.json({ ok: true });
+});
+app.get('/api/productivity/daily-log', ...productivityAccess, async (req, res) => {
+    res.json(await getDailyLog({ range: productivityRange(req) }));
+});
+app.get('/api/productivity/by-client', ...productivityAccess, async (req, res) => {
+    res.json(await getByClient({ range: productivityRange(req) }));
+});
+app.get('/api/productivity/by-person', ...productivityAccess, async (req, res) => {
+    const includeSalary = hasPermission(req.user, 'productivity.salaries.view');
+    res.json(await getByPerson({ range: productivityRange(req), ownerId: req.user.id, includeSalary }));
+});
+app.get('/api/productivity/accounts', ...productivityAccess, async (req, res) => {
+    res.json(await getAccounts({ range: productivityRange(req) }));
+});
+app.post('/api/productivity/accounts', ...productivityAccess, requirePermission('productivity.accounts.manage'), async (req, res) => {
+    const parsed = productivityRosterPayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const payload = { ...parsed.data, assignments: normalizeRosterAssignments(parsed.data.assignments) };
+    const validationError = await validateRosterReferences(payload);
+    if (validationError)
+        return res.status(400).json({ error: validationError });
+    const id = await transaction(async connection => {
+        const roster = await saveRoster(payload, connection);
+        await audit(req.user.id, roster.wasUpdate ? 'productivity_roster_updated' : 'productivity_roster_created', 'productivity_roster', String(roster.id),
+            { clientId: payload.clientId, difficulty: payload.difficulty }, connection);
+        return roster.id;
+    });
+    emitProductivityMutation('roster', String(id));
+    res.status(201).json({ id: String(id) });
+});
+app.put('/api/productivity/accounts/:id', ...productivityAccess, requirePermission('productivity.accounts.manage'), async (req, res) => {
+    const parsed = productivityRosterPayloadSchema.safeParse({ ...req.body, id: req.params.id });
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const payload = { ...parsed.data, assignments: normalizeRosterAssignments(parsed.data.assignments) };
+    const validationError = await validateRosterReferences(payload);
+    if (validationError)
+        return res.status(400).json({ error: validationError });
+    const id = await transaction(async connection => {
+        const roster = await saveRoster(payload, connection);
+        await audit(req.user.id, 'productivity_roster_updated', 'productivity_roster', String(roster.id), { clientId: payload.clientId }, connection);
+        return roster.id;
+    });
+    emitProductivityMutation('roster', String(id));
+    res.json({ id: String(id) });
+});
+app.delete('/api/productivity/accounts/:id', ...productivityAccess, requirePermission('productivity.accounts.manage'), async (req, res) => {
+    await transaction(async connection => {
+        await query('DELETE FROM productivity_account_rosters WHERE id=?', [req.params.id], connection);
+        await audit(req.user.id, 'productivity_roster_deleted', 'productivity_roster', req.params.id, {}, connection);
+    });
+    emitProductivityMutation('roster', req.params.id);
+    res.json({ ok: true });
+});
+app.post('/api/productivity/accounts/reassign', ...productivityAccess, requirePermission('productivity.accounts.manage'), async (req, res) => {
+    const parsed = z.object({ fromUserId: z.string().min(1), toUserId: z.string().min(1), markInactive: z.boolean().optional().default(false) }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const rows = await transaction(async connection => {
+        const affected = await reassignRosterAccounts(parsed.data, connection);
+        await audit(req.user.id, 'productivity_roster_bulk_reassigned', 'productivity_roster', parsed.data.fromUserId,
+            { fromUserId: parsed.data.fromUserId, toUserId: parsed.data.toUserId, affectedAccounts: affected }, connection);
+        return affected;
+    });
+    emitProductivityMutation('roster', 'bulk');
+    res.json({ affected: rows });
+});
+app.get('/api/productivity/targets', ...productivityAccess, async (_req, res) => {
+    res.json(await getTargets({}));
+});
+app.post('/api/productivity/targets', ...productivityAccess, requirePermission('productivity.targets.manage'), async (req, res) => {
+    const parsed = productivityTargetPayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const id = await transaction(async connection => {
+        const targetId = await saveTarget(parsed.data, req.user.id, connection);
+        await audit(req.user.id, 'productivity_target_created', 'productivity_target', String(targetId), parsed.data, connection);
+        return targetId;
+    });
+    emitProductivityMutation('target', String(id));
+    res.status(201).json({ id: String(id) });
+});
+app.put('/api/productivity/targets/:id', ...productivityAccess, requirePermission('productivity.targets.manage'), async (req, res) => {
+    const parsed = productivityTargetPayloadSchema.safeParse({ ...req.body, id: req.params.id });
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    await transaction(async connection => {
+        await saveTarget(parsed.data, req.user.id, connection);
+        await audit(req.user.id, 'productivity_target_updated', 'productivity_target', req.params.id, parsed.data, connection);
+    });
+    emitProductivityMutation('target', req.params.id);
+    res.json({ ok: true });
+});
+app.delete('/api/productivity/targets/:id', ...productivityAccess, requirePermission('productivity.targets.manage'), async (req, res) => {
+    await transaction(async connection => {
+        await query('DELETE FROM productivity_targets WHERE id=?', [req.params.id], connection);
+        await audit(req.user.id, 'productivity_target_deleted', 'productivity_target', req.params.id, {}, connection);
+    });
+    emitProductivityMutation('target', req.params.id);
+    res.json({ ok: true });
+});
+app.get('/api/productivity/reports', ...productivityAccess, async (req, res) => {
+    res.json(await getReports({ serviceId: req.query.serviceId || '' }));
+});
+app.get('/api/productivity/services', ...productivityAccess, async (_req, res) => {
+    const services = await query('SELECT id,name,reference_hours referenceHours,is_active isActive FROM productivity_services ORDER BY is_active DESC,name');
+    res.json({ services: services.map(service => ({ ...service, id: String(service.id), referenceHours: Number(service.referenceHours || 0), isActive: Boolean(service.isActive) })) });
+});
+app.post('/api/productivity/services', ...productivityAccess, requirePermission('productivity.services.manage'), async (req, res) => {
+    const parsed = productivityServicePayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const result = await query('INSERT INTO productivity_services (name,reference_hours,is_active,created_by_user_id) VALUES (?,?,?,?)',
+        [parsed.data.name, parsed.data.referenceHours, parsed.data.isActive ? 1 : 0, req.user.id]);
+    await audit(req.user.id, 'productivity_service_created', 'productivity_service', String(result.insertId), { name: parsed.data.name });
+    emitProductivityMutation('service', String(result.insertId));
+    res.status(201).json({ id: String(result.insertId) });
+});
+app.put('/api/productivity/services/:id', ...productivityAccess, requirePermission('productivity.services.manage'), async (req, res) => {
+    const parsed = productivityServicePayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    await query('UPDATE productivity_services SET name=?,reference_hours=?,is_active=? WHERE id=?',
+        [parsed.data.name, parsed.data.referenceHours, parsed.data.isActive ? 1 : 0, req.params.id]);
+    await audit(req.user.id, 'productivity_service_updated', 'productivity_service', req.params.id, { name: parsed.data.name });
+    emitProductivityMutation('service', req.params.id);
+    res.json({ ok: true });
+});
+app.delete('/api/productivity/services/:id', ...productivityAccess, requirePermission('productivity.services.manage'), async (req, res) => {
+    await query('UPDATE productivity_services SET is_active=0 WHERE id=?', [req.params.id]);
+    await audit(req.user.id, 'productivity_service_updated', 'productivity_service', req.params.id, { isActive: false });
+    emitProductivityMutation('service', req.params.id);
+    res.json({ ok: true });
+});
+app.put('/api/productivity/employee-settings/:userId', ...productivityAccess, requirePermission('productivity.settings.manage'), async (req, res) => {
+    const parsed = productivityEmployeeSettingsSchema.safeParse({ ...req.body, userId: req.params.userId });
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    await query(`INSERT INTO productivity_employee_settings (user_id,weekly_capacity_hours,productivity_status)
+      VALUES (?,?,?)
+      ON DUPLICATE KEY UPDATE weekly_capacity_hours=VALUES(weekly_capacity_hours),productivity_status=VALUES(productivity_status)`,
+        [parsed.data.userId, parsed.data.weeklyCapacityHours, parsed.data.productivityStatus]);
+    await audit(req.user.id, 'productivity_employee_setting_updated', 'user', parsed.data.userId,
+        { weeklyCapacityHours: parsed.data.weeklyCapacityHours, productivityStatus: parsed.data.productivityStatus });
+    emitProductivityMutation('employee-setting', parsed.data.userId);
+    res.json({ ok: true });
+});
+app.get('/api/productivity/salary-grades', ...productivityAccess, requirePermission('productivity.salaries.view'), async (req, res) => {
+    res.json(await salaryGradesForOwner(req.user.id));
+});
+app.post('/api/productivity/salary-grades', ...productivityAccess, requirePermission('productivity.salaries.manage'), async (req, res) => {
+    const parsed = productivitySalaryGradeSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    if (parsed.data.maxAmount < parsed.data.minAmount)
+        return res.status(400).json({ error: 'Max amount must be greater than min amount' });
+    const result = await query('INSERT INTO productivity_salary_grades (owner_user_id,label,min_amount,max_amount) VALUES (?,?,?,?)',
+        [req.user.id, parsed.data.label, parsed.data.minAmount, parsed.data.maxAmount]);
+    await audit(req.user.id, 'productivity_salary_grade_created', 'productivity_salary_grade', String(result.insertId), { label: parsed.data.label });
+    res.status(201).json({ id: String(result.insertId) });
+});
+app.put('/api/productivity/salary-grades/:id', ...productivityAccess, requirePermission('productivity.salaries.manage'), async (req, res) => {
+    const parsed = productivitySalaryGradeSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    await query('UPDATE productivity_salary_grades SET label=?,min_amount=?,max_amount=? WHERE id=? AND owner_user_id=?',
+        [parsed.data.label, parsed.data.minAmount, parsed.data.maxAmount, req.params.id, req.user.id]);
+    await audit(req.user.id, 'productivity_salary_grade_updated', 'productivity_salary_grade', req.params.id, { label: parsed.data.label });
+    res.json({ ok: true });
+});
+app.delete('/api/productivity/salary-grades/:id', ...productivityAccess, requirePermission('productivity.salaries.manage'), async (req, res) => {
+    await query('DELETE FROM productivity_salary_grades WHERE id=? AND owner_user_id=?', [req.params.id, req.user.id]);
+    await audit(req.user.id, 'productivity_salary_grade_deleted', 'productivity_salary_grade', req.params.id, {});
+    res.json({ ok: true });
+});
+app.put('/api/productivity/salary-assignments/:employeeId', ...productivityAccess, requirePermission('productivity.salaries.manage'), async (req, res) => {
+    const parsed = z.object({ gradeId: z.union([z.string(), z.number()]).optional().nullable() }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    if (!parsed.data.gradeId) {
+        await query('DELETE FROM productivity_salary_assignments WHERE owner_user_id=? AND employee_user_id=?', [req.user.id, req.params.employeeId]);
+    } else {
+        const grade = await one('SELECT id FROM productivity_salary_grades WHERE id=? AND owner_user_id=?', [parsed.data.gradeId, req.user.id]);
+        if (!grade)
+            return res.status(404).json({ error: 'Private salary grade not found' });
+        await query(`INSERT INTO productivity_salary_assignments (owner_user_id,employee_user_id,grade_id)
+          VALUES (?,?,?)
+          ON DUPLICATE KEY UPDATE grade_id=VALUES(grade_id)`, [req.user.id, req.params.employeeId, parsed.data.gradeId]);
+    }
+    await audit(req.user.id, 'productivity_salary_assignment_updated', 'user', req.params.employeeId, { changed: true });
+    res.json({ ok: true });
+});
+app.get('/api/productivity/export', ...productivityAccess, requirePermission('productivity.export'), async (req, res) => {
+    const range = productivityRange(req);
+    const [dashboard, jobs] = await Promise.all([getDashboard({ range }), getAllJobs({ range })]);
+    await audit(req.user.id, 'productivity_export_generated', 'productivity_export', range.key, { from: range.from, to: range.to });
+    res.json({ range, dashboard, jobs: jobs.jobs });
 });
 
 app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), requireModuleAccess('audit'), async (_req, res) => {

@@ -210,6 +210,161 @@ CREATE TABLE IF NOT EXISTS jobs (
       ON UPDATE CASCADE ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS productivity_employee_settings (
+    user_id VARCHAR(100) PRIMARY KEY,
+    weekly_capacity_hours DECIMAL(10,2) NOT NULL DEFAULT 40,
+    productivity_status ENUM('active','intern','vendor','inactive') NOT NULL DEFAULT 'active',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_productivity_employee_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_services (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(180) NOT NULL UNIQUE,
+    reference_hours DECIMAL(10,2) NOT NULL DEFAULT 0,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_services_active (is_active),
+    CONSTRAINT fk_productivity_services_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_jobs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    core_job_id VARCHAR(100) NULL,
+    client_id VARCHAR(100) NOT NULL,
+    start_date DATE NOT NULL,
+    completion_date DATE NULL,
+    value_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+    description TEXT NOT NULL,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_jobs_client (client_id),
+    INDEX idx_productivity_jobs_start (start_date),
+    INDEX idx_productivity_jobs_completion (completion_date),
+    CONSTRAINT fk_productivity_jobs_core FOREIGN KEY (core_job_id) REFERENCES jobs(id)
+      ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_productivity_jobs_client FOREIGN KEY (client_id) REFERENCES clients(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_productivity_jobs_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_job_services (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    productivity_job_id BIGINT UNSIGNED NOT NULL,
+    service_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uniq_productivity_job_service (productivity_job_id,service_id),
+    INDEX idx_productivity_job_services_job (productivity_job_id),
+    INDEX idx_productivity_job_services_service (service_id),
+    CONSTRAINT fk_productivity_job_services_job FOREIGN KEY (productivity_job_id) REFERENCES productivity_jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_job_services_service FOREIGN KEY (service_id) REFERENCES productivity_services(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_job_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    productivity_job_id BIGINT UNSIGNED NOT NULL,
+    user_id VARCHAR(100) NOT NULL,
+    revenue_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+    hours_spent DECIMAL(10,2) NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_assignments_job (productivity_job_id),
+    INDEX idx_productivity_assignments_user (user_id),
+    CONSTRAINT fk_productivity_assignments_job FOREIGN KEY (productivity_job_id) REFERENCES productivity_jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_assignments_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_account_rosters (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(100) NOT NULL,
+    nature ENUM('Existing','Prospect') NOT NULL DEFAULT 'Existing',
+    difficulty INT NOT NULL DEFAULT 5,
+    comments TEXT NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_rosters_client (client_id),
+    CONSTRAINT fk_productivity_rosters_client FOREIGN KEY (client_id) REFERENCES clients(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_account_roster_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    roster_id BIGINT UNSIGNED NOT NULL,
+    responsibility_key VARCHAR(40) NOT NULL,
+    assignee_type ENUM('employee','external','tbd') NOT NULL DEFAULT 'tbd',
+    user_id VARCHAR(100) NULL,
+    external_name VARCHAR(180) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_roster_assignments_roster (roster_id),
+    INDEX idx_productivity_roster_assignments_user (user_id),
+    CONSTRAINT fk_productivity_roster_assignments_roster FOREIGN KEY (roster_id) REFERENCES productivity_account_rosters(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_roster_assignments_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_targets (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    service_id BIGINT UNSIGNED NOT NULL,
+    quantity DECIMAL(10,2) NOT NULL DEFAULT 0,
+    unit ENUM('count','hours') NOT NULL DEFAULT 'count',
+    period ENUM('day','week','month') NOT NULL DEFAULT 'week',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_targets_user (user_id),
+    INDEX idx_productivity_targets_service (service_id),
+    CONSTRAINT fk_productivity_targets_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_targets_service FOREIGN KEY (service_id) REFERENCES productivity_services(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_targets_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_salary_grades (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id VARCHAR(100) NOT NULL,
+    label VARCHAR(80) NOT NULL,
+    min_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+    max_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_productivity_salary_grades_owner (owner_user_id),
+    CONSTRAINT fk_productivity_salary_grades_owner FOREIGN KEY (owner_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS productivity_salary_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id VARCHAR(100) NOT NULL,
+    employee_user_id VARCHAR(100) NOT NULL,
+    grade_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uniq_productivity_salary_owner_employee (owner_user_id,employee_user_id),
+    INDEX idx_productivity_salary_assignment_grade (grade_id),
+    CONSTRAINT fk_productivity_salary_assignment_owner FOREIGN KEY (owner_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_salary_assignment_employee FOREIGN KEY (employee_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_productivity_salary_assignment_grade FOREIGN KEY (grade_id) REFERENCES productivity_salary_grades(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS settings (
     id TINYINT PRIMARY KEY,
     json LONGTEXT NOT NULL

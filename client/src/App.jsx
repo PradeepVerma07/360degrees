@@ -40,6 +40,7 @@ const knownDashboardTabs = {
     clients: 'Manage Clients',
     employees: 'Employees',
     users: 'Users & Roles',
+    productivity: 'Productivity Intelligence',
     support: 'Support Tickets',
     audit: 'Audit Logs',
     app_settings: 'Settings'
@@ -172,7 +173,7 @@ export default function App() {
             setError(e.message);
     } }, []);
     useEffect(() => { if (!auth)
-        return; load(); const socket = io(API_URL || undefined); socket.on('data:changed', load); socket.on('permissions:updated', load); return () => { socket.disconnect(); }; }, [auth, load]);
+        return; load(); const socket = io(API_URL || undefined); socket.on('data:changed', load); socket.on('permissions:updated', load); socket.on('productivity:changed', load); return () => { socket.disconnect(); }; }, [auth, load]);
     if (!auth)
         return _jsx(Login, { onLogin: () => setAuth(true) });
     if (!data)
@@ -209,13 +210,15 @@ export default function App() {
                             ? _jsx(Employees, { data: data, setTab: setTab })
                             : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'])
                                 ? _jsx(UsersRoles, { data: data, reload: load })
-                                : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
-                                    ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
-                                    : activeTab === 'audit' && can(data, 'audit.view')
-                                        ? _jsx(AuditLogs, {})
-                                        : activeTab === 'app_settings' && canAny(data, ['settings.view', 'settings.edit'])
-                                            ? _jsx(SystemSettings, { data: data })
-                                            : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
+                                : activeTab === 'productivity' && can(data, 'productivity.view')
+                                    ? _jsx(ProductivityIntelligence, { data: data })
+                                    : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
+                                        ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
+                                        : activeTab === 'audit' && can(data, 'audit.view')
+                                            ? _jsx(AuditLogs, {})
+                                            : activeTab === 'app_settings' && canAny(data, ['settings.view', 'settings.edit'])
+                                                ? _jsx(SystemSettings, { data: data })
+                                                : _jsxs("section", { className: "card access-denied", children: [_jsx("h2", { children: "Access denied" }), _jsx("p", { children: "You do not have permission to open this module." })] });
     return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
 }
 function Login({ onLogin }) {
@@ -354,7 +357,7 @@ function AdminSignup({ onMode }) {
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', support: 'support', audit: 'document', app_settings: 'settings' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'shield', productivity: 'total', support: 'support', audit: 'document', app_settings: 'settings' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
@@ -363,6 +366,7 @@ const dashboardTabDescriptions = {
     clients: 'Client access',
     employees: 'Internal team',
     users: 'Roles and access',
+    productivity: 'Team intelligence',
     support: 'Help and tickets',
     audit: 'Activity history',
     app_settings: 'System controls'
@@ -1128,6 +1132,491 @@ function ManagementTable({ columns, rows, empty }) {
                     ))}
                 </tbody>
             </table>
+        </div>
+    );
+}
+
+const productivityTabs = [
+    ['dashboard', 'Dashboard'],
+    ['analysis', 'Analysis'],
+    ['accounts', 'Accounts'],
+    ['targets', 'Targets'],
+    ['reports', 'Reports'],
+    ['log', 'Log a Job'],
+    ['daily', 'Daily Log'],
+    ['client', 'By Client'],
+    ['person', 'By Person'],
+    ['jobs', 'All Jobs'],
+    ['salaries', 'Salaries'],
+    ['manage', 'Manage']
+];
+const productivityPeriods = [
+    ['all', 'All Time'],
+    ['today', 'Today'],
+    ['month', 'This Month'],
+    ['last30', 'Last 30 Days'],
+    ['quarter', 'This Quarter'],
+    ['custom', 'Custom']
+];
+const inr = value => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(Number(value || 0));
+const num = value => new Intl.NumberFormat('en-IN', { maximumFractionDigits: 1 }).format(Number(value || 0));
+const paceLabel = value => value === 'on_pace' ? 'On Pace' : value === 'behind' ? 'Behind' : 'Off Pace';
+const statusLabel = value => ({ overworked: 'Overworked', stretched: 'Stretched', balanced: 'Balanced', underutilised: 'Underutilised', idle: 'Idle' }[value] || value);
+const useProductivityPeriod = () => {
+    const [period, setPeriod] = useState(() => {
+        try {
+            return JSON.parse(sessionStorage.getItem('ci360-productivity-period') || '{}');
+        }
+        catch {
+            return {};
+        }
+    });
+    const state = { key: period.key || 'month', from: period.from || '', to: period.to || '' };
+    const update = patch => {
+        const next = { ...state, ...patch };
+        setPeriod(next);
+        try {
+            sessionStorage.setItem('ci360-productivity-period', JSON.stringify(next));
+        }
+        catch { }
+    };
+    const params = state.key === 'custom' ? { period: 'custom', from: state.from, to: state.to } : { period: state.key };
+    return [state, update, params];
+};
+
+function ProductivityIntelligence({ data }) {
+    const [active, setActive] = useState('dashboard');
+    const [period, setPeriod, periodParams] = useProductivityPeriod();
+    const [meta, setMeta] = useState(null);
+    const [payload, setPayload] = useState({});
+    const [loading, setLoading] = useState(true);
+    const [message, setMessage] = useState('');
+    const [error, setError] = useState('');
+    const canManageJobs = can(data, 'productivity.jobs.manage');
+    const canCreateJobs = canAny(data, ['productivity.jobs.create', 'productivity.jobs.manage']);
+    const load = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const loaders = {
+                dashboard: () => api.productivityDashboard(periodParams),
+                analysis: () => api.productivityAnalysis(),
+                accounts: () => api.productivityAccounts(periodParams),
+                targets: () => api.productivityTargets(),
+                reports: () => api.productivityReports(),
+                log: () => api.productivityJobs(periodParams),
+                daily: () => api.productivityDailyLog(periodParams),
+                client: () => api.productivityByClient(periodParams),
+                person: () => api.productivityByPerson(periodParams),
+                jobs: () => api.productivityJobs(periodParams),
+                salaries: () => can(data, 'productivity.salaries.view') ? api.productivitySalaryGrades() : Promise.resolve({ locked: true }),
+                manage: () => api.productivityServices()
+            };
+            const [metaResult, sectionResult] = await Promise.all([api.productivityMeta(), (loaders[active] || loaders.dashboard)()]);
+            setMeta(metaResult);
+            setPayload(sectionResult);
+        }
+        catch (err) {
+            setError(err.message);
+        }
+        finally {
+            setLoading(false);
+        }
+    }, [active, periodParams.period, periodParams.from, periodParams.to, data]);
+    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const refresh = () => load();
+        window.addEventListener('productivity:refresh', refresh);
+        return () => window.removeEventListener('productivity:refresh', refresh);
+    }, [load]);
+    const reload = async (note) => {
+        if (note)
+            setMessage(note);
+        await load();
+    };
+    return (
+        <section className="productivity-shell">
+            <div className="productivity-head">
+                <div>
+                    <span>Productivity Intelligence</span>
+                    <h2>Performance, capacity, and revenue intelligence</h2>
+                    <p>Track work effort, account ownership, throughput targets, and salary-private efficiency without changing the core Job Board workflow.</p>
+                </div>
+                <ProductivityPeriodPicker period={period} setPeriod={setPeriod} tracking={payload.period || meta?.tracking} />
+            </div>
+            <div className="productivity-tabs" role="tablist">
+                {productivityTabs.map(([id, label]) => (
+                    <button type="button" className={active === id ? 'active' : ''} onClick={() => setActive(id)} key={id}>
+                        {id === 'salaries' && <DashboardIcon name="shield" />}{label}
+                    </button>
+                ))}
+            </div>
+            {message && <div className="alert success">{message}</div>}
+            {error && <div className="alert error">{error}</div>}
+            {loading || !meta ? <DashboardEmptyState title="Loading productivity intelligence..." body="Calculating period metrics, rosters, targets, and reports." /> : (
+                <>
+                    {active === 'dashboard' && <ProductivityDashboard payload={payload} />}
+                    {active === 'analysis' && <ProductivityAnalysis payload={payload} />}
+                    {active === 'accounts' && <ProductivityAccounts payload={payload} meta={meta} canManage={can(data, 'productivity.accounts.manage')} reload={reload} />}
+                    {active === 'targets' && <ProductivityTargets payload={payload} meta={meta} canManage={can(data, 'productivity.targets.manage')} reload={reload} />}
+                    {active === 'reports' && <ProductivityReports payload={payload} meta={meta} reload={reload} />}
+                    {active === 'log' && <ProductivityLogJob meta={meta} canCreate={canCreateJobs} reload={reload} />}
+                    {active === 'daily' && <ProductivityDaily payload={payload} />}
+                    {active === 'client' && <ProductivityByClient payload={payload} />}
+                    {active === 'person' && <ProductivityByPerson payload={payload} />}
+                    {active === 'jobs' && <ProductivityAllJobs payload={payload} canManage={canManageJobs} reload={reload} />}
+                    {active === 'salaries' && <ProductivitySalaries payload={payload} meta={meta} canView={can(data, 'productivity.salaries.view')} canManage={can(data, 'productivity.salaries.manage')} reload={reload} />}
+                    {active === 'manage' && <ProductivityManage payload={payload} meta={meta} canServices={can(data, 'productivity.services.manage')} canSettings={can(data, 'productivity.settings.manage')} reload={reload} />}
+                </>
+            )}
+        </section>
+    );
+}
+
+function ProductivityPeriodPicker({ period, setPeriod, tracking }) {
+    return (
+        <div className="productivity-period">
+            <label>Period
+                <select value={period.key} onChange={event => setPeriod({ key: event.target.value })}>
+                    {productivityPeriods.map(([id, label]) => <option value={id} key={id}>{label}</option>)}
+                </select>
+            </label>
+            {period.key === 'custom' && (
+                <>
+                    <label>From<input type="date" min={tracking?.trackingStart || tracking?.start} max={tracking?.trackingEnd || tracking?.end} value={period.from || ''} onChange={event => setPeriod({ from: event.target.value })} /></label>
+                    <label>To<input type="date" min={tracking?.trackingStart || tracking?.start} max={tracking?.trackingEnd || tracking?.end} value={period.to || ''} onChange={event => setPeriod({ to: event.target.value })} /></label>
+                </>
+            )}
+        </div>
+    );
+}
+
+function ProductivityDashboard({ payload }) {
+    const k = payload.kpis || {};
+    return (
+        <div className="productivity-grid">
+            <div className="management-stats">
+                <DashboardStat tone="gold" icon="total" value={inr(k.revenueTracked)} label="Revenue Tracked" support={`Across ${k.activeClients || 0} active clients of ${k.totalClients || 0}`} />
+                <DashboardStat tone="blue" icon="jobs" value={k.jobsLogged || 0} label="Jobs Logged" support={`${num(k.hoursLogged)} total effort hours`} />
+                <DashboardStat tone="red" icon="alert" value={k.overworked || 0} label="Overworked" support="People above 115% utilization" />
+                <DashboardStat tone="green" icon="users" value={k.underused || 0} label="Underused Capacity" support="People below 55% utilization" />
+            </div>
+            <ProductivityBars title="Revenue by Client" rows={(payload.revenueByClient || []).map(item => ({ label: item.clientName, value: item.revenue, suffix: inr(item.revenue) }))} />
+            <ProductivityBars title="Revenue by Service" rows={(payload.revenueByService || []).map(item => ({ label: item.name, value: item.revenue, suffix: `${inr(item.revenue)} - ${num(item.hours)} hrs` }))} />
+            <ProductivityTeamLoad rows={payload.teamLoad || []} />
+            <ProductivityInsights insights={payload.insights || []} />
+        </div>
+    );
+}
+
+function ProductivityBars({ title, rows }) {
+    const max = Math.max(1, ...rows.map(row => Number(row.value || 0)));
+    return (
+        <article className="dashboard-card productivity-card">
+            <div className="dashboard-card-head"><h3>{title}</h3></div>
+            {rows.length ? rows.map(row => (
+                <div className="productivity-bar-row" key={row.label}>
+                    <span>{row.label}</span>
+                    <b>{row.suffix}</b>
+                    <i><em style={{ width: `${Math.max(4, row.value / max * 100)}%` }} /></i>
+                </div>
+            )) : <DashboardEmptyState title="No data yet." body="Log productivity jobs to populate this chart." />}
+        </article>
+    );
+}
+
+function ProductivityTeamLoad({ rows }) {
+    return (
+        <article className="dashboard-card productivity-card productivity-wide">
+            <div className="dashboard-card-head"><h3>Team Load at a Glance</h3></div>
+            <div className="productivity-load-list">
+                {rows.map(person => (
+                    <div className="productivity-load-row" key={person.id}>
+                        <div><b>{person.name}</b><small>{person.duties}</small></div>
+                        <span className={`productivity-status ${person.status}`}>{person.statusLabel || statusLabel(person.status)}</span>
+                        <strong>{num(person.utilization)}%</strong>
+                        <i><em style={{ width: `${Math.min(140, person.utilization)}%` }} /></i>
+                    </div>
+                ))}
+            </div>
+        </article>
+    );
+}
+
+function ProductivityInsights({ insights }) {
+    return (
+        <article className="dashboard-card productivity-card productivity-wide">
+            <div className="dashboard-card-head"><h3>Roadmap Signals</h3></div>
+            {insights.length ? <div className="productivity-insights">{insights.map((item, index) => (
+                <div className={`productivity-insight ${item.severity}`} key={`${item.type}-${index}`}>
+                    <b>{item.title}</b>
+                    <p>{item.message}</p>
+                </div>
+            ))}</div> : <DashboardEmptyState title="No signals for this period." body="Capacity and risk insights appear automatically as work is logged." />}
+        </article>
+    );
+}
+
+function ProductivityAnalysis({ payload }) {
+    const t = payload.trajectory || {};
+    return (
+        <div className="productivity-grid">
+            <div className="management-stats">
+                <DashboardStat tone="gold" icon="total" value={inr(t.totalRevenue)} label="Total Revenue Logged" support="Full tracking window" />
+                <DashboardStat tone="blue" icon="clock" value={num(t.totalHours)} label="Total Effort Logged" support="Hours across all assignments" />
+                <DashboardStat tone="green" icon="arrow" value={`${num(t.revenueGrowth)}%`} label="Revenue Growth" support="Last 30 days vs prior 30" />
+                <DashboardStat tone="purple" icon="arrow" value={`${num(t.effortGrowth)}%`} label="Effort Growth" support="Last 30 days vs prior 30" />
+            </div>
+            <ProductivitySimpleTable title="Monthly Trend" columns={['Month', 'Jobs', 'Revenue', 'Hours']} rows={(payload.monthlyTrend || []).map(row => [row.month, row.jobs, inr(row.revenue), num(row.hours)])} />
+            <ProductivitySimpleTable title="Workforce Roadmap" columns={['Person', 'Duties', 'Utilization', 'Hours', 'Accounts', 'Revenue Credit', 'Recommendation']} rows={(payload.workforceRoadmap || []).map(p => [p.name, p.duties, `${num(p.utilization)}%`, num(p.hours), `${p.accountCount} / ${p.difficultySum}`, inr(p.revenueCredit), p.recommendation])} wide />
+            <ProductivitySimpleTable title="Revenue per Hour - Service" columns={['Service', 'Revenue', 'Hours', 'Revenue / Hour']} rows={(payload.serviceRevenuePerHour || []).map(s => [s.name, inr(s.revenue), num(s.hours), inr(s.revenuePerHour)])} />
+            <ProductivitySimpleTable title="Revenue per Hour - Person" columns={['Person', 'Revenue Credit', 'Hours', 'Revenue / Hour']} rows={(payload.personRevenuePerHour || []).map(p => [p.name, inr(p.revenueCredit), num(p.hours), inr(p.revenuePerHour)])} />
+            <ProductivitySimpleTable title="Client Concentration" columns={['Client', 'Revenue', 'Share']} rows={(payload.clientConcentration || []).map(c => [c.clientName, inr(c.revenue), `${num(c.percent)}%`])} />
+        </div>
+    );
+}
+
+function ProductivitySimpleTable({ title, columns, rows, wide = false }) {
+    return (
+        <article className={`dashboard-card productivity-card ${wide ? 'productivity-wide' : ''}`}>
+            <div className="dashboard-card-head"><h3>{title}</h3></div>
+            {rows.length ? <div className="responsive-table productivity-table-wrap"><table className="management-table productivity-table"><thead><tr>{columns.map(c => <th key={c}>{c}</th>)}</tr></thead><tbody>{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td data-label={columns[j]} key={j}>{cell}</td>)}</tr>)}</tbody></table></div> : <DashboardEmptyState title="No data yet." body="This report will populate after matching productivity records exist." />}
+        </article>
+    );
+}
+
+function ProductivityAccounts({ payload, meta, canManage, reload }) {
+    const [form, setForm] = useState({ clientId: meta.clients[0]?.id || '', nature: 'Existing', difficulty: 5, comments: '' });
+    const [reassign, setReassign] = useState({ fromUserId: '', toUserId: '', markInactive: false });
+    const emptyAssignments = () => meta.responsibilities.map(item => ({ responsibilityKey: item.key, assigneeType: 'tbd', userId: '', externalName: '' }));
+    const [assignments, setAssignments] = useState(emptyAssignments);
+    useEffect(() => { setAssignments(emptyAssignments()); }, [meta.responsibilities]);
+    const patchAssignment = (key, patch) => setAssignments(current => current.map(item => item.responsibilityKey === key ? { ...item, ...patch } : item));
+    const assignmentPayload = () => assignments.map(item => ({
+        responsibilityKey: item.responsibilityKey,
+        assigneeType: item.assigneeType,
+        userId: item.assigneeType === 'employee' ? item.userId : '',
+        externalName: item.assigneeType === 'external' ? item.externalName : ''
+    }));
+    const assignmentReady = assignments.every(item => item.assigneeType === 'tbd' || (item.assigneeType === 'employee' && item.userId) || (item.assigneeType === 'external' && item.externalName.trim()));
+    const save = async () => {
+        await api.createProductivityAccount({ ...form, assignments: assignmentPayload() });
+        setForm({ clientId: meta.clients[0]?.id || '', nature: 'Existing', difficulty: 5, comments: '' });
+        setAssignments(emptyAssignments());
+        await reload('Account roster saved.');
+    };
+    const remove = async id => {
+        if (!window.confirm('Delete this account roster?')) return;
+        await api.deleteProductivityAccount(id);
+        await reload('Account roster deleted.');
+    };
+    const bulkReassign = async () => {
+        await api.reassignProductivityAccounts(reassign);
+        await reload('Account responsibilities reassigned.');
+    };
+    return (
+        <div className="productivity-grid">
+            {canManage && <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Add Account Roster</h3></div><div className="productivity-form-row">
+                <select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}><option value="">Client</option>{meta.clients.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}</select>
+                <select value={form.nature} onChange={e => setForm({ ...form, nature: e.target.value })}><option>Existing</option><option>Prospect</option></select>
+                <input type="number" min="1" max="10" value={form.difficulty} onChange={e => setForm({ ...form, difficulty: Number(e.target.value) })} />
+                <input placeholder="Comments" value={form.comments} onChange={e => setForm({ ...form, comments: e.target.value })} />
+            </div><div className="productivity-roster-grid">
+                {meta.responsibilities.map(resp => {
+                    const assignment = assignments.find(item => item.responsibilityKey === resp.key) || { responsibilityKey: resp.key, assigneeType: 'tbd', userId: '', externalName: '' };
+                    return (
+                        <div className="productivity-roster-cell" key={resp.key}>
+                            <b>{resp.label}</b>
+                            <select value={assignment.assigneeType} onChange={e => patchAssignment(resp.key, { assigneeType: e.target.value, userId: '', externalName: '' })}>
+                                <option value="tbd">TBD</option>
+                                <option value="employee">Employee</option>
+                                <option value="external">External</option>
+                            </select>
+                            {assignment.assigneeType === 'employee' && <select value={assignment.userId} onChange={e => patchAssignment(resp.key, { userId: e.target.value })}><option value="">Choose employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name}</option>)}</select>}
+                            {assignment.assigneeType === 'external' && <input value={assignment.externalName} onChange={e => patchAssignment(resp.key, { externalName: e.target.value })} placeholder="External name" />}
+                        </div>
+                    );
+                })}
+            </div><button className="primary" disabled={!form.clientId || !assignmentReady} onClick={save}>Save Roster</button></article>}
+            <ProductivitySimpleTable title="Accounts" columns={['Client', 'Nature', ...meta.responsibilities.map(r => r.label), 'Difficulty', 'Comments', 'Actions']} rows={(payload.rosters || []).map(r => [r.clientName, r.nature, ...meta.responsibilities.map(resp => (r.assignments[resp.key] || []).map(a => a.userName || a.externalName || 'TBD').join(', ') || 'TBD'), r.difficulty, r.comments, canManage ? <button className="danger small" onClick={() => remove(r.id)}>Delete</button> : '-'])} wide />
+            <ProductivitySimpleTable title="Account Load by Person" columns={['Person', 'Accounts', 'Combined Difficulty', 'Utilization']} rows={(payload.accountLoad || []).map(r => [r.name, r.accountCount, r.difficultySum, `${num(r.utilization)}%`])} />
+            {canManage && <article className="dashboard-card productivity-card"><div className="dashboard-card-head"><h3>Reassign a Person's Accounts</h3></div><div className="productivity-stack">
+                <select value={reassign.fromUserId} onChange={e => setReassign({ ...reassign, fromUserId: e.target.value })}><option value="">From employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name}</option>)}</select>
+                <select value={reassign.toUserId} onChange={e => setReassign({ ...reassign, toUserId: e.target.value })}><option value="">To employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name}</option>)}</select>
+                <label className="permission-check"><input type="checkbox" checked={reassign.markInactive} onChange={e => setReassign({ ...reassign, markInactive: e.target.checked })} />Mark departing employee inactive</label>
+                <button className="primary" disabled={!reassign.fromUserId || !reassign.toUserId} onClick={bulkReassign}>Reassign</button>
+            </div></article>}
+        </div>
+    );
+}
+
+function ProductivityTargets({ payload, meta, canManage, reload }) {
+    const [form, setForm] = useState({ userId: '', serviceId: '', quantity: 1, unit: 'count', period: 'week', isActive: true });
+    const save = async () => {
+        await api.createProductivityTarget(form);
+        setForm({ userId: '', serviceId: '', quantity: 1, unit: 'count', period: 'week', isActive: true });
+        await reload('Target saved.');
+    };
+    const remove = async id => {
+        if (!window.confirm('Delete this target?')) return;
+        await api.deleteProductivityTarget(id);
+        await reload('Target deleted.');
+    };
+    return (
+        <div className="productivity-grid">
+            {canManage && <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Throughput Target</h3></div><div className="productivity-form-row">
+                <select value={form.userId} onChange={e => setForm({ ...form, userId: e.target.value })}><option value="">Employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name}</option>)}</select>
+                <select value={form.serviceId} onChange={e => setForm({ ...form, serviceId: e.target.value })}><option value="">Service</option>{meta.services.map(s => <option value={s.id} key={s.id}>{s.name}</option>)}</select>
+                <input type="number" min="1" value={form.quantity} onChange={e => setForm({ ...form, quantity: Number(e.target.value) })} />
+                <select value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })}><option value="count">Jobs / pieces</option><option value="hours">Hours</option></select>
+                <select value={form.period} onChange={e => setForm({ ...form, period: e.target.value })}><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select>
+                <button className="primary" disabled={!form.userId || !form.serviceId} onClick={save}>Save Target</button>
+            </div></article>}
+            <ProductivitySimpleTable title="Targets" columns={['Person', 'Service', 'Target', 'Actual', 'Pace', 'Period', 'Actions']} rows={(payload.targets || []).map(t => [t.userName, t.serviceName, `${num(t.quantity)} ${t.unit}`, num(t.actual), paceLabel(t.pace), t.period, canManage ? <button className="danger small" onClick={() => remove(t.id)}>Delete</button> : '-'])} wide />
+        </div>
+    );
+}
+
+function ProductivityReports({ payload, meta }) {
+    const [serviceId, setServiceId] = useState('');
+    const [reportPayload, setReportPayload] = useState(payload);
+    const [loading, setLoading] = useState(false);
+    const [localError, setLocalError] = useState('');
+    useEffect(() => { setReportPayload(payload); }, [payload]);
+    const reloadReports = async value => {
+        setServiceId(value);
+        setLoading(true);
+        setLocalError('');
+        try {
+            setReportPayload(await api.productivityReports(value ? { serviceId: value } : {}));
+        }
+        catch (err) {
+            setLocalError(err.message);
+        }
+        finally {
+            setLoading(false);
+        }
+    };
+    return (
+        <div className="productivity-grid">
+            <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Report Filter</h3></div><select value={serviceId} onChange={e => reloadReports(e.target.value)}><option value="">All services</option>{meta.services.map(s => <option value={s.id} key={s.id}>{s.name}</option>)}</select></article>
+            {localError && <div className="alert error productivity-wide">{localError}</div>}
+            {loading && <DashboardEmptyState title="Refreshing report..." body="Recalculating service-specific productivity numbers." />}
+            <ProductivitySimpleTable title="Report by Client" columns={['Client', 'MTD', 'YTD', 'LMTD', 'LYTD']} rows={(reportPayload.byClient || []).map(r => [r.clientName, `${r.mtd.jobs} jobs / ${num(r.mtd.hours)} hrs`, `${r.ytd.jobs} jobs / ${num(r.ytd.hours)} hrs`, `${r.lmtd.jobs} jobs / ${num(r.lmtd.hours)} hrs`, `${r.lytd.jobs} jobs / ${num(r.lytd.hours)} hrs`])} wide />
+            <ProductivitySimpleTable title="Report by Person" columns={['Person', 'MTD', 'YTD', 'LMTD', 'LYTD']} rows={(reportPayload.byPerson || []).map(r => [r.name, `${r.mtd.jobs} jobs / ${num(r.mtd.hours)} hrs`, `${r.ytd.jobs} jobs / ${num(r.ytd.hours)} hrs`, `${r.lmtd.jobs} jobs / ${num(r.lmtd.hours)} hrs`, `${r.lytd.jobs} jobs / ${num(r.lytd.hours)} hrs`])} wide />
+        </div>
+    );
+}
+
+function ProductivityLogJob({ meta, canCreate, reload }) {
+    const [form, setForm] = useState({ clientId: meta.clients[0]?.id || '', startDate: '', completionDate: '', valueAmount: 0, description: '', serviceIds: [], assignments: [{ userId: '', revenuePercent: 100, hoursSpent: 0 }] });
+    const total = form.assignments.reduce((sum, item) => sum + Number(item.revenuePercent || 0), 0);
+    const submit = async () => {
+        await api.createProductivityJob(form);
+        setForm({ clientId: meta.clients[0]?.id || '', startDate: '', completionDate: '', valueAmount: 0, description: '', serviceIds: [], assignments: [{ userId: '', revenuePercent: 100, hoursSpent: 0 }] });
+        await reload('Productivity job logged.');
+    };
+    if (!canCreate)
+        return <DashboardEmptyState title="No job logging access." body="Ask a Super Admin to grant productivity job creation permission." />;
+    return (
+        <article className="dashboard-card productivity-card productivity-wide">
+            <div className="dashboard-card-head"><h3>Log a Job</h3><p>{total === 100 ? '100% of revenue allocated.' : `${num(total)}% allocated - should total 100%.`}</p></div>
+            <div className="productivity-log-grid">
+                <select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}>{meta.clients.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select>
+                <input type="date" min={meta.tracking?.start} max={meta.tracking?.end} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} />
+                <input type="date" min={meta.tracking?.start} max={meta.tracking?.end} value={form.completionDate} onChange={e => setForm({ ...form, completionDate: e.target.value })} />
+                <input type="number" min="0" value={form.valueAmount} onChange={e => setForm({ ...form, valueAmount: Number(e.target.value) })} placeholder="Job value" />
+                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description" />
+                <div className="productivity-checks">{meta.services.map(s => <label className="permission-check" key={s.id}><input type="checkbox" checked={form.serviceIds.includes(s.id)} onChange={e => setForm({ ...form, serviceIds: e.target.checked ? [...form.serviceIds, s.id] : form.serviceIds.filter(id => id !== s.id) })} />{s.name}</label>)}</div>
+            </div>
+            <div className="productivity-stack">
+                {form.assignments.map((assignment, index) => <div className="productivity-form-row" key={index}>
+                    <select value={assignment.userId} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, userId: e.target.value } : a) })}><option value="">Employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name} - {e.duties}</option>)}</select>
+                    <input type="number" min="0" max="100" value={assignment.revenuePercent} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, revenuePercent: Number(e.target.value) } : a) })} />
+                    <input type="number" min="0" value={assignment.hoursSpent} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, hoursSpent: Number(e.target.value) } : a) })} />
+                    <button type="button" onClick={() => setForm({ ...form, assignments: form.assignments.filter((_, i) => i !== index) })}>Remove</button>
+                </div>)}
+                <button type="button" onClick={() => setForm({ ...form, assignments: [...form.assignments, { userId: '', revenuePercent: 0, hoursSpent: 0 }] })}>+ Add Person</button>
+                <button className="primary" disabled={!form.clientId || !form.startDate || !form.serviceIds.length || total !== 100} onClick={submit}>Save Productivity Job</button>
+            </div>
+        </article>
+    );
+}
+
+function ProductivityDaily({ payload }) {
+    return <ProductivitySimpleTable title="Daily Log" columns={['Date', 'Jobs', 'Total Hours', 'Per Person']} rows={(payload.days || []).map(day => [day.date, day.jobs, num(day.totalHours), day.people.map(p => `${p.name}: ${num(p.hours)} hrs`).join(', ')])} wide />;
+}
+function ProductivityByClient({ payload }) {
+    return <ProductivitySimpleTable title="By Client" columns={['Client', 'Revenue', 'Jobs', 'Effort', 'People', 'Services']} rows={(payload.clients || []).map(c => [c.clientName, inr(c.revenue), c.jobs, num(c.hours), c.peopleInvolved, c.servicesUsed.map(s => `${s.name} x${s.count}`).join(', ')])} wide />;
+}
+function ProductivityByPerson({ payload }) {
+    return <ProductivitySimpleTable title="By Person" columns={['Name', 'Duties', 'Status', 'Hours', 'Utilization', 'Jobs', 'Revenue Credit', 'Salary Grade', 'Efficiency']} rows={(payload.people || []).map(p => [p.name, p.duties, statusLabel(p.status), num(p.hours), `${num(p.utilization)}%`, p.jobs, inr(p.revenueCredit), p.salaryGrade || 'Private / unset', p.efficiency ? `${num(p.efficiency)}x` : 'Private / unset'])} wide />;
+}
+function ProductivityAllJobs({ payload, canManage, reload }) {
+    const remove = async id => {
+        if (!window.confirm('Delete this productivity job?')) return;
+        await api.deleteProductivityJob(id);
+        await reload('Productivity job deleted.');
+    };
+    return <ProductivitySimpleTable title="All Jobs" columns={['Start', 'Status', 'Productivity TAT', 'Client', 'Services', 'Description', 'Value', 'Assigned', 'Actions']} rows={(payload.jobs || []).map(j => [j.startDate, j.status, j.productivityTat == null ? '-' : `${j.productivityTat} days`, j.clientName, j.serviceNames, j.description, inr(j.valueAmount), j.assignments.map(a => `${a.userName} ${num(a.revenuePercent)}% / ${num(a.hoursSpent)} hrs`).join(', '), canManage ? <button className="danger small" onClick={() => remove(j.id)}>Delete</button> : '-'])} wide />;
+}
+
+function ProductivitySalaries({ payload, meta, canView, canManage, reload }) {
+    const [grade, setGrade] = useState({ label: '', minAmount: 0, maxAmount: 0 });
+    const [assignments, setAssignments] = useState({});
+    useEffect(() => {
+        setAssignments(Object.fromEntries((payload.assignments || []).map(a => [a.employeeUserId, a.gradeId])));
+    }, [payload.assignments]);
+    const saveGrade = async () => {
+        await api.createProductivitySalaryGrade(grade);
+        setGrade({ label: '', minAmount: 0, maxAmount: 0 });
+        await reload('Private salary grade saved.');
+    };
+    const saveAssignment = async employeeId => {
+        await api.updateProductivitySalaryAssignment(employeeId, assignments[employeeId] || null);
+        await reload('Private salary assignment updated.');
+    };
+    const removeGrade = async id => {
+        if (!window.confirm('Delete this private salary grade?')) return;
+        await api.deleteProductivitySalaryGrade(id);
+        await reload('Private salary grade deleted.');
+    };
+    if (!canView)
+        return <DashboardEmptyState title="Salaries are locked." body="This private salary area requires salary permission and never appears in general employee data." />;
+    return (
+        <div className="productivity-grid">
+            {canManage && <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Private Salary Grade</h3></div><div className="productivity-form-row"><input placeholder="Grade label" value={grade.label} onChange={e => setGrade({ ...grade, label: e.target.value })} /><input type="number" value={grade.minAmount} onChange={e => setGrade({ ...grade, minAmount: Number(e.target.value) })} /><input type="number" value={grade.maxAmount} onChange={e => setGrade({ ...grade, maxAmount: Number(e.target.value) })} /><button className="primary" onClick={saveGrade}>Save Grade</button></div></article>}
+            <ProductivitySimpleTable title="Private Salary Grades" columns={['Label', 'Range', 'Actions']} rows={(payload.grades || []).map(g => [g.label, `${inr(g.minAmount)} - ${inr(g.maxAmount)}`, canManage ? <button className="danger small" onClick={() => removeGrade(g.id)}>Delete</button> : '-'])} />
+            {canManage && <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Private Grade Assignments</h3></div><div className="productivity-stack">{meta.employees.map(e => <div className="productivity-form-row" key={e.id}><b>{e.name}</b><select value={assignments[e.id] || ''} onChange={event => setAssignments({ ...assignments, [e.id]: event.target.value })}><option value="">No private grade</option>{(payload.grades || []).map(g => <option value={g.id} key={g.id}>{g.label}</option>)}</select><button onClick={() => saveAssignment(e.id)}>Save</button></div>)}</div></article>}
+        </div>
+    );
+}
+
+function ProductivityManage({ payload, meta, canServices, canSettings, reload }) {
+    const [service, setService] = useState({ name: '', referenceHours: 0, isActive: true });
+    const saveService = async () => {
+        await api.createProductivityService(service);
+        setService({ name: '', referenceHours: 0, isActive: true });
+        await reload('Productivity service saved.');
+    };
+    const toggleService = async item => {
+        await api.updateProductivityService(item.id, { name: item.name, referenceHours: item.referenceHours, isActive: !item.isActive });
+        await reload(item.isActive ? 'Productivity service deactivated.' : 'Productivity service activated.');
+    };
+    const archiveService = async id => {
+        if (!window.confirm('Archive this productivity service?')) return;
+        await api.deleteProductivityService(id);
+        await reload('Productivity service archived.');
+    };
+    const updateEmployee = async (employee, patch) => {
+        await api.updateProductivityEmployeeSettings(employee.id, { weeklyCapacityHours: employee.weeklyCapacityHours, productivityStatus: employee.productivityStatus, ...patch });
+        await reload('Employee productivity setting updated.');
+    };
+    return (
+        <div className="productivity-grid">
+            <ProductivitySimpleTable title="Services" columns={['Service', 'Reference Hours', 'Status', 'Actions']} rows={(payload.services || []).map(s => [s.name, num(s.referenceHours), s.isActive ? 'Active' : 'Inactive', canServices ? <span className="productivity-actions"><button className="small" onClick={() => toggleService(s)}>{s.isActive ? 'Deactivate' : 'Activate'}</button><button className="danger small" onClick={() => archiveService(s.id)}>Archive</button></span> : '-'])} />
+            {canServices && <article className="dashboard-card productivity-card"><div className="dashboard-card-head"><h3>Add Service</h3></div><div className="productivity-stack"><input placeholder="Service name" value={service.name} onChange={e => setService({ ...service, name: e.target.value })} /><input type="number" value={service.referenceHours} onChange={e => setService({ ...service, referenceHours: Number(e.target.value) })} /><button className="primary" onClick={saveService}>Save Service</button></div></article>}
+            {canSettings && <article className="dashboard-card productivity-card productivity-wide"><div className="dashboard-card-head"><h3>Employee Productivity Settings</h3></div><div className="productivity-stack">{meta.employees.map(employee => <div className="productivity-form-row" key={employee.id}><b>{employee.name}</b><input type="number" defaultValue={employee.weeklyCapacityHours} onBlur={e => updateEmployee(employee, { weeklyCapacityHours: Number(e.target.value) })} /><select defaultValue={employee.productivityStatus} onChange={e => updateEmployee(employee, { productivityStatus: e.target.value })}><option value="active">Active</option><option value="intern">Intern</option><option value="vendor">Vendor</option><option value="inactive">Inactive</option></select></div>)}</div></article>}
         </div>
     );
 }
