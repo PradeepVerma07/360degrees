@@ -622,3 +622,14 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
   .dashboard-shell .job,.dashboard-shell .dashboard-overview-jobs .job{padding:13px}
   .dashboard-shell .module-access-stepper button small{display:none}
 }
+
+/* Desktop sidebar polish: keep only the CI logo at the left top, no menu toggle. */
+@media(min-width:1181px){
+  .dashboard-shell .dashboard-menu{display:none!important}
+  .dashboard-shell .dashboard-topbar-left{gap:0}
+  .dashboard-shell .dashboard-brand-icon-only{position:static!important;align-self:flex-start;justify-content:flex-start;padding:4px 0 14px 4px!important}
+  .dashboard-shell .dashboard-brand-icon-only img{width:54px!important;height:54px!important}
+}
+@media(max-width:1180px){
+  .dashboard-shell .dashboard-menu{display:grid!important}
+}
