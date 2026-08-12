@@ -47,7 +47,7 @@ const knownDashboardTabs = {
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
     ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['employees', 'Employees'], ['users', 'Users & Roles'], ['support', 'Support Tickets'], ['audit', 'Audit Logs'], ['app_settings', 'Settings']]
-    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'My Jobs'], ['support', 'Support Tickets']];
+    : [['overview', 'Overview'], ['submit', data.user?.accountType === 'client' ? 'Log a Job' : 'Submit a Job'], ['jobs', 'My Jobs'], ['support', 'Support Tickets']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('reset_token'))
@@ -181,6 +181,8 @@ export default function App() {
     const moduleTabs = (data.modules || [])
         .filter(module => knownDashboardTabs[module.id])
         .map(module => {
+        if (module.id === 'submit' && data.user?.accountType === 'client')
+            return [module.id, 'Log a Job'];
         if (module.id === 'jobs')
             return [module.id, can(data, 'jobs.view_all') ? 'By Category' : 'My Jobs'];
         if (module.id === 'clients')
@@ -637,7 +639,7 @@ function Overview({ data, setTab }) {
                 return ['Departments', 'users', 'users'];
         }
         if (can(data, 'jobs.create'))
-            return ['Submit a Job', 'submit', 'plus'];
+            return [dashboardProfile.roleKey === 'client' ? 'Log a Job' : 'Submit a Job', 'submit', 'plus'];
         if (canOpenJobs)
             return ['Open Jobs', 'jobs', 'jobs'];
         return null;
@@ -719,6 +721,7 @@ function Submit({ data, reload }) {
     const assignees = data.assignees || [];
     const departments = data.departments || [];
     const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
+    const isClientPortal = data.user.accountType === 'client';
     const showClientSelector = data.user.accountType !== 'client' && activeClients.length > 0;
     const emptyForm = {
         clientId: data.user.clientId || activeClients[0]?.id || '',
@@ -754,7 +757,7 @@ function Submit({ data, reload }) {
                 postedBy: form.postedBy,
                 assetLink: form.assetLink
             });
-            setMessage(form.assignedToUserId ? 'Job submitted and assigned successfully.' : 'Job submitted successfully. All logged-in users will receive the update instantly.');
+            setMessage(form.assignedToUserId ? 'Job submitted and assigned successfully.' : isClientPortal ? 'Job logged successfully. Your team will receive the update instantly.' : 'Job submitted successfully. All logged-in users will receive the update instantly.');
             setForm(current => ({ ...emptyForm, clientId: current.clientId, category: current.category, priority: current.priority }));
             await reload();
         }
@@ -764,7 +767,7 @@ function Submit({ data, reload }) {
     };
     return (
         <form className="card form" onSubmit={submit}>
-            <h2>New job request</h2>
+            <h2>{isClientPortal ? 'Log a Job' : 'New job request'}</h2>
             {message && <div className="alert">{message}</div>}
             {showClientSelector && (
                 <label>Client
@@ -821,7 +824,7 @@ function Submit({ data, reload }) {
             <label>Posted by
                 <input required value={form.postedBy} onChange={e => setForm({ ...form, postedBy: e.target.value })} />
             </label>
-            <button className="primary">Submit job</button>
+            <button className="primary">{isClientPortal ? 'Log Job' : 'Submit job'}</button>
         </form>
     );
 }
