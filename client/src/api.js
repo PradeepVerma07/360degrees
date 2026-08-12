@@ -1,4 +1,9 @@
-export const API_URL = import.meta.env.VITE_API_URL ?? '';
+const isNativeApp = typeof window !== 'undefined' && (
+    window.Capacitor?.isNativePlatform?.()
+    || ['android', 'ios'].includes(window.Capacitor?.getPlatform?.())
+    || ['capacitor:', 'file:'].includes(window.location.protocol)
+);
+export const API_URL = import.meta.env.VITE_API_URL ?? (isNativeApp ? 'https://360.webtrionix.com' : '');
 let token = localStorage.getItem('ci360-token') || sessionStorage.getItem('ci360-token');
 export const getToken = () => token;
 export const setToken = (value, remember = true) => {

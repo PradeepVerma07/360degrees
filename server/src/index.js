@@ -61,8 +61,20 @@ const app = express();
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-const io = new Server(httpServer, { cors: { origin } });
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+if (!allowedOrigins.includes('capacitor://localhost'))
+    allowedOrigins.push('capacitor://localhost');
+if (!allowedOrigins.includes('https://localhost'))
+    allowedOrigins.push('https://localhost');
+const corsOrigin = (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin))
+        return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+};
+const io = new Server(httpServer, { cors: { origin: corsOrigin } });
 let databaseReady = false;
 let databaseInitError = null;
 let shuttingDown = false;
@@ -107,7 +119,7 @@ const databaseHealthDetails = () => {
     };
 };
 app.use(helmet());
-app.use(cors({ origin }));
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '20mb' }));
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
 const emitPermissionsUpdated = () => io.emit('permissions:updated', { at: new Date().toISOString() });
