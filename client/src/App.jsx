@@ -527,17 +527,15 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         catch { }
     }, [theme]);
-    const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
-    const urgentJobs = data.jobs.filter(job => isPendingJob(job) && job.priority === 'Urgent').length;
-    const notificationCount = Math.min(openTickets + urgentJobs, 99);
-    const activities = recentActivityItems(data);
+    const notifications = data.notifications || [];
+    const unreadNotifications = Math.min(notifications.filter(item => !item.isRead).length, 99);
+    const notificationItems = dashboardNotificationItems(data);
     const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
     const dashboardProfile = dashboardProfileFor(data);
     const isSuperAdminUser = dashboardProfile.roleKey === 'super_admin';
     const displayName = isSuperAdminUser ? 'Super Admin' : data.user.name;
     const avatarInitials = isSuperAdminUser ? 'SA' : initialsFor(displayName);
     const displayRole = isSuperAdminUser ? 'Super Admin' : (data.user.roleName || data.user.accountType || 'Workspace user');
-    const unreadNotifications = Math.min((data.notifications || []).filter(item => !item.isRead).length, 99);
     const goTo = id => {
         setTab(id);
         setSidebarOpen(false);
@@ -588,7 +586,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
                             _jsxs("form", { className: "dashboard-search", role: "search", onSubmit: submitSearch, children: [_jsx(DashboardIcon, { name: "search" }), _jsx("input", { type: "search", value: searchTerm, onChange: event => setSearchTerm(event.target.value), placeholder: "Search...", "aria-label": "Search jobs" }), _jsx("button", { type: "submit", "aria-label": "Open job search", children: _jsx(DashboardIcon, { name: "search" }) })] }),
                             _jsxs("div", { className: "dashboard-user-area", children: [
                                     _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
-                                    _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Latest activity", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Latest Activity" }), _jsxs("span", { children: [notificationCount, " open notice", notificationCount === 1 ? '' : 's'] })] }), activities.length ? _jsx("div", { className: "dashboard-activity-list compact", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Latest job, ticket, and client updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo('overview'), children: "Open Dashboard" })] })] }),
+                                    _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open notifications", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), unreadNotifications > 0 && _jsx("span", { children: unreadNotifications })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Notifications", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Notifications" }), _jsxs("span", { children: [unreadNotifications, " unread update", unreadNotifications === 1 ? '' : 's'] })] }), notificationItems.length ? _jsx("div", { className: "dashboard-activity-list compact", children: notificationItems.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: item.support })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No notifications", body: "Job, ticket, and team chat updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo(tabs.some(([id]) => id === 'notifications') ? 'notifications' : 'overview'), children: "Open Notifications" })] })] }),
                                     _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsx("span", { children: displayName }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("span", { children: displayRole })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
                                 ] })
                         ] }),
@@ -614,6 +612,29 @@ function recentActivityItems(data) {
     const ticketItems = (data.supportTickets || []).map(ticket => ({ id: `ticket-${ticket.ticketNumber}`, tab: 'support', tone: ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'success' : 'purple', description: `Ticket "${ticket.subject}" ${ticket.status === 'Open' ? 'created' : 'updated'}`, date: ticket.updatedAt || ticket.createdAt }));
     const clientItems = canAny(data, ['clients.view_all', 'clients.view']) ? data.clients.map(client => ({ id: `client-${client.id}`, tab: 'clients', tone: 'gold', description: `Client "${client.name}" added`, date: client.createdAt })) : [];
     return [...jobItems, ...ticketItems, ...clientItems].filter(item => timestamp(item.date)).sort((a, b) => timestamp(b.date) - timestamp(a.date)).slice(0, 5);
+}
+function dashboardNotificationItems(data) {
+    const tabFor = item => item.type === 'chat_message'
+        ? 'chat'
+        : item.type?.startsWith('support_')
+            ? 'support'
+            : item.jobId || item.type?.startsWith('job_') || item.type?.includes('assignment')
+                ? 'jobs'
+                : 'notifications';
+    const toneFor = item => item.type === 'chat_message'
+        ? 'purple'
+        : item.type?.includes('failed') || item.type?.includes('declined')
+            ? 'urgent'
+            : item.isRead
+                ? 'blue'
+                : 'gold';
+    return (data.notifications || []).map(item => ({
+        id: `notification-${item.id}`,
+        tab: tabFor(item),
+        tone: toneFor(item),
+        description: item.title || 'Notification',
+        support: `${item.body || ''}${item.body ? ' - ' : ''}${shortDateTime(item.createdAt)}`
+    })).slice(0, 8);
 }
 const relativeTime = value => {
     const time = timestamp(value);

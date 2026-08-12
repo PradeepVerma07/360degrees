@@ -1163,6 +1163,33 @@ const canAccessInternalChatThread = (user, thread) => {
         return true;
     return user.departmentId && Number(user.departmentId) === Number(thread.department_id);
 };
+const internalChatRecipientIds = async (thread, actorUserId, connection = pool) => {
+    if (thread.participant_user_id)
+        return [thread.created_by_user_id, thread.participant_user_id].filter(id => id && id !== actorUserId);
+    if (thread.department_id) {
+        const rows = await query(
+            `SELECT id FROM users
+              WHERE status='active'
+                AND department_id=?
+                AND COALESCE(account_type,role)<>'client'
+                AND COALESCE(account_type,role)<>'super_admin'
+                AND id<>?`,
+            [thread.department_id, actorUserId],
+            connection
+        );
+        return rows.map(row => row.id);
+    }
+    const rows = await query(
+        `SELECT id FROM users
+          WHERE status='active'
+            AND COALESCE(account_type,role)<>'client'
+            AND COALESCE(account_type,role)<>'super_admin'
+            AND id<>?`,
+        [actorUserId],
+        connection
+    );
+    return rows.map(row => row.id);
+};
 const internalChatDetail = async thread => {
     const messages = await query(`SELECT id,thread_id threadId,author_id authorId,author_name authorName,body,created_at createdAt
       FROM internal_chat_messages
@@ -2243,6 +2270,16 @@ app.post('/api/internal-chat', requireAuth, requirePermission('chat.create'), re
             [id, req.user.id, req.user.name, parsed.data.body, now],
             connection
         );
+        await notifyUsers(await internalChatRecipientIds({
+            created_by_user_id: req.user.id,
+            participant_user_id: participant?.id || null,
+            department_id: departmentResult.departmentId
+        }, req.user.id, connection), {
+            title: 'New team chat',
+            body: `${req.user.name} started "${parsed.data.subject}".`,
+            type: 'chat_message',
+            createdAt: now
+        }, connection);
         await audit(req.user.id, 'create', 'internal_chat', String(id), { subject: parsed.data.subject, departmentId: departmentResult.departmentId, participantUserId: participant?.id || '' }, connection);
         return id;
     });
@@ -2275,6 +2312,12 @@ app.post('/api/internal-chat/:id/replies', requireAuth, requirePermission('chat.
             connection
         );
         await query('UPDATE internal_chat_threads SET last_message_at=?,updated_at=? WHERE id=?', [now, now, thread.id], connection);
+        await notifyUsers(await internalChatRecipientIds(thread, req.user.id, connection), {
+            title: 'New team chat reply',
+            body: `${req.user.name}: ${parsed.data.body.slice(0, 140)}`,
+            type: 'chat_message',
+            createdAt: now
+        }, connection);
         await audit(req.user.id, 'reply', 'internal_chat', String(thread.id), {}, connection);
     });
     emitRefresh();
