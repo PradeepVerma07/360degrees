@@ -1,5 +1,6 @@
-import { moduleCatalog, permissions as permissionCatalog, rolePermissions } from './permissionCatalog.js';
+import { permissions as permissionCatalog, rolePermissions } from './permissionCatalog.js';
 import { one, query } from './db.js';
+import { evaluateModuleAccess, getVisibleModules } from './moduleAccessService.js';
 
 const legacyPermissionFallback = {
   admin: new Set([
@@ -56,10 +57,8 @@ export const hasAnyPermission = (user, permissions) => permissions.some(permissi
 export const isInternalUser = user => user?.accountType !== 'client';
 export const isSuperAdmin = user => user?.accountType === 'super_admin' || user?.roleSlug === 'super_admin';
 
-export function visibleModulesFor(user) {
-  return moduleCatalog
-    .filter(module => hasAnyPermission(user, module.permissionAny))
-    .map(({ id, label }) => ({ id, label }));
+export async function visibleModulesFor(user) {
+  return getVisibleModules(user);
 }
 
 export async function loadUserContext(userId) {
@@ -131,6 +130,7 @@ export async function loadUserContext(userId) {
     roleSlug: row.role_slug || roleId,
     roleLevel: Number(row.role_level || 0),
     roleType: row.role_type || (accountType === 'client' ? 'client' : 'internal'),
+    status: row.status,
     clientId: row.client_id,
     departmentId: row.department_id,
     departmentName: row.department_name,
@@ -140,7 +140,7 @@ export async function loadUserContext(userId) {
     managerUserId: row.manager_user_id,
     permissions: [...permissions].sort()
   };
-  user.modules = visibleModulesFor(user);
+  user.modules = await visibleModulesFor(user);
   return user;
 }
 
@@ -151,6 +151,24 @@ export function requirePermission(...permissions) {
     if (!hasAnyPermission(req.user, permissions))
       return res.status(403).json({ error: 'Permission denied' });
     next();
+  };
+}
+
+export function requireModuleAccess(...moduleKeys) {
+  return async (req, res, next) => {
+    if (!req.user)
+      return res.status(401).json({ error: 'Authentication required' });
+    try {
+      for (const moduleKey of moduleKeys) {
+        const result = await evaluateModuleAccess(req.user, moduleKey);
+        if (result.allowed)
+          return next();
+      }
+      return res.status(403).json({ error: 'Module access denied' });
+    }
+    catch (error) {
+      next(error);
+    }
   };
 }
 

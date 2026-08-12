@@ -22,7 +22,17 @@ import {
     shouldRepairDemoLogin
 } from './db.js';
 import { requireAuth, signToken } from './auth.js';
-import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
+import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission, requireModuleAccess } from './permissions.js';
+import {
+    deleteModuleAccessRule,
+    evaluateModuleAccess,
+    getModuleRuleById,
+    getModuleRules,
+    moduleAccessOverview,
+    normalizeModuleAccessInput,
+    saveModuleAccessRule,
+    validateModuleAccessRule
+} from './moduleAccessService.js';
 import { calculateHours } from './tat.js';
 const app = express();
 app.set('trust proxy', 1);
@@ -74,6 +84,7 @@ app.use(helmet());
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
+const emitPermissionsUpdated = () => io.emit('permissions:updated', { at: new Date().toISOString() });
 const loginRateKey = req => `${req.ip || req.socket.remoteAddress || 'unknown'}:${String(req.body?.id || '').trim().toLowerCase().slice(0, 120)}`;
 const checkLoginRateLimit = (req, res, next) => {
     const key = loginRateKey(req);
@@ -164,6 +175,34 @@ const optionalId = value => {
 };
 const entityStatus = ['active', 'inactive'];
 const roleTypes = ['internal', 'client'];
+const accessConditionSchema = z.object({
+    effect: z.enum(['include', 'exclude']).default('include'),
+    conditionType: z.string().trim().min(1),
+    operator: z.string().trim().default('equals'),
+    value: z.string().trim().min(1)
+});
+const accessTriggerSchema = z.object({
+    triggerType: z.string().trim().min(1),
+    operator: z.string().trim().default('equals'),
+    value: z.string().trim().optional().default(''),
+    isActive: z.boolean().optional().default(true)
+});
+const accessAdvancedRuleSchema = z.object({
+    ruleType: z.string().trim().min(1),
+    operator: z.string().trim().default('equals'),
+    value: z.string().trim().optional().default('')
+});
+const moduleAccessPayloadSchema = z.object({
+    id: z.union([z.string(), z.number()]).optional(),
+    moduleKey: z.string().trim().min(1),
+    name: z.string().trim().optional().default(''),
+    description: z.string().trim().optional().default(''),
+    matchMode: z.enum(['all', 'any']).optional().default('all'),
+    isActive: z.boolean().optional().default(true),
+    conditions: z.array(accessConditionSchema).optional().default([]),
+    triggers: z.array(accessTriggerSchema).optional().default([]),
+    advancedRules: z.array(accessAdvancedRuleSchema).optional().default([])
+});
 const clientSafePermissions = new Set(['dashboard.view', 'jobs.view_own', 'jobs.create', 'jobs.assign', 'support.view_own', 'support.create', 'support.reply']);
 const mapAttachment = (row) => ({
     id: String(row.id), ticketNumber: row.ticket_number, fileName: row.file_name,
@@ -431,12 +470,13 @@ app.post('/api/auth/login', checkLoginRateLimit, async (req, res) => {
 });
 app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const user = req.user;
+    const visibleModuleIds = new Set((user.modules || []).map(module => module.id));
     const includeInternalJobFields = user.accountType !== 'client' || canAssignJobs(user);
-    const canReadJobs = hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
-    const canReadSupport = hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
-    const canReadSettings = hasAnyPermission(user, ['settings.view', 'settings.edit']);
+    const canReadJobs = visibleModuleIds.has('jobs') && hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
+    const canReadSupport = visibleModuleIds.has('support') && hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
+    const canReadSettings = (visibleModuleIds.has('settings') || visibleModuleIds.has('app_settings')) && hasAnyPermission(user, ['settings.view', 'settings.edit']);
     const jobRows = canReadJobs ? await loadVisibleJobs(user) : [];
-    const clients = await loadVisibleClients(user);
+    const clients = (user.accountType === 'client' || visibleModuleIds.has('clients') || visibleModuleIds.has('submit')) ? await loadVisibleClients(user) : [];
     const ticketRows = !canReadSupport
         ? []
         : canManageSupport(user)
@@ -475,7 +515,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         clientOwners
     });
 });
-app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), async (req, res) => {
+app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), requireModuleAccess('jobs'), async (req, res) => {
     const schema = z.object({
         search: z.string().trim().optional().default(''),
         clientId: z.string().trim().optional().default(''),
@@ -518,7 +558,7 @@ app.get('/api/jobs', requireAuth, requirePermission('jobs.view_own', 'jobs.view_
         pagination: { total, page: filters.page, pageSize: filters.pageSize, pages: Math.max(1, Math.ceil(total / filters.pageSize)) }
     });
 });
-app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), async (req, res) => {
+app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.view_all', 'jobs.view_department'), requireModuleAccess('jobs'), async (req, res) => {
     const row = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
     if (!row)
         return res.status(404).json({ error: 'Job not found' });
@@ -549,7 +589,7 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
         : [];
     res.json({ job, assignmentHistory });
 });
-app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req, res) => {
+app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), requireModuleAccess('submit'), async (req, res) => {
     const schema = z.object({
         clientId: z.string().optional(),
         title: z.string().min(2),
@@ -629,7 +669,7 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
     emitRefresh();
     res.status(201).json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [id]), user.accountType !== 'client' || canAssignJobs(user)) });
 });
-app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), async (req, res) => {
+app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), requireModuleAccess('jobs'), async (req, res) => {
     const schema = z.object({
         title: z.string().min(2).optional(),
         description: z.string().optional(),
@@ -731,7 +771,7 @@ app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.upd
     emitRefresh();
     res.json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [req.params.id]), req.user.accountType !== 'client' || canAssignJobs(req.user)) });
 });
-app.put('/api/settings', requireAuth, requirePermission('settings.edit'), async (req, res) => {
+app.put('/api/settings', requireAuth, requirePermission('settings.edit'), requireModuleAccess('settings', 'app_settings'), async (req, res) => {
     const schema = z.object({ categories: z.array(z.object({ name: z.string().min(1), baseHours: z.number().positive() })).min(1), capacityPerCategory: z.number().int().positive(), bufferHoursPerExtraJob: z.number().nonnegative(), startHour: z.number().min(0).max(24), endHour: z.number().min(0).max(24), workDays: z.array(z.number().int().min(0).max(6)).min(1) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
@@ -741,7 +781,7 @@ app.put('/api/settings', requireAuth, requirePermission('settings.edit'), async 
     emitRefresh();
     res.json({ settings: parsed.data });
 });
-app.post('/api/clients', requireAuth, requirePermission('clients.create'), async (req, res) => {
+app.post('/api/clients', requireAuth, requirePermission('clients.create'), requireModuleAccess('clients'), async (req, res) => {
     const parsed = z.object({ id: z.string().regex(/^[a-z0-9_-]+$/), name: z.string().min(2), password: z.string().min(6) }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -758,7 +798,7 @@ app.post('/api/clients', requireAuth, requirePermission('clients.create'), async
     emitRefresh();
     res.status(201).json({ ok: true });
 });
-app.patch('/api/clients/:id', requireAuth, requirePermission('clients.edit'), async (req, res) => {
+app.patch('/api/clients/:id', requireAuth, requirePermission('clients.edit'), requireModuleAccess('clients'), async (req, res) => {
     const parsed = z.object({ name: z.string().min(2).optional(), password: z.string().min(6).optional(), status: z.enum(['active', 'archived']).optional() }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -784,7 +824,7 @@ app.patch('/api/clients/:id', requireAuth, requirePermission('clients.edit'), as
     emitRefresh();
     res.json({ ok: true });
 });
-app.delete('/api/clients/:id', requireAuth, requirePermission('clients.delete'), async (req, res) => {
+app.delete('/api/clients/:id', requireAuth, requirePermission('clients.delete'), requireModuleAccess('clients'), async (req, res) => {
     const client = await one('SELECT * FROM clients WHERE id=?', [req.params.id]);
     if (!client)
         return res.status(404).json({ error: 'Client not found' });
@@ -803,7 +843,7 @@ app.delete('/api/clients/:id', requireAuth, requirePermission('clients.delete'),
     emitRefresh();
     res.json({ ok: true });
 });
-app.post('/api/support-tickets', requireAuth, requirePermission('support.create'), async (req, res) => {
+app.post('/api/support-tickets', requireAuth, requirePermission('support.create'), requireModuleAccess('support'), async (req, res) => {
     const schema = z.object({
         subject: z.string().trim().min(3),
         category: z.enum(ticketCategories),
@@ -841,7 +881,7 @@ app.post('/api/support-tickets', requireAuth, requirePermission('support.create'
     emitRefresh();
     res.status(201).json({ ticket: mapTicket(await getTicketRow(ticketNumber)) });
 });
-app.post('/api/support-tickets/bulk-delete', requireAuth, requirePermission('support.view_own', 'support.manage'), async (req, res) => {
+app.post('/api/support-tickets/bulk-delete', requireAuth, requirePermission('support.view_own', 'support.manage'), requireModuleAccess('support'), async (req, res) => {
     const parsed = z.object({ ticketNumbers: z.array(z.string().min(1)).min(1).max(100) }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -860,7 +900,7 @@ app.post('/api/support-tickets/bulk-delete', requireAuth, requirePermission('sup
     emitRefresh();
     res.json({ ok: true, deleted: accessible.length });
 });
-app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.view_all'), async (req, res) => {
+app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.view_all'), requireModuleAccess('support'), async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
@@ -868,7 +908,7 @@ app.get('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('su
         return res.status(403).json({ error: 'Ticket access denied' });
     res.json({ ticket: await ticketDetail(ticket) });
 });
-app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePermission('support.manage'), async (req, res) => {
+app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePermission('support.manage'), requireModuleAccess('support'), async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
@@ -884,7 +924,7 @@ app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePe
     emitRefresh();
     res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
-app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermission('support.reply'), async (req, res) => {
+app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermission('support.reply'), requireModuleAccess('support'), async (req, res) => {
     const parsed = z.object({ body: z.string().trim().min(1).max(5000) }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -909,7 +949,7 @@ app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermi
     emitRefresh();
     res.status(201).json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
-app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.manage'), async (req, res) => {
+app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.manage'), requireModuleAccess('support'), async (req, res) => {
     const parsed = z.object({ status: z.enum(ticketStatuses).optional(), priority: z.enum(ticketPriorities).optional() }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -938,7 +978,7 @@ app.patch('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('
     emitRefresh();
     res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
-app.delete('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.manage'), async (req, res) => {
+app.delete('/api/support-tickets/:ticketNumber', requireAuth, requirePermission('support.view_own', 'support.manage'), requireModuleAccess('support'), async (req, res) => {
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
@@ -951,7 +991,7 @@ app.delete('/api/support-tickets/:ticketNumber', requireAuth, requirePermission(
     emitRefresh();
     res.json({ ok: true });
 });
-app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireAuth, requirePermission('support.view_own', 'support.view_all'), async (req, res) => {
+app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireAuth, requirePermission('support.view_own', 'support.view_all'), requireModuleAccess('support'), async (req, res) => {
     const row = await one(`SELECT a.*,t.ticket_number,t.user_id FROM support_ticket_attachments a JOIN support_tickets t ON t.id=a.ticket_id WHERE t.ticket_number=? AND a.id=?`,
         [req.params.ticketNumber, req.params.attachmentId]);
     if (!row)
@@ -965,7 +1005,7 @@ app.get('/api/support-tickets/:ticketNumber/attachments/:attachmentId', requireA
     res.send(bytes);
 });
 
-app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), async (req, res) => {
+app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.view'), requireModuleAccess('users', 'employees'), async (req, res) => {
     const scopeWhere = hasPermission(req.user, 'users.view') ? '' : "WHERE COALESCE(u.account_type,u.role)<>'client'";
     const rows = await query(`SELECT u.id,u.name,u.email,u.phone,u.account_type accountType,u.role_id roleId,u.client_id clientId,
         u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
@@ -984,7 +1024,7 @@ app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.vi
     res.json({ users: rows });
 });
 
-app.post('/api/users', requireAuth, requirePermission('users.create', 'employees.create'), async (req, res) => {
+app.post('/api/users', requireAuth, requirePermission('users.create', 'employees.create'), requireModuleAccess('users', 'employees'), async (req, res) => {
     const parsed = z.object({
         id: z.string().trim().regex(/^[a-zA-Z0-9._-]+$/),
         name: z.string().trim().min(2),
@@ -1077,7 +1117,7 @@ app.post('/api/users', requireAuth, requirePermission('users.create', 'employees
     res.status(201).json({ user: await loadUserContext(input.id) });
 });
 
-app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employees.edit'), async (req, res) => {
+app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employees.edit'), requireModuleAccess('users', 'employees'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2).optional(),
         email: z.string().trim().email().optional().or(z.literal('')),
@@ -1154,7 +1194,7 @@ app.patch('/api/users/:id', requireAuth, requirePermission('users.edit', 'employ
     res.json({ user: await loadUserContext(current.id) });
 });
 
-app.get('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), async (req, res) => {
+app.get('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), requireModuleAccess('users'), async (req, res) => {
     const target = await one('SELECT id,account_type,role_id FROM users WHERE id=?', [req.params.id]);
     if (!target)
         return res.status(404).json({ error: 'User not found' });
@@ -1164,7 +1204,7 @@ app.get('/api/users/:id/permission-overrides', requireAuth, requirePermission('r
     res.json({ overrides });
 });
 
-app.put('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), async (req, res) => {
+app.put('/api/users/:id/permission-overrides', requireAuth, requirePermission('roles.manage_permissions'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         grants: z.array(z.string().trim().min(1)).default([]),
         revokes: z.array(z.string().trim().min(1)).default([])
@@ -1199,12 +1239,12 @@ app.put('/api/users/:id/permission-overrides', requireAuth, requirePermission('r
     res.json({ ok: true });
 });
 
-app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), async (_req, res) => {
+app.get('/api/departments', requireAuth, requirePermission('departments.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), requireModuleAccess('users', 'employees'), async (_req, res) => {
     const departments = await query('SELECT id,name,code,description,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM departments ORDER BY status,name');
     res.json({ departments });
 });
 
-app.post('/api/departments', requireAuth, requirePermission('departments.manage'), async (req, res) => {
+app.post('/api/departments', requireAuth, requirePermission('departments.manage'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2),
         code: z.string().trim().optional().or(z.literal('')),
@@ -1224,7 +1264,7 @@ app.post('/api/departments', requireAuth, requirePermission('departments.manage'
     res.status(201).json({ ok: true });
 });
 
-app.patch('/api/departments/:id', requireAuth, requirePermission('departments.manage'), async (req, res) => {
+app.patch('/api/departments/:id', requireAuth, requirePermission('departments.manage'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2).optional(),
         code: z.string().trim().optional().or(z.literal('')),
@@ -1261,12 +1301,12 @@ app.patch('/api/departments/:id', requireAuth, requirePermission('departments.ma
     res.json({ ok: true });
 });
 
-app.get('/api/designations', requireAuth, requirePermission('designations.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), async (_req, res) => {
+app.get('/api/designations', requireAuth, requirePermission('designations.manage', 'employees.view', 'employees.create', 'employees.edit', 'users.view', 'users.create', 'users.edit'), requireModuleAccess('users', 'employees'), async (_req, res) => {
     const designations = await query('SELECT id,name,code,description,hierarchy_level hierarchyLevel,status,created_by createdBy,created_at createdAt,updated_at updatedAt FROM designations ORDER BY hierarchy_level DESC,name');
     res.json({ designations });
 });
 
-app.post('/api/designations', requireAuth, requirePermission('designations.manage'), async (req, res) => {
+app.post('/api/designations', requireAuth, requirePermission('designations.manage'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2),
         code: z.string().trim().optional().or(z.literal('')),
@@ -1287,7 +1327,7 @@ app.post('/api/designations', requireAuth, requirePermission('designations.manag
     res.status(201).json({ ok: true });
 });
 
-app.patch('/api/designations/:id', requireAuth, requirePermission('designations.manage'), async (req, res) => {
+app.patch('/api/designations/:id', requireAuth, requirePermission('designations.manage'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2).optional(),
         code: z.string().trim().optional().or(z.literal('')),
@@ -1326,7 +1366,7 @@ app.patch('/api/designations/:id', requireAuth, requirePermission('designations.
     res.json({ ok: true });
 });
 
-app.post('/api/rbac/roles', requireAuth, requirePermission('roles.create'), async (req, res) => {
+app.post('/api/rbac/roles', requireAuth, requirePermission('roles.create'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         id: z.string().trim().optional().or(z.literal('')),
         name: z.string().trim().min(2),
@@ -1362,7 +1402,7 @@ app.post('/api/rbac/roles', requireAuth, requirePermission('roles.create'), asyn
     res.status(201).json({ ok: true });
 });
 
-app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), async (req, res) => {
+app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({
         name: z.string().trim().min(2).optional(),
         description: z.string().trim().optional(),
@@ -1408,7 +1448,7 @@ app.patch('/api/rbac/roles/:id', requireAuth, requirePermission('roles.edit'), a
     res.json({ ok: true });
 });
 
-app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.create', 'employees.edit'), async (_req, res) => {
+app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.create', 'employees.edit'), requireModuleAccess('users', 'employees'), async (_req, res) => {
     const roles = await query(`SELECT id,name,slug,description,level,role_type roleType,is_system isSystem,status,created_at createdAt,updated_at updatedAt
       FROM roles ORDER BY level DESC,name`);
     const rolePermissionRows = await query('SELECT role_id roleId,permission_id permissionId FROM role_permissions');
@@ -1419,12 +1459,12 @@ app.get('/api/rbac/roles', requireAuth, requirePermission('roles.view', 'users.c
     res.json({ roles: roles.map(role => ({ ...role, permissions: grouped[role.id] || [] })) });
 });
 
-app.get('/api/rbac/permissions', requireAuth, requirePermission('roles.view', 'roles.manage_permissions'), async (_req, res) => {
+app.get('/api/rbac/permissions', requireAuth, requirePermission('roles.view', 'roles.manage_permissions'), requireModuleAccess('users'), async (_req, res) => {
     const permissions = await query('SELECT id,module,action,label,description FROM permissions ORDER BY module,action');
     res.json({ permissions });
 });
 
-app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles.manage_permissions'), async (req, res) => {
+app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles.manage_permissions'), requireModuleAccess('users'), async (req, res) => {
     const parsed = z.object({ permissions: z.array(z.string().min(1)).default([]) }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -1453,7 +1493,102 @@ app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles
     res.json({ ok: true });
 });
 
-app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (_req, res) => {
+app.get('/api/modules', requireAuth, requirePermission('modules.view_access_rules', 'modules.manage_access'), requireModuleAccess('users'), async (_req, res) => {
+    res.json({ modules: await moduleAccessOverview() });
+});
+
+app.get('/api/module-access', requireAuth, requirePermission('modules.view_access_rules', 'modules.manage_access'), requireModuleAccess('users'), async (_req, res) => {
+    res.json({ rules: await getModuleRules() });
+});
+
+app.get('/api/module-access/:moduleKey', requireAuth, requirePermission('modules.view_access_rules', 'modules.manage_access'), requireModuleAccess('users'), async (req, res) => {
+    const modules = await moduleAccessOverview();
+    const module = modules.find(item => item.id === req.params.moduleKey);
+    if (!module)
+        return res.status(404).json({ error: 'Module not found' });
+    res.json({ module, rules: await getModuleRules(req.params.moduleKey) });
+});
+
+app.post('/api/module-access', requireAuth, requirePermission('modules.manage_access'), requireModuleAccess('users'), async (req, res) => {
+    const parsed = moduleAccessPayloadSchema.safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const rule = normalizeModuleAccessInput({ ...parsed.data, id: '' });
+    const validation = await validateModuleAccessRule(rule);
+    if (validation.error)
+        return res.status(400).json({ error: validation.error });
+    const saved = await transaction(async connection => {
+        const persisted = await saveModuleAccessRule(validation.rule, req.user.id, connection);
+        await audit(req.user.id, validation.rule.id ? 'module_access_updated' : 'module_access_created', 'module_access_rule', persisted.id,
+            { moduleKey: persisted.moduleKey, previousRuleId: validation.rule.id || null, rule: persisted }, connection);
+        return persisted;
+    });
+    emitPermissionsUpdated();
+    res.status(201).json({ rule: saved });
+});
+
+app.put('/api/module-access/:id', requireAuth, requirePermission('modules.manage_access'), requireModuleAccess('users'), async (req, res) => {
+    const existing = await getModuleRuleById(req.params.id);
+    if (!existing)
+        return res.status(404).json({ error: 'Module access rule not found' });
+    const parsed = moduleAccessPayloadSchema.safeParse({ ...req.body, id: req.params.id, moduleKey: req.body.moduleKey || existing.moduleKey });
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const rule = normalizeModuleAccessInput(parsed.data);
+    const validation = await validateModuleAccessRule(rule);
+    if (validation.error)
+        return res.status(400).json({ error: validation.error });
+    const saved = await transaction(async connection => {
+        const persisted = await saveModuleAccessRule(validation.rule, req.user.id, connection);
+        const action = !existing.isActive && persisted.isActive
+            ? 'module_access_activated'
+            : existing.isActive && !persisted.isActive
+                ? 'module_access_disabled'
+                : 'module_access_updated';
+        await audit(req.user.id, action, 'module_access_rule', persisted.id,
+            { moduleKey: persisted.moduleKey, previous: existing, next: persisted }, connection);
+        return persisted;
+    });
+    emitPermissionsUpdated();
+    res.json({ rule: saved });
+});
+
+app.delete('/api/module-access/:id', requireAuth, requirePermission('modules.manage_access'), requireModuleAccess('users'), async (req, res) => {
+    const existing = await getModuleRuleById(req.params.id);
+    if (!existing)
+        return res.status(404).json({ error: 'Module access rule not found' });
+    await transaction(async connection => {
+        await deleteModuleAccessRule(req.params.id, connection);
+        await audit(req.user.id, 'module_access_deleted', 'module_access_rule', req.params.id,
+            { moduleKey: existing.moduleKey, previous: existing }, connection);
+    });
+    emitPermissionsUpdated();
+    res.json({ ok: true });
+});
+
+app.post('/api/module-access/:moduleKey/evaluate', requireAuth, requirePermission('modules.view_access_rules', 'modules.manage_access'), requireModuleAccess('users'), async (req, res) => {
+    const parsed = z.object({ userId: z.string().trim().min(1) }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const target = await loadUserContext(parsed.data.userId);
+    if (!target)
+        return res.status(404).json({ error: 'Active user not found' });
+    const result = await evaluateModuleAccess(target, req.params.moduleKey);
+    res.json({
+        user: {
+            id: target.id,
+            name: target.name,
+            accountType: target.accountType,
+            roleName: target.roleName,
+            departmentName: target.departmentName,
+            designationName: target.designationName
+        },
+        moduleKey: req.params.moduleKey,
+        result
+    });
+});
+
+app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), requireModuleAccess('audit'), async (_req, res) => {
     const rows = await query(`SELECT id,actor_id actorId,action,entity_type entityType,entity_id entityId,details,created_at createdAt
       FROM audit_logs ORDER BY created_at DESC,id DESC LIMIT 150`);
     res.json({

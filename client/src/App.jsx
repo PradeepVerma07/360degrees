@@ -207,7 +207,7 @@ export default function App() {
                         ? _jsx(Clients, { data: data, reload: load })
                         : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
                             ? _jsx(Employees, { data: data, setTab: setTab })
-                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
+                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.view', 'employees.create', 'employees.edit', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage', 'modules.view_access_rules', 'modules.manage_access'])
                                 ? _jsx(UsersRoles, { data: data, reload: load })
                                 : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
                                     ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
@@ -1312,6 +1312,8 @@ function UsersRoles({ data, reload }) {
     const [users, setUsers] = useState([]);
     const [roles, setRoles] = useState([]);
     const [permissions, setPermissions] = useState([]);
+    const [modules, setModules] = useState([]);
+    const [moduleAccessRules, setModuleAccessRules] = useState([]);
     const [departments, setDepartments] = useState([]);
     const [designations, setDesignations] = useState([]);
     const [selectedRoleId, setSelectedRoleId] = useState('');
@@ -1330,16 +1332,20 @@ function UsersRoles({ data, reload }) {
         setLoading(true);
         setError('');
         try {
-            const [usersResult, rolesResult, permissionsResult, departmentsResult, designationsResult] = await Promise.all([
+            const [usersResult, rolesResult, permissionsResult, modulesResult, moduleAccessResult, departmentsResult, designationsResult] = await Promise.all([
                 canAny(data, ['users.view', 'employees.view']) ? api.users() : Promise.resolve({ users: [] }),
                 canAny(data, ['roles.view', 'users.create', 'users.edit', 'users.assign_role', 'employees.create', 'employees.edit']) ? api.roles() : Promise.resolve({ roles: [] }),
                 canAny(data, ['roles.view', 'roles.manage_permissions']) ? api.permissions() : Promise.resolve({ permissions: [] }),
+                canAny(data, ['modules.view_access_rules', 'modules.manage_access']) ? api.modules() : Promise.resolve({ modules: [] }),
+                canAny(data, ['modules.view_access_rules', 'modules.manage_access']) ? api.moduleAccess() : Promise.resolve({ rules: [] }),
                 canAny(data, ['departments.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.departments() : Promise.resolve({ departments: [] }),
                 canAny(data, ['designations.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.designations() : Promise.resolve({ designations: [] })
             ]);
             setUsers(usersResult.users || []);
             setRoles(rolesResult.roles || []);
             setPermissions(permissionsResult.permissions || []);
+            setModules(modulesResult.modules || []);
+            setModuleAccessRules(moduleAccessResult.rules || []);
             setDepartments(departmentsResult.departments || []);
             setDesignations(designationsResult.designations || []);
         }
@@ -1377,6 +1383,7 @@ function UsersRoles({ data, reload }) {
         canAny(data, ['users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) && ['users', 'Users'],
         can(data, 'roles.view') && ['roles', 'Roles'],
         can(data, 'roles.manage_permissions') && ['permissions', 'Permissions'],
+        canAny(data, ['modules.view_access_rules', 'modules.manage_access']) && ['moduleAccess', 'Module Access'],
         can(data, 'departments.manage') && ['departments', 'Departments'],
         can(data, 'designations.manage') && ['designations', 'Designations'],
         canAny(data, ['users.view', 'employees.view']) && ['hierarchy', 'Hierarchy']
@@ -1868,10 +1875,511 @@ function UsersRoles({ data, reload }) {
                 </article>
             )}
             {activePanel === 'permissions' && <UserPermissionsPanel users={users} roles={roles} permissions={permissions} currentUser={data.user} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
+            {activePanel === 'moduleAccess' && <ModuleAccessPanel modules={modules} rules={moduleAccessRules} users={users} roles={roles} departments={departments} designations={designations} clients={data.clients || []} canManage={can(data, 'modules.manage_access')} reloadManagement={loadManagement} reload={reload} setMessage={setMessage} setError={setError} />}
             {activePanel === 'departments' && <DepartmentsPanel departments={departments} users={users} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'designations' && <DesignationsPanel designations={designations} users={users} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
             {activePanel === 'hierarchy' && <HierarchyPanel users={internalUsers} />}
         </section>
+    );
+}
+
+const moduleRuleSteps = [
+    ['conditions', 'Conditions', 'Choose who can access this module.', 'users'],
+    ['triggers', 'Triggers', 'Choose when access becomes available.', 'alert'],
+    ['advanced', 'Advanced Rules', 'Apply extra restrictions and scope.', 'shield']
+];
+const conditionTypeOptions = [
+    ['account_type', 'Account Type'],
+    ['role', 'Role'],
+    ['department', 'Department'],
+    ['designation', 'Designation'],
+    ['user', 'Specific User'],
+    ['client', 'Client'],
+    ['manager', 'Reporting Manager']
+];
+const triggerOptions = [
+    ['on_login', 'On Login'],
+    ['job_assigned', 'Job Assigned'],
+    ['client_assigned', 'Client Assigned'],
+    ['support_ticket_assigned', 'Support Ticket Assigned'],
+    ['date_range', 'Date Range'],
+    ['day_of_week', 'Day of Week'],
+    ['manual_activation', 'Manual Activation']
+];
+const advancedRuleOptions = [
+    ['active_users_only', 'Active Users Only'],
+    ['department', 'Department'],
+    ['designation_level', 'Designation Level'],
+    ['reporting_hierarchy', 'Reporting Hierarchy'],
+    ['client_ownership', 'Client Ownership'],
+    ['job_scope', 'Job Scope'],
+    ['client_scope', 'Client Scope'],
+    ['time_window', 'Time Window']
+];
+const accountTypeOptions = [
+    ['super_admin', 'Super Admin'],
+    ['admin', 'Admin'],
+    ['employee', 'Employee'],
+    ['client', 'Client']
+];
+const operatorOptions = [
+    ['equals', 'Equals'],
+    ['not_equals', 'Not equal'],
+    ['in', 'In list'],
+    ['not_in', 'Not in list'],
+    ['less_or_equal', 'Less or equal'],
+    ['greater_or_equal', 'Greater or equal']
+];
+const newCondition = () => ({ effect: 'include', conditionType: 'account_type', operator: 'equals', value: 'employee' });
+const newTrigger = () => ({ triggerType: 'on_login', operator: 'equals', value: '', isActive: true });
+const newAdvancedRule = () => ({ ruleType: 'active_users_only', operator: 'equals', value: 'true' });
+const blankModuleRule = module => ({
+    id: '',
+    moduleKey: module?.id || '',
+    name: `${module?.label || 'Module'} access rule`,
+    description: '',
+    matchMode: 'all',
+    isActive: true,
+    conditions: [newCondition()],
+    triggers: [],
+    advancedRules: [newAdvancedRule()]
+});
+const cloneRuleForDraft = (module, rule) => rule ? ({
+    id: rule.id || '',
+    moduleKey: rule.moduleKey || module?.id || '',
+    name: rule.name || `${module?.label || 'Module'} access rule`,
+    description: rule.description || '',
+    matchMode: rule.matchMode || 'all',
+    isActive: rule.isActive !== false,
+    conditions: (rule.conditions || []).map(condition => ({ effect: condition.effect || 'include', conditionType: condition.conditionType || 'account_type', operator: condition.operator || 'equals', value: String(condition.value || '') })),
+    triggers: (rule.triggers || []).map(trigger => ({ triggerType: trigger.triggerType || 'on_login', operator: trigger.operator || 'equals', value: String(trigger.value || ''), isActive: trigger.isActive !== false })),
+    advancedRules: (rule.advancedRules || []).map(rule => ({ ruleType: rule.ruleType || 'active_users_only', operator: rule.operator || 'equals', value: String(rule.value || '') }))
+}) : blankModuleRule(module);
+
+const optionLabel = (options, value) => options.find(([id]) => String(id) === String(value))?.[1] || String(value || 'Any');
+const itemLabel = (items, value, empty = 'Any') => items.find(item => String(item.id) === String(value))?.name || String(value || empty);
+const ruleValues = value => String(value || '').split(',').map(item => item.trim()).filter(Boolean);
+const formatRuleValue = (value, resolve) => {
+    const values = ruleValues(value);
+    return values.length ? values.map(resolve).join(', ') : 'Any';
+};
+const formatRange = value => String(value || '').replace('..', ' to ') || 'Configured window';
+const conditionSummary = (condition, context) => {
+    const type = optionLabel(conditionTypeOptions, condition.conditionType);
+    const operator = optionLabel(operatorOptions, condition.operator).toLowerCase();
+    const value = formatRuleValue(condition.value, item => {
+        if (condition.conditionType === 'account_type')
+            return optionLabel(accountTypeOptions, item);
+        if (condition.conditionType === 'role')
+            return itemLabel(context.roles, item);
+        if (condition.conditionType === 'department')
+            return itemLabel(context.departments, item);
+        if (condition.conditionType === 'designation')
+            return itemLabel(context.designations, item);
+        if (condition.conditionType === 'user' || condition.conditionType === 'manager')
+            return itemLabel(context.users, item);
+        if (condition.conditionType === 'client')
+            return itemLabel(context.clients, item);
+        return item;
+    });
+    return `${type} ${operator} ${value}`;
+};
+const triggerSummary = trigger => {
+    if (trigger.triggerType === 'on_login')
+        return 'On Login';
+    if (trigger.triggerType === 'manual_activation')
+        return `Manual Activation ${String(trigger.value || 'active')}`;
+    if (trigger.triggerType === 'date_range')
+        return `Date Range ${formatRange(trigger.value)}`;
+    if (trigger.triggerType === 'day_of_week')
+        return `Day of Week ${trigger.value || 'selected days'}`;
+    return optionLabel(triggerOptions, trigger.triggerType);
+};
+const advancedSummary = (rule, context) => {
+    if (rule.ruleType === 'active_users_only')
+        return 'Active users only';
+    if (rule.ruleType === 'department')
+        return `Department ${optionLabel(operatorOptions, rule.operator).toLowerCase()} ${itemLabel(context.departments, rule.value)}`;
+    if (rule.ruleType === 'reporting_hierarchy')
+        return `Reporting manager ${itemLabel(context.users, rule.value)}`;
+    if (rule.ruleType === 'designation_level')
+        return `Designation level ${optionLabel(operatorOptions, rule.operator).toLowerCase()} ${rule.value || 'set level'}`;
+    if (rule.ruleType === 'job_scope')
+        return `Job scope ${optionLabel([['own', 'Own Jobs'], ['assigned', 'Assigned Jobs'], ['department', 'Department Jobs'], ['all', 'All Jobs']], rule.value || 'own')}`;
+    if (rule.ruleType === 'client_scope')
+        return `Client scope ${optionLabel([['assigned', 'Assigned Clients'], ['owned', 'Owned Clients'], ['all', 'All Clients']], rule.value || 'owned')}`;
+    if (rule.ruleType === 'time_window')
+        return `Time window ${formatRange(rule.value)}`;
+    return optionLabel(advancedRuleOptions, rule.ruleType);
+};
+const moduleRuleSummary = (draft, context) => {
+    const includes = draft.conditions.filter(condition => condition.effect !== 'exclude').map(condition => conditionSummary(condition, context));
+    const excludes = draft.conditions.filter(condition => condition.effect === 'exclude').map(condition => conditionSummary(condition, context));
+    const triggers = draft.triggers.filter(trigger => trigger.isActive !== false).map(triggerSummary);
+    const advanced = draft.advancedRules.map(rule => advancedSummary(rule, context));
+    return {
+        availableTo: includes.length ? includes.join('; ') : 'RBAC defaults decide access',
+        except: excludes.length ? excludes.join('; ') : 'No exclusions',
+        when: triggers.length ? triggers.join('; ') : 'Always after conditions pass',
+        scope: advanced.length ? advanced.join('; ') : 'No extra restrictions',
+        status: draft.isActive ? 'Active' : 'Disabled'
+    };
+};
+
+function ModuleAccessPanel({ modules, rules, users, roles, departments, designations, clients, canManage, reloadManagement, reload, setMessage, setError }) {
+    const [search, setSearch] = useState('');
+    const [selectedModule, setSelectedModule] = useState(null);
+    const groupedRules = useMemo(() => rules.reduce((map, rule) => {
+        map[rule.moduleKey] = [...(map[rule.moduleKey] || []), rule];
+        return map;
+    }, {}), [rules]);
+    const filteredModules = useMemo(() => {
+        const term = search.trim().toLowerCase();
+        return (modules || []).filter(module => !term || [module.label, module.id, module.description, module.accessSummary].filter(Boolean).join(' ').toLowerCase().includes(term));
+    }, [modules, search]);
+    return (
+        <article className="dashboard-card management-card module-access-page">
+            <div className="dashboard-card-head">
+                <div>
+                    <h3>Module Access</h3>
+                    <p>Control who can see and use every application module. RBAC still controls the actions inside each module.</p>
+                </div>
+                <label className="module-access-search"><DashboardIcon name="search" /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search modules..." aria-label="Search modules" /></label>
+            </div>
+            {filteredModules.length ? (
+                <div className="module-access-list">
+                    {filteredModules.map(module => {
+                        const moduleRules = groupedRules[module.id] || [];
+                        return (
+                            <section className="module-access-row" key={module.id}>
+                                <span className={`module-access-icon ${module.clientAllowed ? 'client-safe' : ''}`}><DashboardIcon name={module.icon || 'overview'} /></span>
+                                <div className="module-access-copy">
+                                    <div>
+                                        <h4>{module.label}</h4>
+                                        <span>{module.id}</span>
+                                    </div>
+                                    <p>{module.description}</p>
+                                    <small>{module.accessSummary || 'RBAC defaults apply'}</small>
+                                </div>
+                                <div className="module-access-meta">
+                                    <span className={`status-pill ${module.status === 'disabled' ? 'archived' : module.protected ? 'admin' : 'active'}`}>{module.status === 'disabled' ? 'Disabled' : module.protected ? 'Protected' : 'Active'}</span>
+                                    <b>{moduleRules.length} rule{moduleRules.length === 1 ? '' : 's'}</b>
+                                </div>
+                                <button type="button" className="module-access-manage" disabled={!canManage} onClick={() => setSelectedModule(module)}>Manage Access</button>
+                            </section>
+                        );
+                    })}
+                </div>
+            ) : <DashboardEmptyState title="No modules found." body="Available modules come from the backend module catalog." />}
+            {selectedModule && (
+                <ModuleAccessModal
+                    module={selectedModule}
+                    rules={groupedRules[selectedModule.id] || []}
+                    users={users}
+                    roles={roles}
+                    departments={departments}
+                    designations={designations}
+                    clients={clients}
+                    onClose={() => setSelectedModule(null)}
+                    onSaved={async message => {
+                        setMessage(message);
+                        await loadAndRefreshModuleAccess(reloadManagement, reload);
+                    }}
+                    setError={setError}
+                />
+            )}
+        </article>
+    );
+}
+
+async function loadAndRefreshModuleAccess(reloadManagement, reload) {
+    await reloadManagement();
+    await reload?.();
+}
+
+function ValuePicker({ type, value, onChange, roles, departments, designations, users, clients }) {
+    const activeDepartments = departments.filter(item => item.status === 'active');
+    const activeDesignations = designations.filter(item => item.status === 'active');
+    const activeUsers = users.filter(item => item.status === 'active');
+    const internalUsers = activeUsers.filter(item => item.accountType !== 'client');
+    const optionsByType = {
+        account_type: accountTypeOptions,
+        role: roles.filter(item => item.status === 'active').map(item => [item.id, item.name]),
+        department: activeDepartments.map(item => [String(item.id), item.name]),
+        designation: activeDesignations.map(item => [String(item.id), item.name]),
+        user: activeUsers.map(item => [item.id, `${item.name} (${item.id})`]),
+        manager: internalUsers.map(item => [item.id, `${item.name} (${item.roleName || item.accountType})`]),
+        client: clients.map(item => [item.id, item.name])
+    };
+    const options = optionsByType[type] || [];
+    if (!options.length)
+        return <input value={value} onChange={event => onChange(event.target.value)} placeholder="Value" />;
+    return (
+        <select value={value} onChange={event => onChange(event.target.value)}>
+            <option value="">Select value</option>
+            {options.map(([id, label]) => <option value={id} key={id}>{label}</option>)}
+        </select>
+    );
+}
+
+function TriggerValueInput({ trigger, onChange }) {
+    if (trigger.triggerType === 'manual_activation') {
+        return (
+            <select value={trigger.value || 'active'} onChange={event => onChange(event.target.value)}>
+                <option value="active">Active</option>
+                <option value="disabled">Disabled</option>
+            </select>
+        );
+    }
+    if (trigger.triggerType === 'date_range')
+        return <input value={trigger.value} onChange={event => onChange(event.target.value)} placeholder="2026-09-01..2026-09-30" />;
+    if (trigger.triggerType === 'day_of_week')
+        return <input value={trigger.value} onChange={event => onChange(event.target.value)} placeholder="monday,tuesday,wednesday" />;
+    return <input value={trigger.value} onChange={event => onChange(event.target.value)} placeholder="Optional value" />;
+}
+
+function AdvancedValueInput({ rule, onChange, departments, users }) {
+    if (rule.ruleType === 'active_users_only')
+        return <select value={rule.value || 'true'} onChange={event => onChange(event.target.value)}><option value="true">Enabled</option></select>;
+    if (rule.ruleType === 'department')
+        return <select value={rule.value} onChange={event => onChange(event.target.value)}><option value="">Select department</option>{departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select>;
+    if (rule.ruleType === 'designation_level')
+        return <input type="number" min="0" value={rule.value} onChange={event => onChange(event.target.value)} placeholder="4" />;
+    if (rule.ruleType === 'reporting_hierarchy')
+        return <select value={rule.value} onChange={event => onChange(event.target.value)}><option value="">Select manager</option>{users.filter(item => item.status === 'active' && item.accountType !== 'client').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select>;
+    if (rule.ruleType === 'job_scope')
+        return <select value={rule.value || 'own'} onChange={event => onChange(event.target.value)}><option value="own">Own Jobs</option><option value="assigned">Assigned Jobs</option><option value="department">Department Jobs</option><option value="all">All Jobs</option></select>;
+    if (rule.ruleType === 'client_scope')
+        return <select value={rule.value || 'owned'} onChange={event => onChange(event.target.value)}><option value="assigned">Assigned Clients</option><option value="owned">Owned Clients</option><option value="all">All Clients</option></select>;
+    if (rule.ruleType === 'time_window')
+        return <input value={rule.value} onChange={event => onChange(event.target.value)} placeholder="2026-09-01T10:00..2026-09-30T18:00" />;
+    return <input value={rule.value} onChange={event => onChange(event.target.value)} placeholder="Value" />;
+}
+
+function ModuleAccessModal({ module, rules, users, roles, departments, designations, clients, onClose, onSaved, setError }) {
+    const [step, setStep] = useState('conditions');
+    const [draft, setDraft] = useState(() => cloneRuleForDraft(module, rules[0]));
+    const [selectedRuleId, setSelectedRuleId] = useState(rules[0]?.id || 'new');
+    const [saving, setSaving] = useState(false);
+    const [testUserId, setTestUserId] = useState('');
+    const [testResult, setTestResult] = useState(null);
+    useEffect(() => {
+        const selectedRule = selectedRuleId === 'new' ? null : rules.find(rule => rule.id === selectedRuleId);
+        setDraft(cloneRuleForDraft(module, selectedRule));
+        setTestResult(null);
+    }, [module, rules, selectedRuleId]);
+    useEffect(() => {
+        if (!testUserId && users.length)
+            setTestUserId(users[0].id);
+    }, [users, testUserId]);
+    const currentStepIndex = moduleRuleSteps.findIndex(([id]) => id === step);
+    const patchCondition = (index, patch) => setDraft(current => ({
+        ...current,
+        conditions: current.conditions.map((condition, itemIndex) => itemIndex === index ? { ...condition, ...patch } : condition)
+    }));
+    const patchTrigger = (index, patch) => setDraft(current => ({
+        ...current,
+        triggers: current.triggers.map((trigger, itemIndex) => itemIndex === index ? { ...trigger, ...patch } : trigger)
+    }));
+    const patchAdvanced = (index, patch) => setDraft(current => ({
+        ...current,
+        advancedRules: current.advancedRules.map((rule, itemIndex) => itemIndex === index ? { ...rule, ...patch } : rule)
+    }));
+    const save = async () => {
+        setSaving(true);
+        setError('');
+        try {
+            const payload = { ...draft, moduleKey: module.id };
+            if (draft.id)
+                await api.updateModuleAccess(draft.id, payload);
+            else
+                await api.createModuleAccess(payload);
+            await onSaved('Module access rule saved.');
+            onClose();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+        finally {
+            setSaving(false);
+        }
+    };
+    const remove = async () => {
+        if (!draft.id || !window.confirm('Delete this module access rule?'))
+            return;
+        setSaving(true);
+        setError('');
+        try {
+            await api.deleteModuleAccess(draft.id);
+            await onSaved('Module access rule deleted.');
+            onClose();
+        }
+        catch (err) {
+            setError(err.message);
+        }
+        finally {
+            setSaving(false);
+        }
+    };
+    const testAccess = async () => {
+        if (!testUserId)
+            return;
+        setTestResult(null);
+        try {
+            setTestResult(await api.evaluateModuleAccess(module.id, testUserId));
+        }
+        catch (err) {
+            setError(err.message);
+        }
+    };
+    const next = () => {
+        if (currentStepIndex >= moduleRuleSteps.length - 1)
+            save();
+        else
+            setStep(moduleRuleSteps[currentStepIndex + 1][0]);
+    };
+    const includes = draft.conditions.filter(condition => condition.effect !== 'exclude').length;
+    const excludes = draft.conditions.filter(condition => condition.effect === 'exclude').length;
+    const summary = useMemo(() => moduleRuleSummary(draft, { users, roles, departments, designations, clients }), [draft, users, roles, departments, designations, clients]);
+    return (
+        <div className="modal-backdrop module-access-backdrop" role="dialog" aria-modal="true" aria-labelledby="module-access-title">
+            <section className="modal-panel module-access-modal">
+                <header className="module-access-modal-head">
+                    <div>
+                        <span className="modal-kicker">Module Access Settings</span>
+                        <h2 id="module-access-title">{module.label}</h2>
+                        <p>{module.description}</p>
+                    </div>
+                    <button type="button" className="icon-button" aria-label="Close module access settings" onClick={onClose}>x</button>
+                </header>
+                <div className="module-access-modal-body">
+                    <aside className="module-access-stepper" aria-label="Module access setup sections">
+                        {moduleRuleSteps.map(([id, label, body, icon]) => (
+                            <button type="button" className={step === id ? 'active' : ''} onClick={() => setStep(id)} key={id}>
+                                <DashboardIcon name={icon} />
+                                <span><b>{label}</b><small>{body}</small></span>
+                            </button>
+                        ))}
+                    </aside>
+                    <div className="module-access-editor">
+                        <div className="module-access-rule-top">
+                            <label>Rule
+                                <select value={selectedRuleId} onChange={event => setSelectedRuleId(event.target.value)}>
+                                    {rules.map(rule => <option value={rule.id} key={rule.id}>{rule.name}</option>)}
+                                    <option value="new">+ New rule</option>
+                                </select>
+                            </label>
+                            <label>Rule Name<input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} /></label>
+                            <label>Status
+                                <select value={draft.isActive ? 'active' : 'inactive'} onChange={event => setDraft({ ...draft, isActive: event.target.value === 'active' })}>
+                                    <option value="active">Active</option>
+                                    <option value="inactive">Disabled</option>
+                                </select>
+                            </label>
+                        </div>
+                        {step === 'conditions' && (
+                            <section className="module-access-section">
+                                <div className="module-access-section-head">
+                                    <div>
+                                        <h3>Conditions</h3>
+                                        <p>Define which users can access this module.</p>
+                                    </div>
+                                    <label>Match
+                                        <select value={draft.matchMode} onChange={event => setDraft({ ...draft, matchMode: event.target.value })}>
+                                            <option value="all">All Conditions</option>
+                                            <option value="any">Any Condition</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div className="module-rule-builder">
+                                    {draft.conditions.map((condition, index) => (
+                                        <div className="module-rule-row" key={index}>
+                                            <select value={condition.effect} onChange={event => patchCondition(index, { effect: event.target.value })}><option value="include">Include</option><option value="exclude">Exclude</option></select>
+                                            <select value={condition.conditionType} onChange={event => patchCondition(index, { conditionType: event.target.value, value: '' })}>{conditionTypeOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                            <select value={condition.operator} onChange={event => patchCondition(index, { operator: event.target.value })}>{operatorOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                            <ValuePicker type={condition.conditionType} value={condition.value} onChange={value => patchCondition(index, { value })} roles={roles} departments={departments} designations={designations} users={users} clients={clients} />
+                                            <button type="button" aria-label="Remove condition" onClick={() => setDraft(current => ({ ...current, conditions: current.conditions.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" className="module-access-add" onClick={() => setDraft(current => ({ ...current, conditions: [...current.conditions, newCondition()] }))}>+ Add Condition</button>
+                            </section>
+                        )}
+                        {step === 'triggers' && (
+                            <section className="module-access-section">
+                                <div className="module-access-section-head"><div><h3>Triggers</h3><p>Define when this module becomes available to matched users.</p></div></div>
+                                {draft.triggers.length ? (
+                                    <div className="module-rule-builder">
+                                        {draft.triggers.map((trigger, index) => (
+                                            <div className="module-rule-row trigger" key={index}>
+                                                <select value={trigger.triggerType} onChange={event => patchTrigger(index, { triggerType: event.target.value, value: '' })}>{triggerOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                                <select value={trigger.operator} onChange={event => patchTrigger(index, { operator: event.target.value })}>{operatorOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                                <TriggerValueInput trigger={trigger} onChange={value => patchTrigger(index, { value })} />
+                                                <label className="module-rule-toggle"><input type="checkbox" checked={trigger.isActive} onChange={event => patchTrigger(index, { isActive: event.target.checked })} />Active</label>
+                                                <button type="button" onClick={() => setDraft(current => ({ ...current, triggers: current.triggers.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : <DashboardEmptyState title="Always available." body="No trigger is required after RBAC and conditions pass." />}
+                                <button type="button" className="module-access-add" onClick={() => setDraft(current => ({ ...current, triggers: [...current.triggers, newTrigger()] }))}>+ Add Trigger</button>
+                            </section>
+                        )}
+                        {step === 'advanced' && (
+                            <section className="module-access-section">
+                                <div className="module-access-section-head"><div><h3>Advanced Rules</h3><p>Add additional restrictions and scope for this module.</p></div></div>
+                                <div className="module-rule-builder">
+                                    {draft.advancedRules.map((rule, index) => (
+                                        <div className="module-rule-row advanced" key={index}>
+                                            <select value={rule.ruleType} onChange={event => patchAdvanced(index, { ruleType: event.target.value, value: event.target.value === 'active_users_only' ? 'true' : '' })}>{advancedRuleOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                            <select value={rule.operator} onChange={event => patchAdvanced(index, { operator: event.target.value })}>{operatorOptions.map(([id, label]) => <option value={id} key={id}>{label}</option>)}</select>
+                                            <AdvancedValueInput rule={rule} onChange={value => patchAdvanced(index, { value })} departments={departments} users={users} />
+                                            <button type="button" onClick={() => setDraft(current => ({ ...current, advancedRules: current.advancedRules.filter((_, itemIndex) => itemIndex !== index) }))}>Remove</button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button type="button" className="module-access-add" onClick={() => setDraft(current => ({ ...current, advancedRules: [...current.advancedRules, newAdvancedRule()] }))}>+ Add Advanced Rule</button>
+                                <div className="module-access-test">
+                                    <div>
+                                        <b>Test Access</b>
+                                        <span>Choose a live user and verify the final backend decision.</span>
+                                    </div>
+                                    <select value={testUserId} onChange={event => setTestUserId(event.target.value)}>
+                                        {users.map(user => <option value={user.id} key={user.id}>{user.name} - {user.roleName || user.accountType}</option>)}
+                                    </select>
+                                    <button type="button" onClick={testAccess}>Test</button>
+                                </div>
+                                {testResult && (
+                                    <div className={`module-access-result ${testResult.result.allowed ? 'allowed' : 'denied'}`}>
+                                        <b>FINAL: ACCESS {testResult.result.allowed ? 'ALLOWED' : 'DENIED'}</b>
+                                        <span>{testResult.result.reason}</span>
+                                        {(testResult.result.details || []).map((detail, index) => <small key={index}>{detail.label}: {detail.reason}</small>)}
+                                    </div>
+                                )}
+                            </section>
+                        )}
+                    </div>
+                </div>
+                <div className="module-access-summary">
+                    <div>
+                        <b>{module.label} Module</b>
+                        <span>{summary.status} - {includes} include, {excludes} exclude - {draft.triggers.length} trigger - {draft.advancedRules.length} advanced</span>
+                    </div>
+                    <div className="module-access-summary-grid">
+                        <small><strong>Available to</strong>{summary.availableTo}</small>
+                        <small><strong>Except</strong>{summary.except}</small>
+                        <small><strong>When</strong>{summary.when}</small>
+                        <small><strong>Scope</strong>{summary.scope}</small>
+                    </div>
+                </div>
+                <footer className="module-access-actions">
+                    {draft.id && <button type="button" className="danger" onClick={remove} disabled={saving}>Delete Rule</button>}
+                    <span />
+                    <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
+                    <button type="button" onClick={save} disabled={saving}>Save & Close</button>
+                    <button type="button" className="primary" onClick={next} disabled={saving}>{currentStepIndex >= moduleRuleSteps.length - 1 ? 'Save & Close' : 'Next'}</button>
+                </footer>
+            </section>
+        </div>
     );
 }
 

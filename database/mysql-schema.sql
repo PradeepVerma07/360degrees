@@ -126,6 +126,60 @@ CREATE TABLE IF NOT EXISTS employee_profiles (
       ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS module_access_rules (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    module_key VARCHAR(80) NOT NULL,
+    name VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL,
+    match_mode ENUM('all','any') NOT NULL DEFAULT 'all',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_module_rules_module (module_key),
+    INDEX idx_module_rules_active (is_active),
+    CONSTRAINT fk_module_rules_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS module_access_conditions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT UNSIGNED NOT NULL,
+    effect ENUM('include','exclude') NOT NULL DEFAULT 'include',
+    condition_type ENUM('account_type','role','department','designation','user','manager','client') NOT NULL,
+    operator VARCHAR(40) NOT NULL DEFAULT 'equals',
+    value VARCHAR(255) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_module_conditions_rule (rule_id),
+    CONSTRAINT fk_module_conditions_rule FOREIGN KEY (rule_id) REFERENCES module_access_rules(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS module_access_triggers (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT UNSIGNED NOT NULL,
+    trigger_type VARCHAR(80) NOT NULL,
+    operator VARCHAR(40) NOT NULL DEFAULT 'equals',
+    value VARCHAR(255) NOT NULL DEFAULT '',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_module_triggers_rule (rule_id),
+    CONSTRAINT fk_module_triggers_rule FOREIGN KEY (rule_id) REFERENCES module_access_rules(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS module_access_advanced_rules (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT UNSIGNED NOT NULL,
+    rule_type VARCHAR(80) NOT NULL,
+    operator VARCHAR(40) NOT NULL DEFAULT 'equals',
+    value VARCHAR(255) NOT NULL DEFAULT '',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_module_advanced_rule (rule_id),
+    CONSTRAINT fk_module_advanced_rule FOREIGN KEY (rule_id) REFERENCES module_access_rules(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS jobs (
     id VARCHAR(100) PRIMARY KEY,
     client_id VARCHAR(100) NOT NULL,
