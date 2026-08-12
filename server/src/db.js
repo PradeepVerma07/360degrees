@@ -10,7 +10,7 @@ const dbConnectionTarget = dbSocketPath
   ? { socketPath: dbSocketPath }
   : { host: dbHost, port: Number(process.env.DB_PORT || 3306) };
 
-export const pool = mysql.createPool({
+const createPool = () => mysql.createPool({
   ...dbConnectionTarget,
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
@@ -24,6 +24,30 @@ export const pool = mysql.createPool({
   enableKeepAlive: true,
   keepAliveInitialDelay: 0
 });
+
+export let pool = createPool();
+
+const isPoolClosedError = error => /Pool is closed/i.test(String(error?.message || ''));
+
+const refreshPool = () => {
+  pool = createPool();
+  return pool;
+};
+
+const getPool = () => pool || refreshPool();
+
+export async function closePool() {
+  const activePool = pool;
+  pool = null;
+  if (!activePool)
+    return;
+  try {
+    await activePool.end();
+  } catch (error) {
+    if (!isPoolClosedError(error))
+      throw error;
+  }
+}
 
 export const defaultSettings = {
   categories: [
@@ -130,18 +154,46 @@ const productivityClientRosterSeeds = [
   { clientName: 'Network 18', nature: 'Prospect', difficulty: 10, comments: 'Quotation submitted', roles: { strategy: 'Pramit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' } }
 ];
 
-export async function query(sql, params = [], connection = pool) {
-  const [rows] = await connection.execute(sql, params);
-  return rows;
+export async function query(sql, params = [], connection) {
+  if (connection) {
+    try {
+      const [rows] = await connection.execute(sql, params);
+      return rows;
+    } catch (error) {
+      if (!isPoolClosedError(error) || connection !== pool)
+        throw error;
+      const [rows] = await refreshPool().execute(sql, params);
+      return rows;
+    }
+  }
+  try {
+    const [rows] = await getPool().execute(sql, params);
+    return rows;
+  } catch (error) {
+    if (!isPoolClosedError(error))
+      throw error;
+    const [rows] = await refreshPool().execute(sql, params);
+    return rows;
+  }
 }
 
-export async function one(sql, params = [], connection = pool) {
+export async function one(sql, params = [], connection) {
   const rows = await query(sql, params, connection);
   return rows[0] || null;
 }
 
+async function getConnection() {
+  try {
+    return await getPool().getConnection();
+  } catch (error) {
+    if (!isPoolClosedError(error))
+      throw error;
+    return refreshPool().getConnection();
+  }
+}
+
 export async function transaction(work) {
-  const connection = await pool.getConnection();
+  const connection = await getConnection();
   try {
     await connection.beginTransaction();
     const result = await work(connection);

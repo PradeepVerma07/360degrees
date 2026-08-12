@@ -11,6 +11,7 @@ import { Server } from 'socket.io';
 import { z } from 'zod';
 import {
     pool,
+    closePool,
     query,
     one,
     transaction,
@@ -64,12 +65,13 @@ const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const io = new Server(httpServer, { cors: { origin } });
 let databaseReady = false;
 let databaseInitError = null;
+let shuttingDown = false;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const loginAttempts = new Map();
 const loginRateLimit = { windowMs: 15 * 60 * 1000, maxAttempts: 8 };
 const initialiseDatabaseWithRetry = async () => {
     let attempt = 0;
-    while (!databaseReady) {
+    while (!databaseReady && !shuttingDown) {
         attempt += 1;
         try {
             await initialiseDatabase();
@@ -78,14 +80,16 @@ const initialiseDatabaseWithRetry = async () => {
             console.log('CI360 database ready');
         }
         catch (error) {
+            if (shuttingDown)
+                return false;
             databaseInitError = error;
             const delayMs = Math.min(30000, attempt * 5000);
             console.error(`CI360 database initialization failed; retrying in ${delayMs / 1000}s`, error);
             await wait(delayMs);
         }
     }
+    return databaseReady;
 };
-void initialiseDatabaseWithRetry();
 const databaseHealthDetails = () => {
     if (databaseReady || !databaseInitError)
         return {};
@@ -3157,10 +3161,29 @@ app.use((error, _req, res, _next) => {
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });
 });
 const port = Number(process.env.PORT || 4000);
-httpServer.listen(port, () => console.log(`CI360 API running on port ${port}`));
+let serverListening = false;
+const startServer = () => {
+    if (serverListening)
+        return;
+    serverListening = true;
+    httpServer.listen(port, () => console.log(`CI360 API running on port ${port}`));
+};
+void initialiseDatabaseWithRetry()
+    .then(ready => {
+        if (ready)
+            startServer();
+    })
+    .catch(error => {
+        console.error('CI360 database initialization stopped', error);
+        process.exit(1);
+    });
 for (const signal of ['SIGTERM', 'SIGINT']) {
     process.on(signal, async () => {
-        await pool.end();
-        httpServer.close(() => process.exit(0));
+        shuttingDown = true;
+        await closePool();
+        if (serverListening)
+            httpServer.close(() => process.exit(0));
+        else
+            process.exit(0);
     });
 }

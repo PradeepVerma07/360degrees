@@ -88,6 +88,14 @@ export default function TeamChat({ data, reload }) {
     return thread.departmentName || 'All internal team';
   };
 
+  const isMyDirectThreadWith = (thread, employeeId) => {
+    if (!thread.participantUserId || !employeeId)
+      return false;
+    const currentUserId = data.user?.id;
+    return (thread.createdByUserId === currentUserId && thread.participantUserId === employeeId)
+      || (thread.participantUserId === currentUserId && thread.createdByUserId === employeeId);
+  };
+
   const createThread = async event => {
     event.preventDefault();
     setError('');
@@ -114,6 +122,21 @@ export default function TeamChat({ data, reload }) {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const startEmployeeChat = employee => {
+    const existing = threads.find(thread => isMyDirectThreadWith(thread, employee.id));
+    if (existing) {
+      void openThread(existing.id);
+      return;
+    }
+    setForm({
+      subject: `Chat with ${employee.name}`,
+      departmentId: '',
+      participantUserId: employee.id,
+      body: ''
+    });
+    setShowForm(true);
   };
 
   return (
@@ -169,37 +192,88 @@ export default function TeamChat({ data, reload }) {
           )}
         </section>
       ) : threads.length ? (
-        <div className="card table-card ticket-list-card">
-          <div className="responsive-table">
-            <table className="ticket-table">
-              <thead>
-                <tr>
-                  <th>Subject</th>
-                  <th>Audience</th>
-                  <th>Started By</th>
-                  <th>Last Message</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {threads.map(thread => (
-                  <tr key={thread.id}>
-                    <td data-label="Subject"><b>{thread.subject}</b><small>{thread.lastMessage || 'No message preview'}</small></td>
-                    <td data-label="Audience">{audienceLabel(thread)}</td>
-                    <td data-label="Started By">{thread.createdByName || '-'}</td>
-                    <td data-label="Last Message">{fmt(thread.lastMessageAt)}</td>
-                    <td data-label="Action"><button type="button" className="small" onClick={() => openThread(thread.id)}>Open</button></td>
+        <>
+          {canCreate && chatEmployees.length > 0 && (
+            <section className="card team-chat-directory">
+              <div className="team-chat-directory-head">
+                <div>
+                  <h3>Employee Direct Chat</h3>
+                  <p className="muted">Start or continue a private internal conversation with any employee.</p>
+                </div>
+              </div>
+              <div className="team-chat-employee-grid">
+                {chatEmployees.map(employee => {
+                  const existing = threads.find(thread => isMyDirectThreadWith(thread, employee.id));
+                  return (
+                    <article className="team-chat-employee" key={employee.id}>
+                      <div className="team-chat-avatar">{employee.name?.charAt(0)?.toUpperCase() || 'E'}</div>
+                      <div>
+                        <b>{employee.name}</b>
+                        <span>{employee.departmentName || 'No department'}{employee.designationName ? ` - ${employee.designationName}` : ''}</span>
+                      </div>
+                      <button type="button" className="small" onClick={() => startEmployeeChat(employee)}>{existing ? 'Open' : 'Message'}</button>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+          <div className="card table-card ticket-list-card">
+            <div className="responsive-table">
+              <table className="ticket-table">
+                <thead>
+                  <tr>
+                    <th>Subject</th>
+                    <th>Audience</th>
+                    <th>Started By</th>
+                    <th>Last Message</th>
+                    <th>Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {threads.map(thread => (
+                    <tr key={thread.id}>
+                      <td data-label="Subject"><b>{thread.subject}</b><small>{thread.lastMessage || 'No message preview'}</small></td>
+                      <td data-label="Audience">{audienceLabel(thread)}</td>
+                      <td data-label="Started By">{thread.createdByName || '-'}</td>
+                      <td data-label="Last Message">{fmt(thread.lastMessageAt)}</td>
+                      <td data-label="Action"><button type="button" className="small" onClick={() => openThread(thread.id)}>Open</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </>
       ) : (
-        <div className="card empty-state">
-          <h3>No internal chats yet.</h3>
-          {canCreate && <button type="button" className="primary" onClick={() => setShowForm(true)}>Start Team Chat</button>}
-        </div>
+        <>
+          {canCreate && chatEmployees.length > 0 && (
+            <section className="card team-chat-directory">
+              <div className="team-chat-directory-head">
+                <div>
+                  <h3>Employee Direct Chat</h3>
+                  <p className="muted">Start a private internal conversation with any employee.</p>
+                </div>
+              </div>
+              <div className="team-chat-employee-grid">
+                {chatEmployees.map(employee => (
+                  <article className="team-chat-employee" key={employee.id}>
+                    <div className="team-chat-avatar">{employee.name?.charAt(0)?.toUpperCase() || 'E'}</div>
+                    <div>
+                      <b>{employee.name}</b>
+                      <span>{employee.departmentName || 'No department'}{employee.designationName ? ` - ${employee.designationName}` : ''}</span>
+                    </div>
+                    <button type="button" className="small" onClick={() => startEmployeeChat(employee)}>Message</button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+          <div className="card empty-state">
+            <h3>No internal chats yet.</h3>
+            {canCreate && <button type="button" className="primary" onClick={() => setShowForm(true)}>Start Team Chat</button>}
+          </div>
+        </>
       )}
       {showForm && canCreate && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="new-chat-title">
