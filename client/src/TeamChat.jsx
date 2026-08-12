@@ -8,9 +8,13 @@ export default function TeamChat({ data, reload }) {
   const canCreate = can(data, 'chat.create');
   const canReply = can(data, 'chat.reply');
   const departments = data.departments || [];
+  const chatEmployees = useMemo(
+    () => (data.chatEmployees || data.assignees || []).filter(employee => employee.id !== data.user?.id),
+    [data.chatEmployees, data.assignees, data.user?.id]
+  );
   const threads = useMemo(() => data.chatThreads || [], [data.chatThreads]);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ subject: '', departmentId: data.user?.departmentId || '', body: '' });
+  const [form, setForm] = useState({ subject: '', departmentId: data.user?.departmentId || '', participantUserId: '', body: '' });
   const [selected, setSelected] = useState(null);
   const [reply, setReply] = useState('');
   const [error, setError] = useState('');
@@ -71,6 +75,19 @@ export default function TeamChat({ data, reload }) {
     }
   };
 
+  const directEmployeeName = thread => {
+    if (!thread.participantUserId) return '';
+    return thread.participantUserId === data.user?.id
+      ? (thread.createdByName || 'Team member')
+      : (thread.participantName || 'Employee');
+  };
+
+  const audienceLabel = thread => {
+    const directName = directEmployeeName(thread);
+    if (directName) return `Direct with ${directName}`;
+    return thread.departmentName || 'All internal team';
+  };
+
   const createThread = async event => {
     event.preventDefault();
     setError('');
@@ -78,7 +95,7 @@ export default function TeamChat({ data, reload }) {
       const result = await api.createInternalChatThread(form);
       setSelected(result.thread);
       setShowForm(false);
-      setForm({ subject: '', departmentId: data.user?.departmentId || '', body: '' });
+      setForm({ subject: '', departmentId: data.user?.departmentId || '', participantUserId: '', body: '' });
       setToast('Chat thread created.');
       await reload();
     } catch (err) {
@@ -116,7 +133,7 @@ export default function TeamChat({ data, reload }) {
             <div>
               <button type="button" className="small ticket-back" onClick={() => setSelected(null)}>&lt; Back to Chat</button>
               <h2>{selected.subject}</h2>
-              <p className="muted">{selected.departmentName || 'All internal team'} - Started by {selected.createdByName || 'Team member'}</p>
+              <p className="muted">{audienceLabel(selected)} - Started by {selected.createdByName || 'Team member'}</p>
             </div>
           </div>
           <div className="conversation">
@@ -124,7 +141,7 @@ export default function TeamChat({ data, reload }) {
               <article className={`message ${message.authorId === data.user?.id ? 'admin' : 'client'}`} key={message.id}>
                 <div className="message-head">
                   <b>{message.authorName}</b>
-                  <span>Team message - {fmt(message.createdAt)}</span>
+                  <span>{selected.participantUserId ? 'Direct message' : 'Team message'} - {fmt(message.createdAt)}</span>
                 </div>
                 <p>{message.body}</p>
               </article>
@@ -158,7 +175,7 @@ export default function TeamChat({ data, reload }) {
               <thead>
                 <tr>
                   <th>Subject</th>
-                  <th>Department</th>
+                  <th>Audience</th>
                   <th>Started By</th>
                   <th>Last Message</th>
                   <th>Action</th>
@@ -168,7 +185,7 @@ export default function TeamChat({ data, reload }) {
                 {threads.map(thread => (
                   <tr key={thread.id}>
                     <td data-label="Subject"><b>{thread.subject}</b><small>{thread.lastMessage || 'No message preview'}</small></td>
-                    <td data-label="Department">{thread.departmentName || 'All internal team'}</td>
+                    <td data-label="Audience">{audienceLabel(thread)}</td>
                     <td data-label="Started By">{thread.createdByName || '-'}</td>
                     <td data-label="Last Message">{fmt(thread.lastMessageAt)}</td>
                     <td data-label="Action"><button type="button" className="small" onClick={() => openThread(thread.id)}>Open</button></td>
@@ -190,19 +207,41 @@ export default function TeamChat({ data, reload }) {
             <div className="modal-head">
               <div>
                 <h2 id="new-chat-title">New Team Chat</h2>
-                <p className="muted">Start an internal conversation for your team or department.</p>
+                <p className="muted">Start an internal conversation with one employee or a team group.</p>
               </div>
               <button type="button" className="icon-button" aria-label="Close chat form" onClick={() => setShowForm(false)}>x</button>
             </div>
             <label>Subject
               <input required value={form.subject} onChange={event => setForm({ ...form, subject: event.target.value })} />
             </label>
-            <label>Department
-              <select value={form.departmentId || ''} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
-                <option value="">All internal team</option>
-                {departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}
+            <label>Employee
+              <select
+                value={form.participantUserId || ''}
+                onChange={event => {
+                  const participantUserId = event.target.value;
+                  setForm({
+                    ...form,
+                    participantUserId,
+                    departmentId: participantUserId ? '' : (form.departmentId || data.user?.departmentId || '')
+                  });
+                }}
+              >
+                <option value="">Team or department chat</option>
+                {chatEmployees.map(employee => (
+                  <option value={employee.id} key={employee.id}>
+                    {employee.name}{employee.departmentName ? ` - ${employee.departmentName}` : ''}
+                  </option>
+                ))}
               </select>
             </label>
+            {!form.participantUserId && (
+              <label>Department
+                <select value={form.departmentId || ''} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
+                  <option value="">All internal team</option>
+                  {departments.map(department => <option value={department.id} key={department.id}>{department.name}</option>)}
+                </select>
+              </label>
+            )}
             <label>Message
               <textarea required value={form.body} onChange={event => setForm({ ...form, body: event.target.value })} />
             </label>

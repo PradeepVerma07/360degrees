@@ -434,6 +434,20 @@ const loadAssignableUsers = async user => {
     const rows = await query(`${internalAssignableUserSelect} ORDER BY r.level DESC,ds.hierarchy_level DESC,d.name IS NULL,d.name,u.name`);
     return rows.filter(candidate => assignmentScopeAllowsUser(user, candidate));
 };
+const loadInternalChatUsers = async user => {
+    if (user.accountType === 'client')
+        return [];
+    const rows = await query(`${internalAssignableUserSelect} ORDER BY d.name IS NULL,d.name,r.level DESC,ds.hierarchy_level DESC,u.name`);
+    return rows.map(row => ({
+        id: row.id,
+        name: row.name,
+        accountType: row.accountType,
+        departmentId: row.departmentId,
+        departmentName: row.departmentName,
+        designationName: row.designationName,
+        roleName: row.roleName
+    }));
+};
 const loadAssignableDepartments = async user => {
     const departments = await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name");
     if (user.accountType === 'client')
@@ -1071,6 +1085,8 @@ const mapInternalChatThread = row => ({
     subject: row.subject,
     departmentId: row.department_id || null,
     departmentName: row.department_name || '',
+    participantUserId: row.participant_user_id || '',
+    participantName: row.participant_name || '',
     createdByUserId: row.created_by_user_id,
     createdByName: row.created_by_name || '',
     lastMessageAt: row.last_message_at,
@@ -1084,18 +1100,17 @@ const loadInternalChatThreads = async user => {
     const params = [];
     let where = '';
     if (!hasGlobalAssignmentScope(user)) {
-        if (!user.departmentId)
-            where = 'WHERE t.created_by_user_id=?';
-        else
-            where = 'WHERE t.department_id IS NULL OR t.department_id=? OR t.created_by_user_id=?';
-        if (!user.departmentId)
-            params.push(user.id);
-        else
-            params.push(user.departmentId, user.id);
+        where = 'WHERE (t.department_id IS NULL AND t.participant_user_id IS NULL) OR t.created_by_user_id=? OR t.participant_user_id=?';
+        params.push(user.id, user.id);
+        if (user.departmentId) {
+            where += ' OR (t.department_id=? AND t.participant_user_id IS NULL)';
+            params.push(user.departmentId);
+        }
     }
     const rows = await query(`SELECT t.*,
         d.name department_name,
         creator.name created_by_name,
+        participant.name participant_name,
         (
           SELECT m.body FROM internal_chat_messages m
           WHERE m.thread_id=t.id
@@ -1105,6 +1120,7 @@ const loadInternalChatThreads = async user => {
       FROM internal_chat_threads t
       LEFT JOIN departments d ON d.id=t.department_id
       LEFT JOIN users creator ON creator.id=t.created_by_user_id
+      LEFT JOIN users participant ON participant.id=t.participant_user_id
       ${where}
       ORDER BY t.last_message_at DESC,t.id DESC
       LIMIT 80`, params);
@@ -1126,15 +1142,19 @@ const loadVisibleSupportTickets = async user => {
     return query(`${supportTicketSelect} WHERE ${clauses.join(' OR ')} ORDER BY t.updated_at DESC,t.id DESC`, params);
 };
 const getInternalChatThread = id => one(`SELECT t.*,d.name department_name,creator.name created_by_name
+    ,participant.name participant_name
   FROM internal_chat_threads t
   LEFT JOIN departments d ON d.id=t.department_id
   LEFT JOIN users creator ON creator.id=t.created_by_user_id
+  LEFT JOIN users participant ON participant.id=t.participant_user_id
   WHERE t.id=?`, [id]);
 const canAccessInternalChatThread = (user, thread) => {
     if (user.accountType === 'client')
         return false;
     if (hasGlobalAssignmentScope(user) || thread.created_by_user_id === user.id)
         return true;
+    if (thread.participant_user_id)
+        return thread.participant_user_id === user.id;
     if (!thread.department_id)
         return true;
     return user.departmentId && Number(user.departmentId) === Number(thread.department_id);
@@ -1200,6 +1220,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const assignees = user.accountType !== 'client' && (canAssignJobs(user) || canDispatchAssign(user) || canDispatchClaim(user) || canAssignSupport(user) || canReadChat)
         ? await loadAssignableUsers(user)
         : [];
+    const chatEmployees = canReadChat ? await loadInternalChatUsers(user) : [];
     const departments = canClientCreateJobs || canAssignJobs(user) || canViewDepartmentJobs(user) || canViewDispatch(user) || canAssignSupport(user) || canReadChat
         ? await loadAssignableDepartments(user)
         : [];
@@ -1228,6 +1249,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         settings: bootstrapSettings,
         categoryLoad: !canReadJobs || user.accountType === 'client' ? {} : await categoryLoadForUser(user),
         assignees,
+        chatEmployees,
         departments,
         clientOwners,
         notifications: hasPermission(user, 'notifications.view') ? await loadNotifications(user) : [],
@@ -2187,20 +2209,27 @@ app.post('/api/internal-chat', requireAuth, requirePermission('chat.create'), re
     const parsed = z.object({
         subject: z.string().trim().min(3).max(500),
         departmentId: z.union([z.number().int().positive(), z.string().trim()]).optional().nullable(),
+        participantUserId: z.string().trim().optional().default(''),
         body: z.string().trim().min(1).max(5000)
     }).safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
-    const departmentResult = await validateDepartmentForUser(req.user, optionalId(parsed.data.departmentId));
+    const participantUserId = parsed.data.participantUserId || '';
+    const participant = participantUserId ? await one(`${internalAssignableUserSelect} AND u.id=?`, [participantUserId]) : null;
+    if (participantUserId && !participant)
+        return res.status(400).json({ error: 'Active employee not found' });
+    if (participantUserId === req.user.id)
+        return res.status(400).json({ error: 'Choose another employee for a direct chat' });
+    const departmentResult = await validateDepartmentForUser(req.user, participantUserId ? null : optionalId(parsed.data.departmentId));
     if (departmentResult.error)
         return res.status(departmentResult.status).json({ error: departmentResult.error });
     const now = isoNow();
     const threadId = await transaction(async connection => {
         const result = await query(
             `INSERT INTO internal_chat_threads
-              (subject,department_id,created_by_user_id,last_message_at,created_at,updated_at)
-              VALUES (?,?,?,?,?,?)`,
-            [parsed.data.subject, departmentResult.departmentId, req.user.id, now, now, now],
+              (subject,department_id,participant_user_id,created_by_user_id,last_message_at,created_at,updated_at)
+              VALUES (?,?,?,?,?,?,?)`,
+            [parsed.data.subject, departmentResult.departmentId, participant?.id || null, req.user.id, now, now, now],
             connection
         );
         const id = Number(result.insertId);
@@ -2210,7 +2239,7 @@ app.post('/api/internal-chat', requireAuth, requirePermission('chat.create'), re
             [id, req.user.id, req.user.name, parsed.data.body, now],
             connection
         );
-        await audit(req.user.id, 'create', 'internal_chat', String(id), { subject: parsed.data.subject, departmentId: departmentResult.departmentId }, connection);
+        await audit(req.user.id, 'create', 'internal_chat', String(id), { subject: parsed.data.subject, departmentId: departmentResult.departmentId, participantUserId: participant?.id || '' }, connection);
         return id;
     });
     emitRefresh();

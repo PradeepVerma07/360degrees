@@ -229,7 +229,13 @@ async function columnExists(tableName, columnName) {
 async function addColumnIfMissing(tableName, columnName, definition) {
   if (await columnExists(tableName, columnName))
     return;
-  await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  try {
+    await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  } catch (error) {
+    if (error?.code === 'ER_DUP_FIELDNAME' || /Duplicate column name/i.test(String(error?.message || '')))
+      return;
+    throw error;
+  }
 }
 
 async function indexExists(tableName, indexName) {
@@ -245,7 +251,13 @@ async function indexExists(tableName, indexName) {
 async function addIndexIfMissing(tableName, indexName, definition) {
   if (await indexExists(tableName, indexName))
     return;
-  await query(`CREATE INDEX ${indexName} ON ${tableName} ${definition}`);
+  try {
+    await query(`CREATE INDEX ${indexName} ON ${tableName} ${definition}`);
+  } catch (error) {
+    if (error?.code === 'ER_DUP_KEYNAME' || /Duplicate key name/i.test(String(error?.message || '')))
+      return;
+    throw error;
+  }
 }
 
 export async function initialiseDatabase() {
@@ -368,13 +380,17 @@ export async function initialiseDatabase() {
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     subject VARCHAR(500) NOT NULL,
     department_id BIGINT UNSIGNED NULL,
+    participant_user_id VARCHAR(100) NULL,
     created_by_user_id VARCHAR(100) NOT NULL,
     last_message_at VARCHAR(40) NOT NULL,
     created_at VARCHAR(40) NOT NULL,
     updated_at VARCHAR(40) NOT NULL,
     INDEX idx_internal_chat_department (department_id),
+    INDEX idx_internal_chat_participant (participant_user_id),
     INDEX idx_internal_chat_created_by (created_by_user_id),
     INDEX idx_internal_chat_last_message (last_message_at),
+    CONSTRAINT fk_internal_chat_participant FOREIGN KEY (participant_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL,
     CONSTRAINT fk_internal_chat_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
       ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
@@ -577,6 +593,7 @@ async function initialiseRbacSchema() {
   await addColumnIfMissing('support_tickets', 'assigned_by_user_id', 'VARCHAR(100) NULL AFTER assigned_to_user_id');
   await addColumnIfMissing('support_tickets', 'assignment_note', 'TEXT NULL AFTER assigned_by_user_id');
   await addColumnIfMissing('support_tickets', 'assigned_at', 'VARCHAR(40) NULL AFTER assignment_note');
+  await addColumnIfMissing('internal_chat_threads', 'participant_user_id', 'VARCHAR(100) NULL AFTER department_id');
 
   await addColumnIfMissing('jobs', 'created_by_user_id', 'VARCHAR(100) NULL AFTER posted_by');
   await addColumnIfMissing('jobs', 'assigned_to_user_id', 'VARCHAR(100) NULL AFTER created_by_user_id');
@@ -891,6 +908,7 @@ async function initialiseRbacSchema() {
   await addIndexIfMissing('support_tickets', 'idx_tickets_job', '(job_id)');
   await addIndexIfMissing('support_tickets', 'idx_tickets_department', '(department_id)');
   await addIndexIfMissing('support_tickets', 'idx_tickets_assigned_to', '(assigned_to_user_id)');
+  await addIndexIfMissing('internal_chat_threads', 'idx_internal_chat_participant', '(participant_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_assigned_to', '(assigned_to_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_preferred_assignee', '(preferred_assignee_user_id)');
   await addIndexIfMissing('jobs', 'idx_jobs_created_by', '(created_by_user_id)');

@@ -175,6 +175,7 @@ export const rolePermissions = {
     'support.view_own',
     'support.reply',
     'chat.view',
+    'chat.create',
     'chat.reply',
     'notifications.view',
     'profile.view'
