@@ -61,9 +61,22 @@ jobs:
         env:
           GRADLE_OPTS: -Dorg.gradle.internal.http.connectionTimeout=60000 -Dorg.gradle.internal.http.socketTimeout=60000 -Dorg.gradle.daemon=false
         run: |
+          set -o pipefail
+          mkdir -p apk
           chmod +x android/gradlew
           cd android
-          ./gradlew --no-daemon assembleDebug --stacktrace
+          ./gradlew --no-daemon assembleDebug --stacktrace --info 2>&1 | tee ../apk/android-build.log
+
+      - name: Commit Android build log
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -f apk/android-build.log ]; then
+            git add -f apk/android-build.log
+            git commit -m "Capture Android APK build failure" || true
+            git push || true
+          fi
 
       - name: Copy APK
         run: |
