@@ -61,14 +61,14 @@ const app = express();
 app.set('trust proxy', 1);
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173')
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173,https://360.webtrionix.com')
     .split(',')
     .map(item => item.trim())
     .filter(Boolean);
-if (!allowedOrigins.includes('capacitor://localhost'))
-    allowedOrigins.push('capacitor://localhost');
-if (!allowedOrigins.includes('https://localhost'))
-    allowedOrigins.push('https://localhost');
+for (const nativeOrigin of ['capacitor://localhost', 'https://localhost', 'http://localhost']) {
+    if (!allowedOrigins.includes(nativeOrigin))
+        allowedOrigins.push(nativeOrigin);
+}
 const corsOrigin = (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin))
         return callback(null, true);
