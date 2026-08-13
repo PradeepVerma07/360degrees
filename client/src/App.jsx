@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
-import { api, API_URL, getToken, IS_NATIVE_APP, setToken } from './api';
+import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
@@ -568,7 +568,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         goTo(dashboardProfile.sidebarTab || 'overview');
     };
-    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${dashboardProfile.roleKey} ${IS_NATIVE_APP ? 'is-native-app' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${dashboardProfile.roleKey} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
             _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
                     _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }) }),
