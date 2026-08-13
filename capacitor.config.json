@@ -2,6 +2,7 @@
   "appId": "com.webtrionix.ci360",
   "appName": "CI360degrees",
   "webDir": "client/dist",
+  "appendUserAgent": "CI360AndroidApp",
   "server": {
     "url": "https://360.webtrionix.com",
     "cleartext": false
