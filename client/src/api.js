@@ -1,12 +1,32 @@
 const APP_USER_AGENT_TOKEN = 'CI360AndroidApp';
 
+const hasNativeAppFlag = () => {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('ci360_app') === 'android') {
+            localStorage.setItem('ci360-platform', 'android');
+            return true;
+        }
+        return localStorage.getItem('ci360-platform') === 'android';
+    }
+    catch {
+        return false;
+    }
+};
+
 export const IS_NATIVE_APP = typeof window !== 'undefined' && (
-    window.Capacitor?.isNativePlatform?.()
+    hasNativeAppFlag()
+    || window.__CI360_ANDROID_APP__ === true
+    || window.Capacitor?.isNativePlatform?.()
     || ['android', 'ios'].includes(window.Capacitor?.getPlatform?.())
     || ['capacitor:', 'file:'].includes(window.location.protocol)
     || (['http:', 'https:'].includes(window.location.protocol) && window.location.hostname === 'localhost' && !window.location.port)
     || window.navigator?.userAgent?.includes(APP_USER_AGENT_TOKEN)
 );
+
+if (IS_NATIVE_APP) {
+    document.documentElement.classList.add('ci360-android-app');
+}
 export const API_URL = import.meta.env.VITE_API_URL ?? (IS_NATIVE_APP ? 'https://360.webtrionix.com' : '');
 let token = localStorage.getItem('ci360-token') || sessionStorage.getItem('ci360-token');
 export const getToken = () => token;
