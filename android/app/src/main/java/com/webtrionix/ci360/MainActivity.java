@@ -12,12 +12,17 @@ public class MainActivity extends BridgeActivity {
     private static final String APP_MODE_SCRIPT =
         "(function(){"
             + "window.__CI360_ANDROID_APP__=true;"
+            + "function mark(){"
             + "document.documentElement.classList.add('ci360-android-app');"
             + "if(document.body){document.body.classList.add('ci360-android-app');}"
+            + "document.querySelectorAll('.dashboard-shell').forEach(function(node){node.classList.add('app-mobile-browser');});"
+            + "}"
             + "var meta=document.querySelector('meta[name=\"viewport\"]');"
             + "if(!meta&&document.head){meta=document.createElement('meta');meta.name='viewport';document.head.appendChild(meta);}"
             + "if(meta){meta.setAttribute('content','width=device-width,initial-scale=1.0,maximum-scale=1.0,viewport-fit=cover');}"
             + "try{localStorage.setItem('ci360-platform','android');}catch(e){}"
+            + "mark();"
+            + "try{new MutationObserver(mark).observe(document.documentElement,{childList:true,subtree:true});}catch(e){}"
             + "})();";
 
     private boolean mobileWebViewConfigured = false;
@@ -43,15 +48,11 @@ public class MainActivity extends BridgeActivity {
         settings.setDisplayZoomControls(false);
         settings.setTextZoom(100);
         settings.setUserAgentString(MOBILE_USER_AGENT + " " + APP_USER_AGENT_TOKEN + " Mobile");
+        webView.clearCache(true);
         webView.setInitialScale(100);
 
         webView.postDelayed(() -> {
             webView.evaluateJavascript(APP_MODE_SCRIPT, null);
-            String currentUrl = webView.getUrl();
-            if (currentUrl != null && currentUrl.startsWith("https://360.webtrionix.com") && !currentUrl.contains("ci360_app=android")) {
-                String separator = currentUrl.contains("?") ? "&" : "?";
-                webView.loadUrl(currentUrl + separator + "ci360_app=android");
-            }
         }, 250);
     }
 }

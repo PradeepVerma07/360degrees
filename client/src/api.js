@@ -24,8 +24,18 @@ export const IS_NATIVE_APP = typeof window !== 'undefined' && (
     || window.navigator?.userAgent?.includes(APP_USER_AGENT_TOKEN)
 );
 
-if (IS_NATIVE_APP) {
+const markNativeAppShell = () => {
     document.documentElement.classList.add('ci360-android-app');
+    document.body?.classList.add('ci360-android-app');
+    document.querySelectorAll('.dashboard-shell').forEach(node => node.classList.add('app-mobile-browser'));
+};
+
+if (IS_NATIVE_APP) {
+    markNativeAppShell();
+    try {
+        new MutationObserver(markNativeAppShell).observe(document.documentElement, { childList: true, subtree: true });
+    }
+    catch { }
 }
 export const API_URL = import.meta.env.VITE_API_URL ?? (IS_NATIVE_APP ? 'https://360.webtrionix.com' : '');
 let token = localStorage.getItem('ci360-token') || sessionStorage.getItem('ci360-token');
