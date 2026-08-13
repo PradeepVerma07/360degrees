@@ -233,6 +233,19 @@ CREATE TABLE IF NOT EXISTS productivity_services (
       ON UPDATE CASCADE ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS productivity_responsibilities (
+    `key` VARCHAR(40) PRIMARY KEY,
+    label VARCHAR(160) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO productivity_responsibilities (`key`, label, description) VALUES
+  ('owner','Owner','Primary owner of the job or client account'),
+  ('producer','Producer','Primary producer responsible for delivery'),
+  ('reviewer','Reviewer','Quality or content reviewer'),
+  ('support','Support','Support or operations contributor');
+
 CREATE TABLE IF NOT EXISTS productivity_jobs (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     core_job_id VARCHAR(100) NULL,
@@ -272,12 +285,14 @@ CREATE TABLE IF NOT EXISTS productivity_job_services (
 CREATE TABLE IF NOT EXISTS productivity_job_assignments (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     productivity_job_id BIGINT UNSIGNED NOT NULL,
+    responsibility_key VARCHAR(40) NULL,
     user_id VARCHAR(100) NOT NULL,
     revenue_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
     hours_spent DECIMAL(10,2) NOT NULL DEFAULT 0,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     INDEX idx_productivity_assignments_job (productivity_job_id),
+    INDEX idx_productivity_assignments_responsibility (responsibility_key),
     INDEX idx_productivity_assignments_user (user_id),
     CONSTRAINT fk_productivity_assignments_job FOREIGN KEY (productivity_job_id) REFERENCES productivity_jobs(id)
       ON UPDATE CASCADE ON DELETE CASCADE,

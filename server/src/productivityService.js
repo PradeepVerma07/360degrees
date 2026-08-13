@@ -182,6 +182,7 @@ export async function loadProductivityJobs(range, { serviceId = '', userId = '',
       WHERE pjs.productivity_job_id IN (${placeholders})
       ORDER BY s.name`, ids, connection),
     query(`SELECT pja.id,pja.productivity_job_id jobId,pja.user_id userId,u.name userName,
+      pja.responsibility_key responsibilityKey,
         d.name departmentName,ds.name designationName,
         pja.revenue_percent revenuePercent,pja.hours_spent hoursSpent
       FROM productivity_job_assignments pja
@@ -205,6 +206,7 @@ export async function loadProductivityJobs(range, { serviceId = '', userId = '',
       jobId: String(row.jobId),
       userId: row.userId,
       userName: row.userName,
+      responsibilityKey: row.responsibilityKey || '',
       departmentName: row.departmentName || '',
       designationName: row.designationName || '',
       revenuePercent: number(row.revenuePercent),
@@ -625,8 +627,8 @@ export async function createOrUpdateProductivityJob(rule, actorId, connection) {
   for (const serviceId of rule.serviceIds)
     await query('INSERT IGNORE INTO productivity_job_services (productivity_job_id,service_id) VALUES (?,?)', [id, serviceId], connection);
   for (const assignment of rule.assignments) {
-    await query(`INSERT INTO productivity_job_assignments (productivity_job_id,user_id,revenue_percent,hours_spent)
-      VALUES (?,?,?,?)`, [id, assignment.userId, assignment.revenuePercent, assignment.hoursSpent], connection);
+    await query(`INSERT INTO productivity_job_assignments (productivity_job_id,user_id,responsibility_key,revenue_percent,hours_spent)
+      VALUES (?,?,?,?,?)`, [id, assignment.userId, assignment.responsibilityKey || null, assignment.revenuePercent, assignment.hoursSpent], connection);
   }
   return (await loadProductivityJobs(resolvePeriodRange('all'), {}, connection)).find(job => Number(job.id) === Number(id));
 }

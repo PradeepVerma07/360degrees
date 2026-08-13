@@ -292,6 +292,7 @@ const productivityJobPayloadSchema = z.object({
     serviceIds: z.array(numericId).min(1),
     assignments: z.array(z.object({
         userId: z.string().trim().min(1),
+        responsibilityKey: z.string().trim().optional().default(''),
         revenuePercent: z.coerce.number().min(0).max(100),
         hoursSpent: z.coerce.number().min(0)
     })).min(1)
@@ -1056,6 +1057,13 @@ const validateProductivityReferences = async payload => {
     const users = await query(`SELECT id FROM users WHERE id IN (${userIds.map(() => '?').join(',')}) AND status='active' AND COALESCE(account_type,role)<>'client'`, userIds);
     if (users.length !== userIds.length)
         return 'One or more active internal assignees were not found';
+    // validate responsibility keys if provided
+    const responsibilityKeys = [...new Set((payload.assignments || []).map(a => a.responsibilityKey).filter(Boolean))];
+    if (responsibilityKeys.length) {
+        const valid = (await query(`SELECT key FROM productivity_responsibilities WHERE key IN (${responsibilityKeys.map(() => '?').join(',')})`, responsibilityKeys)).map(r => r.key);
+        if (valid.length !== responsibilityKeys.length)
+            return 'One or more responsibility/role keys are invalid';
+    }
     const dateError = validateProductivityDates(payload);
     if (dateError)
         return dateError;

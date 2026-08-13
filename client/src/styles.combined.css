@@ -1,0 +1,5 @@
+@import './tokens.css';
+@import './styles.css';
+
+/* Combined import so tokens are available before the main stylesheet.
+   This avoids modifying the large styles.css directly. */

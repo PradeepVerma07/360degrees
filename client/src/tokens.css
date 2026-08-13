@@ -1,0 +1,19 @@
+:root {
+  /* Color tokens */
+  --ci-primary: #102044;
+  --ci-secondary: #172b55;
+  --ci-gold: #c6a336;
+  --ci-bg: #f7f8fc;
+  --ci-card: #fff;
+  --ci-text: #14213d;
+  --ci-muted: #667085;
+  --ci-border: #e4e7ec;
+  --ci-success: #198754;
+  --ci-warning: #c58a00;
+  --ci-urgent: #a94335;
+
+  /* Layout tokens */
+  --ci-breakpoint-tablet: 768px;
+  --ci-breakpoint-desktop: 1180px;
+  --ci-sidebar-width: 270px;
+}

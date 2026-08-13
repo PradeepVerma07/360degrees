@@ -6,8 +6,11 @@ import { isForcedMobileAppMode } from './mobileMode';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
+import ProductivityLogJob from './components/ProductivityLogJob';
+import DashboardSidebar from './components/DashboardSidebar';
+import DashboardTopbar from './components/DashboardTopbar';
 import ci360LogoMark from './assets/ci360-logo-mark.png';
-import './styles.css';
+import './styles.combined.css';
 const statusLabels = {
     submitted: 'Submitted',
     pending_acceptance: 'Pending Acceptance',
@@ -512,7 +515,14 @@ function ClientMobileBottomNav({ tabs, tab, goTo, notificationCount }) {
             ] }, item.id)) });
 }
 function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTicketForm, children }) {
-    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarOpen, setSidebarOpen] = useState(() => {
+        try {
+            return localStorage.getItem('ci360-sidebar-open') === '1';
+        }
+        catch {
+            return false;
+        }
+    });
     const [userMenuOpen, setUserMenuOpen] = useState(false);
     const [notificationOpen, setNotificationOpen] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -530,6 +540,21 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         catch { }
     }, [theme]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('ci360-sidebar-open', sidebarOpen ? '1' : '0');
+        }
+        catch { }
+    }, [sidebarOpen]);
+
+    useEffect(() => {
+        const onKey = (e) => {
+            if (e.key === 'Escape' && sidebarOpen) setSidebarOpen(false);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [sidebarOpen]);
     const notifications = data.notifications || [];
     const unreadNotifications = Math.min(notifications.filter(item => !item.isRead).length, 99);
     const notificationItems = dashboardNotificationItems(data);
@@ -574,17 +599,15 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         goTo(dashboardProfile.sidebarTab || 'overview');
     };
-    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${visualRoleKey} ${forceMobileDashboard ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+        return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${visualRoleKey} ${forceMobileDashboard ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
-            _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
-                    _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }) }),
-                    _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
-                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [
-                            _jsxs("div", { className: "dashboard-role-card", children: [_jsx(DashboardIcon, { name: dashboardProfile.sidebarAction === 'support' ? 'support' : 'shield' }), _jsx("b", { children: dashboardProfile.sidebarTitle }), _jsx("p", { children: dashboardProfile.sidebarBody }), _jsx("button", { type: "button", onClick: runSidebarAction, children: dashboardProfile.sidebarButton })] }),
-                            _jsxs("div", { className: "dashboard-sidebar-profile", children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("small", { children: displayRole })] })] }),
-                            _jsxs("button", { type: "button", className: "dashboard-sidebar-logout", onClick: logout, children: [_jsx(DashboardIcon, { name: "logout" }), _jsx("span", { children: "Logout" })] })
-                        ] })
-                ] }),
+            _jsx(DashboardSidebar, { tabs: tabs, tab: tab, goTo: goTo, dashboardProfile: dashboardProfile, avatarInitials: avatarInitials, displayName: displayName, displayRole: displayRole, logout: logout, runSidebarAction: runSidebarAction }),
+            _jsxs("section", { className: "dashboard-main", children: [
+                showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
+                _jsx(DashboardTopbar, { activeLabel: activeLabel, dashboardProfile: { workspaceTitle: dashboardProfile.workspaceTitle, displayName, displayRole, avatarInitials }, sidebarOpen: sidebarOpen, setSidebarOpen: setSidebarOpen, searchTerm: searchTerm, setSearchTerm: setSearchTerm, submitSearch: submitSearch, unreadNotifications: unreadNotifications, notificationOpen: notificationOpen, setNotificationOpen: setNotificationOpen, notificationItems: notificationItems, logout: logout, userMenuOpen: userMenuOpen, setUserMenuOpen: setUserMenuOpen, theme: theme, setTheme: setTheme, goTo: goTo }),
+                error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
+                _jsx("div", { className: "dashboard-content", children: children })
+            ] }),
             _jsxs("section", { className: "dashboard-main", children: [
                     showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
                     _jsxs("div", { className: "dashboard-topbar", children: [
@@ -2012,40 +2035,7 @@ function ProductivityReports({ payload, meta }) {
     );
 }
 
-function ProductivityLogJob({ meta, canCreate, reload }) {
-    const [form, setForm] = useState({ clientId: meta.clients[0]?.id || '', startDate: '', completionDate: '', valueAmount: 0, description: '', serviceIds: [], assignments: [{ userId: '', revenuePercent: 100, hoursSpent: 0 }] });
-    const total = form.assignments.reduce((sum, item) => sum + Number(item.revenuePercent || 0), 0);
-    const submit = async () => {
-        await api.createProductivityJob(form);
-        setForm({ clientId: meta.clients[0]?.id || '', startDate: '', completionDate: '', valueAmount: 0, description: '', serviceIds: [], assignments: [{ userId: '', revenuePercent: 100, hoursSpent: 0 }] });
-        await reload('Productivity job logged.');
-    };
-    if (!canCreate)
-        return <DashboardEmptyState title="No job logging access." body="Ask a Super Admin to grant productivity job creation permission." />;
-    return (
-        <article className="dashboard-card productivity-card productivity-wide">
-            <div className="dashboard-card-head"><h3>Log a Job</h3><p>{total === 100 ? '100% of revenue allocated.' : `${num(total)}% allocated - should total 100%.`}</p></div>
-            <div className="productivity-log-grid">
-                <select value={form.clientId} onChange={e => setForm({ ...form, clientId: e.target.value })}>{meta.clients.map(c => <option value={c.id} key={c.id}>{c.name}</option>)}</select>
-                <input type="date" min={meta.tracking?.start} max={meta.tracking?.end} value={form.startDate} onChange={e => setForm({ ...form, startDate: e.target.value })} />
-                <input type="date" min={meta.tracking?.start} max={meta.tracking?.end} value={form.completionDate} onChange={e => setForm({ ...form, completionDate: e.target.value })} />
-                <input type="number" min="0" value={form.valueAmount} onChange={e => setForm({ ...form, valueAmount: Number(e.target.value) })} placeholder="Job value" />
-                <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Description" />
-                <div className="productivity-checks">{meta.services.map(s => <label className="permission-check" key={s.id}><input type="checkbox" checked={form.serviceIds.includes(s.id)} onChange={e => setForm({ ...form, serviceIds: e.target.checked ? [...form.serviceIds, s.id] : form.serviceIds.filter(id => id !== s.id) })} />{s.name}</label>)}</div>
-            </div>
-            <div className="productivity-stack">
-                {form.assignments.map((assignment, index) => <div className="productivity-form-row" key={index}>
-                    <select value={assignment.userId} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, userId: e.target.value } : a) })}><option value="">Employee</option>{meta.employees.map(e => <option value={e.id} key={e.id}>{e.name} - {e.duties}</option>)}</select>
-                    <input type="number" min="0" max="100" value={assignment.revenuePercent} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, revenuePercent: Number(e.target.value) } : a) })} />
-                    <input type="number" min="0" value={assignment.hoursSpent} onChange={e => setForm({ ...form, assignments: form.assignments.map((a, i) => i === index ? { ...a, hoursSpent: Number(e.target.value) } : a) })} />
-                    <button type="button" onClick={() => setForm({ ...form, assignments: form.assignments.filter((_, i) => i !== index) })}>Remove</button>
-                </div>)}
-                <button type="button" onClick={() => setForm({ ...form, assignments: [...form.assignments, { userId: '', revenuePercent: 0, hoursSpent: 0 }] })}>+ Add Person</button>
-                <button className="primary" disabled={!form.clientId || !form.startDate || !form.serviceIds.length || total !== 100} onClick={submit}>Save Productivity Job</button>
-            </div>
-        </article>
-    );
-}
+/* ProductivityLogJob moved to ./components/ProductivityLogJob.jsx */
 
 function ProductivityDaily({ payload }) {
     return <ProductivitySimpleTable title="Daily Log" columns={['Date', 'Jobs', 'Total Hours', 'Per Person']} rows={(payload.days || []).map(day => [day.date, day.jobs, num(day.totalHours), day.people.map(p => `${p.name}: ${num(p.hours)} hrs`).join(', ')])} wide />;
@@ -2062,7 +2052,7 @@ function ProductivityAllJobs({ payload, canManage, reload }) {
         await api.deleteProductivityJob(id);
         await reload('Productivity job deleted.');
     };
-    return <ProductivitySimpleTable title="All Jobs" columns={['Start', 'Status', 'Productivity TAT', 'Client', 'Services', 'Description', 'Value', 'Assigned', 'Actions']} rows={(payload.jobs || []).map(j => [j.startDate, j.status, j.productivityTat == null ? '-' : `${j.productivityTat} days`, j.clientName, j.serviceNames, j.description, inr(j.valueAmount), j.assignments.map(a => `${a.userName} ${num(a.revenuePercent)}% / ${num(a.hoursSpent)} hrs`).join(', '), canManage ? <button className="danger small" onClick={() => remove(j.id)}>Delete</button> : '-'])} wide />;
+    return <ProductivitySimpleTable title="All Jobs" columns={['Start', 'Status', 'Productivity TAT', 'Client', 'Services', 'Description', 'Value', 'Assigned', 'Actions']} rows={(payload.jobs || []).map(j => [j.startDate, j.status, j.productivityTat == null ? '-' : `${j.productivityTat} days`, j.clientName, j.serviceNames, j.description, inr(j.valueAmount), j.assignments.map(a => `${a.userName} ${num(a.revenuePercent)}% / ${num(a.hoursSpent)} hrs${a.responsibilityKey ? ' · ' + a.responsibilityKey : ''}`).join(', '), canManage ? <button className="danger small" onClick={() => remove(j.id)}>Delete</button> : '-'])} wide />;
 }
 
 function ProductivitySalaries({ payload, meta, canView, canManage, reload }) {
