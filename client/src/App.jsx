@@ -2,6 +2,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 import { api, API_URL, getToken, IS_NATIVE_APP, setToken } from './api';
+import { isForcedMobileAppMode } from './mobileMode';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
@@ -172,6 +173,8 @@ const dashboardProfileFor = data => {
     };
     return profiles[roleKey];
 };
+const isForcedMobileDashboardMode = () => IS_NATIVE_APP || isForcedMobileAppMode();
+const shouldUseMobileDashboard = roleKey => roleKey === 'client' || isForcedMobileDashboardMode();
 export default function App() {
     const [auth, setAuth] = useState(Boolean(getToken()));
     const [data, setData] = useState(null);
@@ -532,6 +535,9 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
     const notificationItems = dashboardNotificationItems(data);
     const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
     const dashboardProfile = dashboardProfileFor(data);
+    const forceMobileDashboard = isForcedMobileDashboardMode();
+    const showMobileDashboardChrome = shouldUseMobileDashboard(dashboardProfile.roleKey);
+    const visualRoleKey = forceMobileDashboard ? 'client' : dashboardProfile.roleKey;
     const isSuperAdminUser = dashboardProfile.roleKey === 'super_admin';
     const displayName = isSuperAdminUser ? 'Super Admin' : data.user.name;
     const avatarInitials = isSuperAdminUser ? 'SA' : initialsFor(displayName);
@@ -568,7 +574,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         goTo(dashboardProfile.sidebarTab || 'overview');
     };
-    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${dashboardProfile.roleKey} ${IS_NATIVE_APP ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${visualRoleKey} ${forceMobileDashboard ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
             _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
             _jsxs("aside", { id: "dashboard-sidebar", className: "dashboard-sidebar", "aria-label": "Dashboard navigation", children: [
                     _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }) }),
@@ -580,7 +586,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
                         ] })
                 ] }),
             _jsxs("section", { className: "dashboard-main", children: [
-                    dashboardProfile.roleKey === 'client' && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
+                    showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
                     _jsxs("div", { className: "dashboard-topbar", children: [
                             _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: dashboardProfile.workspaceTitle })] })] }),
                             _jsxs("form", { className: "dashboard-search", role: "search", onSubmit: submitSearch, children: [_jsx(DashboardIcon, { name: "search" }), _jsx("input", { type: "search", value: searchTerm, onChange: event => setSearchTerm(event.target.value), placeholder: "Search...", "aria-label": "Search jobs" }), _jsx("button", { type: "submit", "aria-label": "Open job search", children: _jsx(DashboardIcon, { name: "search" }) })] }),
@@ -593,7 +599,7 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
                     error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
                     _jsx("div", { className: "dashboard-content", children: children })
                 ] }),
-            dashboardProfile.roleKey === 'client' && _jsx(ClientMobileBottomNav, { tabs: tabs, tab: tab, goTo: goTo, notificationCount: unreadNotifications })
+            showMobileDashboardChrome && _jsx(ClientMobileBottomNav, { tabs: tabs, tab: tab, goTo: goTo, notificationCount: unreadNotifications })
         ] });
 }
 function DashboardStat({ tone, icon, value, label, support }) {
@@ -733,7 +739,7 @@ function Overview({ data, setTab }) {
             return ['Open Jobs', 'jobs', 'jobs'];
         return null;
     })();
-    const clientMobileOverview = dashboardProfile.roleKey === 'client' ? _jsx(ClientMobileOverview, { jobs: jobs, completedJobs: completedJobs, pendingWithDue: pendingWithDue, validDue: validDue, dueLabel: dueLabel, canOpenJobs: canOpenJobs, setTab: setTab }) : null;
+    const clientMobileOverview = shouldUseMobileDashboard(dashboardProfile.roleKey) ? _jsx(ClientMobileOverview, { title: dashboardProfile.overviewTitle, jobs: jobs, completedJobs: completedJobs, pendingWithDue: pendingWithDue, validDue: validDue, dueLabel: dueLabel, canOpenJobs: canOpenJobs, canCreateJob: can(data, 'jobs.create'), setTab: setTab }) : null;
     return _jsx("section", { className: "overview-reference", children: _jsxs(_Fragment, { children: [
                 clientMobileOverview,
                 _jsxs("div", { className: "overview-reference-head", children: [
@@ -794,7 +800,7 @@ const getTrackableJob = jobs => jobs.find(job => job.status === 'in_progress')
     || jobs.find(job => isPendingJob(job))
     || jobs[0]
     || null;
-function ClientMobileOverview({ jobs, completedJobs, pendingWithDue, validDue, dueLabel, canOpenJobs, setTab }) {
+function ClientMobileOverview({ title = 'Client Dashboard', jobs, completedJobs, pendingWithDue, validDue, dueLabel, canOpenJobs, canCreateJob = true, setTab }) {
     const pendingAcceptance = jobs.filter(job => job.status === 'pending_acceptance').length;
     const inProgress = jobs.filter(job => job.status === 'in_progress').length;
     const attentionJobs = jobs.filter(job => job.requiresClientAction || clientAttentionStatuses.has(job.status)).sort((a, b) => timestamp(b.updatedAt || b.datePosted) - timestamp(a.updatedAt || a.datePosted));
@@ -811,17 +817,17 @@ function ClientMobileOverview({ jobs, completedJobs, pendingWithDue, validDue, d
     return _jsxs("section", { className: "client-mobile-overview", children: [
             _jsxs("article", { className: "client-mobile-hero", children: [
                     _jsxs("div", { className: "client-mobile-hero-copy", children: [
-                            _jsx("h2", { children: "Client Dashboard" }),
+                            _jsx("h2", { children: title }),
                             _jsxs("p", { children: ["Here's what's happening", _jsx("br", {}), "with your jobs today."] }),
                             _jsxs("span", { className: "client-mobile-smart", children: [_jsx("i", {}), _jsx("b", { children: "Smart Assignment" }), _jsx("small", { children: "Right people. Right time." })] })
                         ] }),
                     _jsx(ClientHeroIllustration, {})
                 ] }),
             _jsx("section", { className: "client-mobile-kpis", "aria-label": "Client job metrics", children: kpis.map(([tone, icon, value, label]) => _jsxs("button", { type: "button", className: `client-mobile-kpi ${tone}`, onClick: () => setTab(canOpenJobs ? 'jobs' : 'overview'), children: [_jsx("span", { children: _jsx(DashboardIcon, { name: icon }) }), _jsx("strong", { children: value }), _jsx("small", { children: label })] }, label)) }),
-            _jsxs("button", { type: "button", className: "client-mobile-create", onClick: () => setTab('submit'), children: [_jsx(DashboardIcon, { name: "plus" }), "Create Job"] }),
+            (canCreateJob || canOpenJobs) && _jsxs("button", { type: "button", className: "client-mobile-create", onClick: () => setTab(canCreateJob ? 'submit' : 'jobs'), children: [_jsx(DashboardIcon, { name: canCreateJob ? "plus" : "jobs" }), canCreateJob ? "Create Job" : "Open Jobs"] }),
             _jsxs("article", { className: "client-mobile-card client-mobile-recent", children: [
                     _jsxs("div", { className: "client-mobile-section-head", children: [_jsx("h3", { children: "Recent Jobs" }), recentJobs.length > 0 && _jsx("button", { type: "button", onClick: () => setTab(canOpenJobs ? 'jobs' : 'overview'), children: "View all" })] }),
-                    recentJobs.length ? _jsx("div", { className: "client-mobile-job-list", children: recentJobs.map(job => _jsx(ClientMobileJobItem, { job: job, due: dueByJob.get(job.id), validDue: validDue, dueLabel: dueLabel, setTab: setTab, canOpenJobs: canOpenJobs }, job.id)) }) : _jsxs("div", { className: "client-mobile-empty", children: [_jsx("b", { children: "No jobs yet" }), _jsx("p", { children: "Create your first job and track it here." }), _jsx("button", { type: "button", onClick: () => setTab('submit'), children: "Create Job" })] })
+                    recentJobs.length ? _jsx("div", { className: "client-mobile-job-list", children: recentJobs.map(job => _jsx(ClientMobileJobItem, { job: job, due: dueByJob.get(job.id), validDue: validDue, dueLabel: dueLabel, setTab: setTab, canOpenJobs: canOpenJobs }, job.id)) }) : _jsxs("div", { className: "client-mobile-empty", children: [_jsx("b", { children: "No jobs yet" }), _jsx("p", { children: "Create your first job and track it here." }), canCreateJob && _jsx("button", { type: "button", onClick: () => setTab('submit'), children: "Create Job" })] })
                 ] }),
             _jsxs("article", { className: "client-mobile-card client-mobile-track", children: [
                     _jsxs("div", { className: "client-mobile-section-head", children: [_jsx("h3", { children: "Track Job" }), trackJob && _jsx("button", { type: "button", onClick: () => setTab(canOpenJobs ? 'jobs' : 'overview'), children: "View details" })] }),

@@ -6,7 +6,6 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 
-    private static final String MOBILE_APP_URL = "https://360.webtrionix.com/?mobileApp=1&ci360_app=android";
     private static final String APP_USER_AGENT_TOKEN = "CI360AndroidApp";
     private static final String MOBILE_USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
@@ -99,14 +98,6 @@ public class MainActivity extends BridgeActivity {
 
         webView.postDelayed(() -> {
             webView.evaluateJavascript(APP_MODE_SCRIPT, null);
-            String currentUrl = webView.getUrl();
-            if (currentUrl == null || !currentUrl.startsWith("https://360.webtrionix.com")) {
-                webView.loadUrl(MOBILE_APP_URL);
-            }
-            else if (!currentUrl.contains("mobileApp=1")) {
-                String separator = currentUrl.contains("?") ? "&" : "?";
-                webView.loadUrl(currentUrl + separator + "mobileApp=1&ci360_app=android");
-            }
         }, 250);
     }
 }
