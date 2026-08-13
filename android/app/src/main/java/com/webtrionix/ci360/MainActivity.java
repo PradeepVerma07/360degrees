@@ -12,9 +12,12 @@ public class MainActivity extends BridgeActivity {
     private static final String APP_MODE_SCRIPT =
         "(function(){"
             + "window.__CI360_ANDROID_APP__=true;"
+            + "window.__CI360_MOBILE_APP__=true;"
             + "function mark(){"
             + "document.documentElement.classList.add('ci360-android-app');"
+            + "document.documentElement.classList.add('mobile-app-mode');"
             + "if(document.body){document.body.classList.add('ci360-android-app');}"
+            + "if(document.body){document.body.classList.add('mobile-app-mode');}"
             + "document.querySelectorAll('.dashboard-shell').forEach(function(node){node.classList.add('app-mobile-browser');});"
             + "}"
             + "var meta=document.querySelector('meta[name=\"viewport\"]');"

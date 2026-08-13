@@ -999,3 +999,33 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
 .dashboard-shell.app-mobile-browser.role-client .client-mobile-nav-icon em{position:absolute!important;top:-5px!important;right:-7px!important;min-width:17px!important;height:17px!important;padding:0 4px!important;border-radius:999px!important;background:#1455e8!important;color:#fff!important;font-size:9px!important;font-style:normal!important;display:grid!important;place-items:center!important;border:2px solid #fff!important}
 .dashboard-shell.app-mobile-browser.role-client .client-mobile-bottom-nav button.active .client-mobile-nav-icon em{background:#0b3fb7!important}
 .dashboard-shell.app-mobile-browser.role-client .client-mobile-bottom-nav b{font-size:10px!important;line-height:1.1!important;white-space:nowrap!important;color:inherit!important}
+
+/* Forced APK/WebView phone mode. Activated only by ?mobileApp=1, injected app marker, or local native app protocol. */
+html.mobile-app-mode,body.mobile-app-mode{width:100%;max-width:100%;overflow-x:hidden}
+body.mobile-app-mode .app{width:100%;max-width:430px;margin-left:auto;margin-right:auto;padding:18px 12px 50px}
+body.mobile-app-mode header{align-items:flex-start;flex-direction:column}
+body.mobile-app-mode .metrics{grid-template-columns:1fr}
+body.mobile-app-mode .job-head{flex-direction:column}
+body.mobile-app-mode .badges{justify-content:flex-start}
+body.mobile-app-mode .setting-row{grid-template-columns:1fr}
+body.mobile-app-mode .client-row{grid-template-columns:1fr}
+body.mobile-app-mode .identity{text-align:left}
+body.mobile-app-mode .filters select{width:100%;min-width:0}
+body.mobile-app-mode .page-title{flex-direction:column}
+body.mobile-app-mode .modal-backdrop{align-items:start}
+body.mobile-app-mode .modal-panel{padding:18px}
+body.mobile-app-mode .ticket-table{min-width:760px}
+body.mobile-app-mode .modal-actions,body.mobile-app-mode .admin-ticket-controls{justify-content:flex-start}
+body.mobile-app-mode .auth-shell{display:block;background:#f7f3eb;padding:0}
+body.mobile-app-mode .auth-story{display:none}
+body.mobile-app-mode .auth-panel{display:block;min-height:100vh;padding:0;background:#f7f3eb}
+body.mobile-app-mode .auth-card{width:100%;min-height:100vh;margin:0;padding:0 20px 28px;background:#f7f3eb;border:0;border-radius:0;box-shadow:none}
+body.mobile-app-mode .auth-card:hover{box-shadow:none}
+body.mobile-app-mode .auth-mobile-logo{position:sticky;top:0;z-index:10;display:block;margin:0 -20px 26px;padding:18px 20px;background:#f7f3eb;border-bottom:1px solid rgba(15,35,70,.08)}
+body.mobile-app-mode .auth-mobile-logo .auth-logo,body.mobile-app-mode .auth-mobile-logo .auth-logo span{color:#111827}
+body.mobile-app-mode .auth-form{max-width:520px;margin:0 auto}
+body.mobile-app-mode .auth-form h2{font-size:30px}
+body.mobile-app-mode .auth-grid{grid-template-columns:1fr}
+body.mobile-app-mode .auth-primary{position:sticky;bottom:14px;z-index:3}
+body.mobile-app-mode .password-rules{grid-template-columns:1fr}
+body.mobile-app-mode .auth-row{align-items:flex-start;flex-direction:column}
