@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import DashboardIcon from './DashboardIcon';
 import SidebarItem from './SidebarItem';
 
-export default function DashboardSidebar({ tabs, tab, goTo, dashboardProfile, avatarInitials, displayName, displayRole, logout, runSidebarAction }) {
+export default function DashboardSidebar({ tabs, tab, goTo, dashboardProfile, avatarInitials, displayName, displayRole, logout, runSidebarAction, sidebarOpen, setSidebarOpen }) {
   const containerRef = useRef(null);
 
   const onKeyDown = (e) => {
@@ -40,7 +40,12 @@ export default function DashboardSidebar({ tabs, tab, goTo, dashboardProfile, av
 
   return (
     <aside id="dashboard-sidebar" className="dashboard-sidebar" aria-label="Dashboard navigation">
-      <div className="dashboard-brand dashboard-brand-icon-only"><img src="/assets/ci360-logo-mark.png" alt="CI360degrees" /></div>
+      <div className="dashboard-brand dashboard-brand-icon-only">
+        <img src="/assets/ci360-logo-mark.png" alt="CI360degrees" />
+        <button type="button" className="dashboard-collapse-toggle" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen(open => !open)}>
+          <DashboardIcon name="chevron" />
+        </button>
+      </div>
       <div className="dashboard-nav" role="navigation" aria-label="Dashboard tabs" ref={navRef => (containerRef.current = navRef)} onKeyDown={onKeyDown} tabIndex={0}>
         {tabs.map(([id, label]) => (
           <SidebarItem key={id} id={id} label={label} active={tab === id} onActivate={goTo} icon={id === 'overview' ? 'overview' : id} description={/* fallback */ 'Open section'} count={undefined} />

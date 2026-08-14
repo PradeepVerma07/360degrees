@@ -258,6 +258,53 @@ html,body,#root{width:100%;max-width:100%;overflow-x:hidden}
   .client-mobile-attention-item>span{width:40px;height:40px;border-radius:14px;background:#fff2dd;color:#d27a00;display:grid;place-items:center}.client-mobile-attention-item .dashboard-icon{width:18px;height:18px}.client-mobile-attention-item b{display:grid;gap:4px;min-width:0}.client-mobile-attention-item strong{font-size:14px;color:#101f3f;line-height:1.25;overflow-wrap:anywhere}.client-mobile-attention-item small{font-size:11px;color:#667085;line-height:1.3}
   .client-mobile-bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:110;display:flex;align-items:flex-start;justify-content:space-around;gap:2px;min-height:82px;margin:0;padding:10px 10px calc(10px + env(safe-area-inset-bottom));border:0;border-radius:24px 24px 0 0;background:#fff;box-shadow:0 -12px 36px rgba(16,32,68,.13)}
   .client-mobile-bottom-nav button{position:relative;min-height:58px!important;flex:1;padding:4px 2px!important;border:0!important;border-radius:16px!important;background:transparent!important;color:#3e4859!important;display:grid!important;justify-items:center;align-content:center;gap:4px;font-size:10px;font-weight:900}
+
+/* Universal dashboard sidebar behavior (collapsed / expanded / hover overlay) */
+.dashboard-shell .dashboard-sidebar{
+  display:flex;
+  flex-direction:column;
+  height:100vh;
+  transition:width 180ms ease, transform 180ms ease;
+  width:250px; /* default expanded width */
+  min-width:0;
+}
+.dashboard-shell .dashboard-brand-icon-only{flex:0 0 auto;position:sticky;top:0;z-index:3;padding-bottom:12px}
+.dashboard-shell .dashboard-nav{flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;-ms-overflow-style:none}
+.dashboard-shell .dashboard-nav::-webkit-scrollbar{display:none}
+.dashboard-shell .dashboard-sidebar-footer{flex-shrink:0}
+
+/* Collapsed (icons only) */
+.dashboard-shell:not(.sidebar-open) .dashboard-sidebar{
+  width:76px;
+}
+.dashboard-shell:not(.sidebar-open) .dashboard-sidebar .dashboard-nav button span{display:none}
+.dashboard-shell:not(.sidebar-open) .dashboard-sidebar .dashboard-sidebar-profile div{display:none}
+.dashboard-shell:not(.sidebar-open) .dashboard-sidebar .dashboard-sidebar-logout span{display:none}
+
+/* Ensure main area reserves space for collapsed or expanded sidebar */
+.dashboard-shell.sidebar-open .dashboard-main{margin-left:250px}
+.dashboard-shell:not(.sidebar-open) .dashboard-main{margin-left:76px}
+
+/* Hover-to-temporarily expand for pointer devices, overlaying content */
+@media (hover: hover) and (pointer: fine) {
+  .dashboard-shell:not(.sidebar-open) .dashboard-sidebar:hover{
+    width:250px;
+    position:fixed;
+    left:0;
+    top:0;
+    bottom:0;
+    z-index:120;
+    box-shadow:18px 0 50px rgba(16,32,68,.18);
+  }
+  /* show labels while hovered */
+  .dashboard-shell:not(.sidebar-open) .dashboard-sidebar:hover .dashboard-nav button span{display:block}
+  .dashboard-shell:not(.sidebar-open) .dashboard-sidebar:hover .dashboard-sidebar-profile div{display:block}
+}
+
+/* collapse toggle button styling inside brand area */
+.dashboard-collapse-toggle{margin-left:auto;background:transparent;border:0;color:inherit;display:grid;place-items:center;min-width:40px;min-height:40px;border-radius:8px}
+.dashboard-collapse-toggle .dashboard-icon{transform:rotate(0);transition:transform 180ms ease}
+.dashboard-shell.sidebar-open .dashboard-collapse-toggle .dashboard-icon{transform:rotate(180deg)}
   .client-mobile-bottom-nav button.active{color:#1455e8!important}.client-mobile-bottom-nav button.primary-action .client-mobile-nav-icon{width:42px;height:42px;margin-top:-17px;border-radius:999px;background:#1455e8;color:#fff;box-shadow:0 12px 24px rgba(20,85,232,.28)}.client-mobile-nav-icon{position:relative;width:28px;height:28px;display:grid;place-items:center;border-radius:12px}.client-mobile-nav-icon .dashboard-icon{width:20px;height:20px}.client-mobile-nav-icon em{position:absolute;top:-5px;right:-7px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:#1455e8;color:#fff;font-size:9px;font-style:normal;display:grid;place-items:center;border:2px solid #fff}.client-mobile-bottom-nav button.active .client-mobile-nav-icon em{background:#0b3fb7}.client-mobile-bottom-nav b{font-size:10px;line-height:1.1;white-space:nowrap;color:inherit}
 }
 @media(max-width:350px){
