@@ -275,6 +275,10 @@ function Login({ onLogin }) {
     }, [theme]);
     const portalCopy = loginPortalOptions[portal];
     const showPortalPicker = portal !== 'admin';
+    const portalChoices = [
+        { value: 'team', label: 'Employee' },
+        { value: 'client', label: 'Client' }
+    ];
     const showMode = next => {
         setMode(next);
         if (next === 'login')
@@ -284,17 +288,14 @@ function Login({ onLogin }) {
             _jsxs("div", { className: "auth-utility-bar", children: [
                     showPortalPicker && _jsxs("label", { className: "auth-portal-select", "aria-label": "Choose login portal", children: [
                             _jsx(DashboardIcon, { name: "users" }),
-                            _jsx("select", { value: portal, onChange: event => setPortal(event.target.value), children: [
-                                    _jsx("option", { key: "team", value: "team", children: "Employee" }),
-                                    _jsx("option", { key: "client", value: "client", children: "Client" })
-                                ] })
+                            _jsx("select", { value: portal, onChange: event => setPortal(event.target.value), children: portalChoices.map(choice => _jsx("option", { value: choice.value, children: choice.label }, choice.value)) })
                         ] }),
                     _jsx("button", { type: "button", className: "auth-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) })
                 ] }),
             _jsxs("aside", { className: "auth-story", children: [
                     _jsx(AuthLogo, {}),
                     _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: portalCopy.storyTitle }), _jsx("p", { children: portalCopy.storyBody })] }),
-                    _jsx("div", { className: "auth-orbits", "aria-hidden": "true", children: [_jsx("span", {}), _jsx("span", {}), _jsx("span", {})] }),
+                    _jsx("div", { className: "auth-orbits", "aria-hidden": "true", children: ['one', 'two', 'three'].map(item => _jsx("span", {}, item)) }),
                     _jsx("div", { className: "auth-story-foot", children: portalCopy.foot })
                 ] }),
             _jsx("main", { className: "auth-panel", children: _jsxs("div", { className: "auth-card", children: [
