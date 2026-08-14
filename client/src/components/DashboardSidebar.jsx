@@ -42,22 +42,29 @@ export default function DashboardSidebar({ tabs, tab, goTo, dashboardProfile, av
     <aside id="dashboard-sidebar" className="dashboard-sidebar" aria-label="Dashboard navigation">
       <div className="dashboard-brand dashboard-brand-icon-only">
         <img src="/assets/ci360-logo-mark.png" alt="CI360degrees" />
+        <div className="dashboard-brand-copy">
+          <strong>CI360degrees</strong>
+          <small>Realtime Job Board</small>
+        </div>
         <button type="button" className="dashboard-collapse-toggle" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen(open => !open)}>
           <DashboardIcon name="chevron" />
         </button>
       </div>
+
       <div className="dashboard-nav" role="navigation" aria-label="Dashboard tabs" ref={navRef => (containerRef.current = navRef)} onKeyDown={onKeyDown} tabIndex={0}>
+        <button type="button" className="dashboard-sidebar-primary" onClick={() => goTo('submit')}>
+          <DashboardIcon name="plus" />
+          <span>+ Submit a Job</span>
+        </button>
+
         {tabs.map(([id, label]) => (
-          <SidebarItem key={id} id={id} label={label} active={tab === id} onActivate={goTo} icon={id === 'overview' ? 'overview' : id} description={/* fallback */ 'Open section'} count={undefined} />
+          <SidebarItem key={id} id={id} label={label} active={tab === id} onActivate={goTo} icon={id === 'overview' ? 'overview' : id} description={'Open section'} count={undefined} />
         ))}
       </div>
+
+      <div className="dashboard-sidebar-spacer" aria-hidden="true" />
+
       <div className="dashboard-sidebar-footer">
-        <div className="dashboard-role-card">
-          <DashboardIcon name={dashboardProfile.sidebarAction === 'support' ? 'support' : 'shield'} />
-          <b>{dashboardProfile.sidebarTitle}</b>
-          <p>{dashboardProfile.sidebarBody}</p>
-          <button type="button" onClick={runSidebarAction}>{dashboardProfile.sidebarButton}</button>
-        </div>
         <div className="dashboard-sidebar-profile">
           <span className="dashboard-avatar">{avatarInitials}</span>
           <div><b>{displayName}</b><small>{displayRole}</small></div>

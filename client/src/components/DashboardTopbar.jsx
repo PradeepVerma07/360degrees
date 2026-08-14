@@ -8,18 +8,23 @@ export default function DashboardTopbar({ activeLabel, dashboardProfile, sidebar
         <button type="button" className="dashboard-menu" aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-controls="dashboard-sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(open => !open)}>
           <DashboardIcon name="menu" />
         </button>
-        <div>
+        <div className="dashboard-page-heading">
           <span>{activeLabel}</span>
-          <strong>{dashboardProfile.workspaceTitle}</strong>
+          <strong>{activeLabel === 'Overview' ? 'Realtime visibility across jobs, workload and delivery timelines.' : 'CI360 Job Board'}</strong>
         </div>
       </div>
-      <form className="dashboard-search" role="search" onSubmit={submitSearch}>
-        <DashboardIcon name="search" />
-        <input type="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search..." aria-label="Search jobs" />
-        <button type="submit" aria-label="Open job search"><DashboardIcon name="search" /></button>
-      </form>
-      <div className="dashboard-user-area">
-        <button type="button" className="dashboard-theme-toggle" aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}><DashboardIcon name={theme === 'dark' ? 'sun' : 'moon'} /></button>
+
+      <div className="dashboard-topbar-right">
+        <div className="dashboard-realtime-status">
+          <span className="dashboard-status-dot" aria-hidden="true" />
+          <span>Realtime Connected</span>
+        </div>
+
+        <div className="dashboard-workspace">
+          <small>Workspace</small>
+          <strong>CI360 Job Board</strong>
+        </div>
+
         <div className="dashboard-notification-wrap">
           <button type="button" className="dashboard-notification" aria-label="Open notifications" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen(open => !open); setUserMenuOpen(false); }}>
             <DashboardIcon name="bell" />{unreadNotifications > 0 && <span>{unreadNotifications}</span>}
@@ -32,11 +37,10 @@ export default function DashboardTopbar({ activeLabel, dashboardProfile, sidebar
             </div>
           )}
         </div>
+
         <div className="dashboard-user-menu-wrap">
           <button type="button" className="dashboard-user-button" aria-expanded={userMenuOpen} onClick={() => { setUserMenuOpen(open => !open); setNotificationOpen(false); }}>
             <span className="dashboard-avatar">{dashboardProfile?.avatarInitials || ''}</span>
-            <span>{dashboardProfile?.displayName || ''}</span>
-            <DashboardIcon name="chevron" />
           </button>
           {userMenuOpen && (
             <div className="dashboard-user-menu" role="menu">

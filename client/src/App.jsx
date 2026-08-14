@@ -285,8 +285,8 @@ function Login({ onLogin }) {
                     showPortalPicker && _jsxs("label", { className: "auth-portal-select", "aria-label": "Choose login portal", children: [
                             _jsx(DashboardIcon, { name: "users" }),
                             _jsx("select", { value: portal, onChange: event => setPortal(event.target.value), children: [
-                                    _jsx("option", { value: "team", children: "Employee" }),
-                                    _jsx("option", { value: "client", children: "Client" })
+                                    _jsx("option", { key: "team", value: "team", children: "Employee" }),
+                                    _jsx("option", { key: "client", value: "client", children: "Client" })
                                 ] })
                         ] }),
                     _jsx("button", { type: "button", className: "auth-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) })
@@ -306,8 +306,14 @@ function Login({ onLogin }) {
                     ] }) })
         ] });
 }
-function AuthLogo() {
-    return _jsx("div", { className: "auth-logo auth-logo-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "Workspace" }) });
+function AuthLogo({ showWordmark = true }) {
+    return _jsxs("div", { className: "auth-logo auth-logo-icon-only", children: [
+            _jsx("img", { src: ci360LogoMark, alt: "CI360degrees" }),
+            showWordmark && _jsxs("div", { className: "auth-logo-wordmark", children: [
+                    _jsx("strong", { children: "CI360degrees" }),
+                    _jsx("small", { children: "Realtime Job Board" })
+                ] })
+        ] });
 }
 function LoadingScreen({ message, hasError = false }) {
     return _jsxs("div", { className: `app-loading ${hasError ? 'has-error' : ''}`, role: "status", "aria-live": "polite", children: [
@@ -320,9 +326,6 @@ function LoadingScreen({ message, hasError = false }) {
                     _jsx("small", { children: message })
                 ] })
         ] });
-}
-function GoogleIcon() {
-    return _jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06L5.84 9.9C6.71 7.3 9.14 5.38 12 5.38z" })] });
 }
 function LoginForm({ onLogin, onMode, portal }) {
     const [id, setId] = useState('');
@@ -344,15 +347,13 @@ function LoginForm({ onLogin, onMode, portal }) {
     };
     return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
             _jsx("div", { className: "auth-kicker", children: portalCopy.kicker }),
-            _jsx("h2", { children: portalCopy.title }),
+            _jsx("h2", { children: "Job Board Sign In" }),
             _jsx("p", { className: "auth-subtitle", children: portalCopy.subtitle }),
-            _jsxs("label", { children: ["Email or User ID", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or workspace ID", required: true })] }),
+            _jsxs("label", { children: ["ID", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "Enter your workspace ID", required: true })] }),
             _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
             _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
             error && _jsx("div", { className: "alert error", children: error }),
-            _jsx("button", { className: "primary auth-primary", children: "Login" }),
-            _jsxs("div", { className: "auth-divider", children: [_jsx("span", {}), "OR", _jsx("span", {})] }),
-            _jsxs("button", { type: "button", className: "google-button", onClick: () => setError('Google sign in requires OAuth credentials before it can be enabled.'), children: [_jsx(GoogleIcon, {}), "Continue with Google"] }),
+            _jsx("button", { className: "primary auth-primary", children: "Log In" }),
             _jsxs("p", { className: "auth-footnote", children: ["Protected by secure authentication.", _jsx("br", {}), _jsx("a", { href: "#privacy", children: "Privacy Policy" }), " \u00B7 ", _jsx("a", { href: "#terms", children: "Terms" })] })
         ] });
 }
@@ -411,7 +412,6 @@ function AdminSignup({ onMode }) {
             _jsxs("div", { className: "auth-grid", children: [_jsxs("label", { children: ["Email", _jsx("input", { type: "email", required: true })] }), _jsxs("label", { children: ["Phone Number", _jsx("input", { type: "tel", required: true })] })] }),
             _jsxs("div", { className: "auth-grid", children: [_jsxs("label", { children: ["Password", _jsx("input", { type: "password", required: true })] }), _jsxs("label", { children: ["Confirm Password", _jsx("input", { type: "password", required: true })] })] }),
             _jsxs("label", { children: ["Role", _jsx("input", { value: "Admin", readOnly: true })] }),
-            _jsxs("button", { type: "button", className: "google-button", children: [_jsx(GoogleIcon, {}), "Link Google Account (Optional)"] }),
             message && _jsx("div", { className: "alert success", children: message }),
             _jsx("button", { className: "primary auth-primary", children: "Create Admin Account" })
         ] });
@@ -599,31 +599,18 @@ function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTic
         }
         goTo(dashboardProfile.sidebarTab || 'overview');
     };
-        return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${visualRoleKey} ${forceMobileDashboard ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
-            _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
-            _jsx(DashboardSidebar, { tabs: tabs, tab: tab, goTo: goTo, dashboardProfile: dashboardProfile, avatarInitials: avatarInitials, displayName: displayName, displayRole: displayRole, logout: logout, runSidebarAction: runSidebarAction, sidebarOpen: sidebarOpen, setSidebarOpen: setSidebarOpen }),
-            _jsxs("section", { className: "dashboard-main", children: [
-                showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
-                _jsx(DashboardTopbar, { activeLabel: activeLabel, dashboardProfile: { workspaceTitle: dashboardProfile.workspaceTitle, displayName, displayRole, avatarInitials }, sidebarOpen: sidebarOpen, setSidebarOpen: setSidebarOpen, searchTerm: searchTerm, setSearchTerm: setSearchTerm, submitSearch: submitSearch, unreadNotifications: unreadNotifications, notificationOpen: notificationOpen, setNotificationOpen: setNotificationOpen, notificationItems: notificationItems, logout: logout, userMenuOpen: userMenuOpen, setUserMenuOpen: setUserMenuOpen, theme: theme, setTheme: setTheme, goTo: goTo }),
-                error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
-                _jsx("div", { className: "dashboard-content", children: children })
-            ] }),
-            _jsxs("section", { className: "dashboard-main", children: [
-                    showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
-                    _jsxs("div", { className: "dashboard-topbar", children: [
-                            _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: dashboardProfile.workspaceTitle })] })] }),
-                            _jsxs("form", { className: "dashboard-search", role: "search", onSubmit: submitSearch, children: [_jsx(DashboardIcon, { name: "search" }), _jsx("input", { type: "search", value: searchTerm, onChange: event => setSearchTerm(event.target.value), placeholder: "Search...", "aria-label": "Search jobs" }), _jsx("button", { type: "submit", "aria-label": "Open job search", children: _jsx(DashboardIcon, { name: "search" }) })] }),
-                            _jsxs("div", { className: "dashboard-user-area", children: [
-                                    _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
-                                    _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open notifications", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), unreadNotifications > 0 && _jsx("span", { children: unreadNotifications })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Notifications", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Notifications" }), _jsxs("span", { children: [unreadNotifications, " unread update", unreadNotifications === 1 ? '' : 's'] })] }), notificationItems.length ? _jsx("div", { className: "dashboard-activity-list compact", children: notificationItems.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: item.support })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No notifications", body: "Job, ticket, and team chat updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo(tabs.some(([id]) => id === 'notifications') ? 'notifications' : 'overview'), children: "Open Notifications" })] })] }),
-                                    _jsxs("div", { className: "dashboard-user-menu-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: avatarInitials }), _jsx("span", { children: displayName }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: displayName }), _jsx("span", { children: displayRole })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
-                                ] })
-                        ] }),
-                    error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
-                    _jsx("div", { className: "dashboard-content", children: children })
-                ] }),
-            showMobileDashboardChrome && _jsx(ClientMobileBottomNav, { tabs: tabs, tab: tab, goTo: goTo, notificationCount: unreadNotifications })
-        ] });
+
+    return _jsxs("main", { className: `dashboard-shell theme-${theme} role-${visualRoleKey} ${forceMobileDashboard ? 'app-mobile-browser' : ''} ${sidebarOpen ? 'sidebar-open' : ''}`, children: [
+        _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
+        _jsx(DashboardSidebar, { tabs: tabs, tab: tab, goTo: goTo, dashboardProfile: dashboardProfile, avatarInitials: avatarInitials, displayName: displayName, displayRole: displayRole, logout: logout, runSidebarAction: runSidebarAction, sidebarOpen: sidebarOpen, setSidebarOpen: setSidebarOpen }),
+        _jsxs("section", { className: "dashboard-main", children: [
+            showMobileDashboardChrome && _jsx(ClientMobileDashboardHeader, { displayName: displayName, avatarInitials: avatarInitials, notificationCount: unreadNotifications, goTo: goTo }),
+            _jsx(DashboardTopbar, { activeLabel: activeLabel, dashboardProfile: { workspaceTitle: dashboardProfile.workspaceTitle, displayName, displayRole, avatarInitials }, sidebarOpen: sidebarOpen, setSidebarOpen: setSidebarOpen, searchTerm: searchTerm, setSearchTerm: setSearchTerm, submitSearch: submitSearch, unreadNotifications: unreadNotifications, notificationOpen: notificationOpen, setNotificationOpen: setNotificationOpen, notificationItems: notificationItems, logout: logout, userMenuOpen: userMenuOpen, setUserMenuOpen: setUserMenuOpen, theme: theme, setTheme: setTheme, goTo: goTo }),
+            error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
+            _jsx("div", { className: "dashboard-content", children: children })
+        ] }),
+        showMobileDashboardChrome && _jsx(ClientMobileBottomNav, { tabs: tabs, tab: tab, goTo: goTo, notificationCount: unreadNotifications })
+    ] });
 }
 function DashboardStat({ tone, icon, value, label, support }) {
     return _jsxs("article", { className: `dashboard-stat ${tone}`, children: [_jsx("span", { className: "dashboard-stat-icon", children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("div", { children: [_jsx("strong", { children: value }), _jsx("span", { children: label }), _jsx("small", { children: support })] })] });
