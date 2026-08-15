@@ -1,1538 +1,2082 @@
-import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
-import ci360LogoMark from './assets/ci360-logo-mark.png';
 import './styles.css';
-const statusLabels = { submitted: 'Submitted', under_review: 'Under Review', in_progress: 'In Progress', waiting_client: 'Waiting for Client', revision_requested: 'Revision Requested', on_hold: 'On Hold', completed: 'Completed', cancelled: 'Cancelled' };
-const fmt = (value) => new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const openStatuses = new Set(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold']);
+
+const statusLabels = {
+  submitted: 'Submitted',
+  under_review: 'Under Review',
+  in_progress: 'In Progress',
+  waiting_client: 'Waiting for Client',
+  revision_requested: 'Revision Requested',
+  on_hold: 'On Hold',
+  completed: 'Completed',
+  cancelled: 'Cancelled'
+};
+
+const statusBadgeClasses = {
+  submitted: 'badge-status-submitted',
+  under_review: 'badge-status-under-review',
+  in_progress: 'badge-status-in-progress',
+  waiting_client: 'badge-status-waiting-client',
+  revision_requested: 'badge-status-revision-requested',
+  on_hold: 'badge-status-on-hold',
+  completed: 'badge-status-completed',
+  cancelled: 'badge-status-cancelled'
+};
+
+const priorityBadgeClasses = {
+  Urgent: 'badge-priority-urgent',
+  High: 'badge-priority-high',
+  Medium: 'badge-priority-medium',
+  Low: 'badge-priority-low'
+};
+
 const priorityRank = { Urgent: 0, High: 1, Medium: 2, Low: 3 };
+const openStatuses = new Set(['submitted', 'under_review', 'in_progress', 'waiting_client', 'revision_requested', 'on_hold']);
 const isPendingJob = job => openStatuses.has(job.status);
 const isCompletedJob = job => job.status === 'completed';
-const dateForMonth = job => job.dateCompleted || job.updatedAt || job.datePosted;
-const monthKey = value => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? 'Unknown' : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const formatDisplayDate = value => {
+  if (!value) return 'N/A';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
-const monthLabel = key => {
-    if (key === 'Unknown')
-        return 'Unknown date';
-    const [year, month] = key.split('-').map(Number);
-    return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
+const formatDisplayDateTime = value => {
+  if (!value) return 'N/A';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
 };
-const groupByMonth = (jobs, getDate) => jobs.reduce((groups, job) => {
-    const key = monthKey(getDate(job));
-    return { ...groups, [key]: [...(groups[key] || []), job] };
-}, {});
-const sortedMonthKeys = groups => Object.keys(groups).sort().reverse();
-const clientNameFor = (data, id) => data.clients.find(c => c.id === id)?.name || id;
-const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
-const canAny = (data, permissions) => permissions.some(permission => can(data, permission));
-const knownDashboardTabs = {
-    overview: 'Overview',
-    submit: 'Submit a Job',
-    jobs: 'Job Board',
-    chat: 'Team Chat',
-    settings: 'TAT Standards',
-    clients: 'Clients',
-    employees: 'Employees',
-    users: 'Users & Roles',
-    support: 'Support Tickets',
-    audit: 'Audit Logs'
-};
-const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['chat', 'Team Chat'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']]
-    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['chat', 'Team Chat'], ['support', 'Support Tickets']];
-const initialAuthMode = () => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('reset_token'))
-        return 'reset';
-    if (params.has('admin_invite') || params.has('admin_code') || window.location.hash === '#admin-signup')
-        return 'signup';
-    return 'login';
-};
-const passwordChecks = password => ({
-    length: password.length >= 8,
-    upper: /[A-Z]/.test(password),
-    lower: /[a-z]/.test(password),
-    number: /\d/.test(password),
-    special: /[^A-Za-z0-9]/.test(password)
-});
-const passwordScore = password => Object.values(passwordChecks(password)).filter(Boolean).length;
-export default function App() {
-    const [auth, setAuth] = useState(Boolean(getToken()));
-    const [data, setData] = useState(null);
-    const [error, setError] = useState('');
-    const [tab, setTab] = useState('overview');
-    const [supportCreateSignal, setSupportCreateSignal] = useState(0);
-    const load = useCallback(async () => { try {
-        setData(await api.bootstrap());
-        setError('');
-    }
-    catch (e) {
-        if (e.message.includes('Session')) {
-            setToken(null);
-            setAuth(false);
-        }
-        else
-            setError(e.message);
-    } }, []);
-    useEffect(() => { if (!auth)
-        return; load(); const socket = io(API_URL || undefined); socket.on('data:changed', load); socket.on('permissions:updated', load); return () => { socket.disconnect(); }; }, [auth, load]);
-    if (!auth)
-        return _jsx(Login, { onLogin: () => setAuth(true) });
-    if (!data)
-        return _jsx("div", { className: "center", children: error || 'Loading workspace...' });
-    const moduleTabs = (data.modules || [])
-        .filter(module => knownDashboardTabs[module.id])
-        .map(module => {
-            if (module.id === 'jobs')
-                return [module.id, can(data, 'jobs.view_all') ? 'Job Board' : 'My Jobs'];
-            if (module.id === 'clients')
-                return [module.id, 'Clients'];
-            return [module.id, module.label || knownDashboardTabs[module.id]];
-        });
-    const tabs = Array.isArray(data.modules) ? moduleTabs : fallbackModulesFor(data);
-    const activeTab = tabs.some(([id]) => id === tab) ? tab : (tabs[0]?.[0] || null);
-    const logout = () => { setToken(null); setAuth(false); setData(null); };
-    const openSupportTicketForm = () => {
-        setSupportCreateSignal(value => value + 1);
-        setTab('support');
-    };
-    const currentContent = !activeTab
-        ? _jsxs('section', { className: 'card access-denied', children: [_jsx('h2', { children: 'No module access' }), _jsx('p', { children: 'Your account is active, but no dashboard modules are currently assigned. Contact a Super Admin for access.' })] })
-        : activeTab === 'overview' && can(data, 'dashboard.view')
-            ? _jsx(Overview, { data: data, setTab: setTab })
-        : activeTab === 'submit' && can(data, 'jobs.create')
-            ? _jsx(Submit, { data: data, reload: load })
-            : activeTab === 'jobs' && canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'])
-                ? _jsx(Jobs, { data: data, reload: load })
-                : activeTab === 'chat' && canAny(data, ['chat.view', 'chat.send'])
-                    ? _jsx(TeamChat, { data: data, reload: load })
-                : activeTab === 'settings' && canAny(data, ['settings.view', 'settings.edit'])
-                    ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
-                    : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
-                        ? _jsx(Clients, { data: data, reload: load })
-                        : activeTab === 'employees' && canAny(data, ['employees.view', 'employees.create', 'employees.edit'])
-                            ? _jsx(Employees, { data: data, reload: load })
-                            : activeTab === 'users' && canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role', 'roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'departments.manage', 'designations.manage'])
-                                ? _jsx(UsersRoles, { data: data, reload: load })
-                                : activeTab === 'support' && canAny(data, ['support.view_all', 'support.view_own', 'support.create'])
-                                    ? _jsx(SupportTickets, { data: data, reload: load, openCreateSignal: supportCreateSignal })
-                                    : activeTab === 'audit' && can(data, 'audit.view')
-                                        ? _jsx(AuditLogs, {})
-                                        : _jsxs('section', { className: 'card access-denied', children: [_jsx('h2', { children: 'Access denied' }), _jsx('p', { children: 'You do not have permission to open this module.' })] });
-    return _jsx(DashboardShell, { data: data, tabs: tabs, tab: activeTab, setTab: setTab, logout: logout, error: error, openSupportTicketForm: openSupportTicketForm, children: currentContent });
-}
-function Login({ onLogin }) {
-    const [mode, setMode] = useState(initialAuthMode);
-    const showMode = next => {
-        setMode(next);
-        if (next === 'login')
-            window.history.replaceState(null, '', window.location.pathname);
-    };
-    return _jsxs("div", { className: "auth-shell", children: [
-            _jsxs("aside", { className: "auth-story", children: [
-                    _jsx(AuthLogo, {}),
-                    _jsxs("div", { className: "auth-story-copy", children: [_jsx("h1", { children: "Work requests, organised beautifully." }), _jsx("p", { children: "Submit jobs, follow turnaround times, collaborate with the team, and manage your projects from one secure workspace." })] }),
-                    _jsx("div", { className: "auth-orbits", "aria-hidden": "true", children: [_jsx("span", {}), _jsx("span", {}), _jsx("span", {})] }),
-                    _jsx("div", { className: "auth-story-foot", children: "Strategy \u2022 Creative \u2022 Technology" })
-                ] }),
-            _jsx("main", { className: "auth-panel", children: _jsxs("div", { className: "auth-card", children: [
-                        _jsx("div", { className: "auth-mobile-logo", children: _jsx(AuthLogo, {}) }),
-                        mode === 'login' && _jsx(LoginForm, { onLogin: onLogin, onMode: showMode }),
-                        mode === 'forgot' && _jsx(ForgotPassword, { onMode: showMode }),
-                        mode === 'reset' && _jsx(ResetPassword, { onMode: showMode }),
-                        mode === 'signup' && _jsx(AdminSignup, { onMode: showMode })
-                    ] }) })
-        ] });
-}
-function AuthLogo() {
-    return _jsx("div", { className: "auth-logo auth-logo-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "Workspace" }) });
-}
-function GoogleIcon() {
-    return _jsxs("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", children: [_jsx("path", { fill: "#4285F4", d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" }), _jsx("path", { fill: "#34A853", d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" }), _jsx("path", { fill: "#FBBC05", d: "M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" }), _jsx("path", { fill: "#EA4335", d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06L5.84 9.9C6.71 7.3 9.14 5.38 12 5.38z" })] });
-}
-function LoginForm({ onLogin, onMode }) {
-    const [id, setId] = useState('');
-    const [password, setPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
-    const [remember, setRemember] = useState(true);
-    const [error, setError] = useState('');
-    const submit = async (e) => {
-        e.preventDefault();
-        try {
-            const r = await api.login(id.trim(), password);
-            setToken(r.token, remember);
-            onLogin();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return _jsxs("form", { className: "auth-form", onSubmit: submit, children: [
-            _jsx("div", { className: "auth-kicker", children: "CLIENT WORKSPACE" }),
-            _jsx("h2", { children: "Welcome Back" }),
-            _jsx("p", { className: "auth-subtitle", children: "Sign in to access your workspace." }),
-            _jsxs("label", { children: ["Email or User ID", _jsx("input", { type: "text", value: id, onChange: e => setId(e.target.value), autoComplete: "username", placeholder: "name@company.com or workspace ID", required: true })] }),
-            _jsxs("label", { children: ["Password", _jsxs("div", { className: "password-field", children: [_jsx("input", { type: showPassword ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), autoComplete: "current-password", required: true }), _jsx("button", { type: "button", onClick: () => setShowPassword(current => !current), children: showPassword ? 'Hide' : 'Show' })] })] }),
-            _jsxs("div", { className: "auth-row", children: [_jsxs("label", { className: "remember-row", children: [_jsx("input", { type: "checkbox", checked: remember, onChange: e => setRemember(e.target.checked) }), "Remember me"] }), _jsx("button", { type: "button", className: "text-button", onClick: () => onMode('forgot'), children: "Forgot Password" })] }),
-            error && _jsx("div", { className: "alert error", children: error }),
-            _jsx("button", { className: "primary auth-primary", children: "Log in Securely" }),
-            _jsxs("div", { className: "auth-divider", children: [_jsx("span", {}), "OR", _jsx("span", {})] }),
-            _jsxs("button", { type: "button", className: "google-button", onClick: () => setError('Google sign in requires OAuth credentials before it can be enabled.'), children: [_jsx(GoogleIcon, {}), "Continue with Google"] }),
-            _jsxs("p", { className: "auth-footnote", children: ["Protected by secure authentication.", _jsx("br", {}), _jsx("a", { href: "#privacy", children: "Privacy Policy" }), " \u00B7 ", _jsx("a", { href: "#terms", children: "Terms" })] })
-        ] });
-}
-function ForgotPassword({ onMode }) {
-    return (
-        <div className="auth-form access-denied">
-            <div className="auth-kicker">PASSWORD RECOVERY</div>
-            <h2>Password recovery</h2>
-            <p className="auth-subtitle">Self-service password recovery is not enabled for this workspace. Contact an authorised administrator to reset your access securely.</p>
-            <button type="button" className="primary auth-primary" onClick={() => onMode('login')}>Back to Login</button>
-        </div>
-    );
-}
-function ResetPassword({ onMode }) {
-    return (
-        <div className="auth-form access-denied">
-            <div className="auth-kicker">SECURE RESET</div>
-            <h2>Reset link unavailable</h2>
-            <p className="auth-subtitle">This deployment does not yet have a verified reset-token service. No password will be changed from this screen.</p>
-            <button type="button" className="primary auth-primary" onClick={() => onMode('login')}>Return to Login</button>
-        </div>
-    );
-}
-function AdminSignup({ onMode }) {
-    return (
-        <div className="auth-form access-denied">
-            <div className="auth-kicker">RESTRICTED ACCESS</div>
-            <h2>Admin signup is disabled</h2>
-            <p className="auth-subtitle">Admin and Employee accounts must be created by an authorised Super Admin from the internal Users & Roles or Employees module.</p>
-            <button type="button" className="primary auth-primary" onClick={() => onMode('login')}>Return to Login</button>
-        </div>
-    );
-}
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', chat: 'chat', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support', audit: 'document' };
-const dashboardTabDescriptions = {
-    overview: 'Workspace summary',
-    submit: 'Create a request',
-    jobs: 'Browse every job',
-    chat: 'Team messaging & channels',
-    settings: 'Turnaround rules',
-    clients: 'Client access',
-    employees: 'Internal team',
-    users: 'Roles and access',
-    support: 'Help and tickets',
-    audit: 'Activity history'
-};
-const dashboardDate = value => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime()))
-        return 'Date unavailable';
-    return date.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-};
-const shortDateTime = value => {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime()))
-        return 'Date unavailable';
-    return date.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-};
-const timestamp = value => {
-    const time = new Date(value).getTime();
-    return Number.isNaN(time) ? 0 : time;
-};
-const initialsFor = value => (value || 'User').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'U';
-function DashboardIcon({ name }) {
-    const paths = {
-        overview: ['M4 13h6V4H4z', 'M14 20h6v-9h-6z', 'M4 20h6v-4H4z', 'M14 8h6V4h-6z'],
-        submit: ['M12 5v14', 'M5 12h14', 'M5 4h14v16H5z'],
-        jobs: ['M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2', 'M4 7h16v12H4z', 'M9 12h6'],
-        chat: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', 'M8 10h.01', 'M12 10h.01', 'M16 10h.01'],
-        clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
-        users: ['M16 18a4 4 0 0 0-8 0', 'M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M20 18a3.5 3.5 0 0 0-3-3.45', 'M17 5.3a2.6 2.6 0 0 1 0 5.4'],
-        support: ['M5 18v-5a7 7 0 0 1 14 0v5', 'M5 18h3v-5H5z', 'M16 18h3v-5h-3z', 'M16 19a4 4 0 0 1-8 0'],
-        bell: ['M18 16v-5a6 6 0 0 0-12 0v5l-2 2h16z', 'M10 20a2 2 0 0 0 4 0'],
-        menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
-        chevron: ['M9 6l6 6-6 6'],
-        calendar: ['M7 3v4', 'M17 3v4', 'M4 8h16', 'M5 5h14v16H5z'],
-        plus: ['M12 5v14', 'M5 12h14'],
-        arrow: ['M5 12h14', 'M13 6l6 6-6 6'],
-        total: ['M7 7h10', 'M7 12h10', 'M7 17h10', 'M4 4h16v16H4z'],
-        pending: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v6l4 2'],
-        completed: ['M20 6L9 17l-5-5', 'M21 12a9 9 0 1 1-3.2-6.9'],
-        document: ['M7 3h7l5 5v13H7z', 'M14 3v6h5', 'M10 14h6', 'M10 18h4'],
-        moon: ['M21 14.4A8.6 8.6 0 0 1 9.6 3 7 7 0 1 0 21 14.4z'],
-        sun: ['M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z', 'M12 2v2', 'M12 20v2', 'M4.93 4.93l1.41 1.41', 'M17.66 17.66l1.41 1.41', 'M2 12h2', 'M20 12h2', 'M4.93 19.07l1.41-1.41', 'M17.66 6.34l1.41-1.41']
-    };
-    return _jsx("svg", { className: "dashboard-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.8", strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true", children: (paths[name] || paths.overview).map((d, index) => _jsx("path", { d: d }, index)) });
-}
-function DashboardShell({ data, tabs, tab, setTab, logout, error, openSupportTicketForm, children }) {
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [sidebarPinned, setSidebarPinned] = useState(() => {
-        try {
-            return localStorage.getItem('ci360-sidebar-pinned') !== '0';
-        }
-        catch {
-            return true;
-        }
-    });
-    const [sidebarHovered, setSidebarHovered] = useState(false);
-    const [userMenuOpen, setUserMenuOpen] = useState(false);
-    const [notificationOpen, setNotificationOpen] = useState(false);
-    const [theme, setTheme] = useState(() => {
-        try {
-            return localStorage.getItem('ci360-theme') === 'dark' ? 'dark' : 'light';
-        }
-        catch {
-            return 'light';
-        }
-    });
-    useEffect(() => {
-        try {
-            localStorage.setItem('ci360-theme', theme);
-        }
-        catch { }
-    }, [theme]);
-    useEffect(() => {
-        try {
-            localStorage.setItem('ci360-sidebar-pinned', sidebarPinned ? '1' : '0');
-        }
-        catch { }
-    }, [sidebarPinned]);
-    const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
-    const urgentJobs = data.jobs.filter(job => isPendingJob(job) && job.priority === 'Urgent').length;
-    const notificationCount = Math.min(openTickets + urgentJobs, 99);
-    const activities = recentActivityItems(data);
-    const activeLabel = tabs.find(([id]) => id === tab)?.[1] || 'Dashboard';
-    const goTo = id => {
-        setTab(id);
-        setSidebarOpen(false);
-        setUserMenuOpen(false);
-        setNotificationOpen(false);
-        window.requestAnimationFrame(() => {
-            document.querySelector('.dashboard-main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-    };
-    const sidebarExpanded = sidebarPinned || sidebarHovered;
-    const toggleSidebarPin = () => {
-        setSidebarPinned(current => !current);
-        setSidebarHovered(false);
-        setUserMenuOpen(false);
-    };
-    return _jsxs("main", { className: `dashboard-shell theme-${theme} ${sidebarOpen ? 'sidebar-open' : ''} ${sidebarPinned ? 'sidebar-pinned' : 'sidebar-collapsed'} ${sidebarHovered ? 'sidebar-hovered' : ''}`, children: [
-            _jsx("button", { type: "button", className: "dashboard-backdrop", "aria-label": "Close navigation", onClick: () => setSidebarOpen(false) }),
-            _jsxs("aside", { id: "dashboard-sidebar", className: `dashboard-sidebar ${sidebarExpanded ? 'is-expanded' : 'is-collapsed'}`, "aria-label": "Dashboard navigation", onMouseEnter: () => { if (!sidebarPinned) setSidebarHovered(true); }, onMouseLeave: () => { if (!sidebarPinned) { setSidebarHovered(false); setUserMenuOpen(false); } }, children: [
-                    _jsx("div", { className: "dashboard-brand dashboard-brand-icon-only", children: _jsx("img", { src: ci360LogoMark, alt: "Workspace" }) }),
-                    _jsxs("button", { type: "button", className: "dashboard-sidebar-toggle", "aria-label": sidebarPinned ? "Collapse sidebar" : "Expand sidebar", "aria-pressed": sidebarPinned, onClick: toggleSidebarPin, children: [_jsx(DashboardIcon, { name: "chevron" }), _jsx("span", { children: sidebarPinned ? "Collapse" : "Pin sidebar" })] }),
-                    _jsx("div", { className: "dashboard-nav", role: "navigation", "aria-label": "Dashboard tabs", children: tabs.map(([id, label]) => _jsxs("button", { type: "button", className: tab === id ? 'active' : '', onClick: () => goTo(id), "aria-current": tab === id ? 'page' : undefined, title: label, children: [_jsx(DashboardIcon, { name: dashboardTabIcons[id] || 'overview' }), _jsxs("span", { children: [_jsx("b", { children: label }), _jsx("small", { children: dashboardTabDescriptions[id] || 'Open section' })] })] }, id)) }),
-                    _jsxs("div", { className: "dashboard-sidebar-footer", children: [
-                            _jsxs("button", { type: "button", className: "dashboard-quick-support", title: "Create support ticket", onClick: () => { setSidebarOpen(false); setUserMenuOpen(false); setNotificationOpen(false); openSupportTicketForm(); }, children: [_jsx(DashboardIcon, { name: "support" }), _jsx("span", { children: "Create Ticket" })] }),
-                            _jsxs("div", { className: "dashboard-sidebar-profile-wrap", children: [
-                                    _jsxs("button", { type: "button", className: "dashboard-sidebar-profile", "aria-label": `Open profile menu for ${data.user.name}`, "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsxs("span", { className: "dashboard-sidebar-profile-text", children: [_jsx("b", { children: data.user.name }), _jsx("small", { children: data.user.roleName || data.user.accountType || 'Workspace user' })] }), _jsx(DashboardIcon, { name: "chevron" })] }),
-                                    userMenuOpen && _jsxs("div", { className: "dashboard-user-menu dashboard-sidebar-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.roleName || data.user.accountType || 'Workspace user' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })
-                                ] })
-                        ] })
-                ] }),
-            _jsxs("section", { className: "dashboard-main", children: [
-                    _jsxs("div", { className: "dashboard-topbar", children: [
-                            _jsxs("div", { className: "dashboard-topbar-left", children: [_jsx("button", { type: "button", className: "dashboard-menu", "aria-label": sidebarOpen ? "Close navigation" : "Open navigation", "aria-controls": "dashboard-sidebar", "aria-expanded": sidebarOpen, onClick: () => setSidebarOpen(open => !open), children: _jsx(DashboardIcon, { name: "menu" }) }), _jsxs("div", { children: [_jsx("span", { children: activeLabel }), _jsx("strong", { children: "Workspace" })] })] }),
-                            _jsxs("div", { className: "dashboard-user-area", children: [
-                                    _jsx("button", { type: "button", className: "dashboard-theme-toggle", "aria-label": theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode', onClick: () => setTheme(current => current === 'dark' ? 'light' : 'dark'), children: _jsx(DashboardIcon, { name: theme === 'dark' ? 'sun' : 'moon' }) }),
-                                    _jsxs("div", { className: "dashboard-notification-wrap", children: [_jsxs("button", { type: "button", className: "dashboard-notification", "aria-label": "Open latest activity", "aria-expanded": notificationOpen, onClick: () => { setNotificationOpen(open => !open); setUserMenuOpen(false); }, children: [_jsx(DashboardIcon, { name: "bell" }), notificationCount > 0 && _jsx("span", { children: notificationCount })] }), notificationOpen && _jsxs("div", { className: "dashboard-notification-menu", role: "dialog", "aria-label": "Latest activity", children: [_jsxs("div", { className: "dashboard-notification-head", children: [_jsx("b", { children: "Latest Activity" }), _jsxs("span", { children: [notificationCount, " open notice", notificationCount === 1 ? '' : 's'] })] }), activities.length ? _jsx("div", { className: "dashboard-activity-list compact", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => goTo(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Latest job, ticket, and client updates will appear here." }), _jsx("button", { type: "button", className: "dashboard-open-overview", onClick: () => goTo('overview'), children: "Open Dashboard" })] })] }),
-                                    _jsxs("div", { className: "dashboard-user-menu-wrap dashboard-mobile-user-profile", children: [_jsxs("button", { type: "button", className: "dashboard-user-button", "aria-expanded": userMenuOpen, onClick: () => { setUserMenuOpen(open => !open); setNotificationOpen(false); }, children: [_jsx("span", { className: "dashboard-avatar", children: initialsFor(data.user.name) }), _jsx("span", { children: data.user.name }), _jsx(DashboardIcon, { name: "chevron" })] }), userMenuOpen && _jsxs("div", { className: "dashboard-user-menu", role: "menu", children: [_jsxs("div", { children: [_jsx("b", { children: data.user.name }), _jsx("span", { children: data.user.roleName || data.user.accountType || 'Workspace user' })] }), _jsx("button", { type: "button", role: "menuitem", onClick: logout, children: "Log out" })] })] })
-                                ] })
-                        ] }),
-                    error && _jsx("div", { className: "alert error dashboard-alert", children: error }),
-                    _jsx("div", { className: "dashboard-content", children: children })
-                ] })
-        ] });
-}
-function DashboardStat({ tone, icon, value, label, support }) {
-    return _jsxs("article", { className: `dashboard-stat ${tone}`, children: [_jsx("span", { className: "dashboard-stat-icon", children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("div", { children: [_jsx("strong", { children: value }), _jsx("span", { children: label }), _jsx("small", { children: support })] })] });
-}
-function DashboardEmptyState({ title, body }) {
-    return _jsxs("div", { className: "dashboard-empty", children: [_jsx("span", { children: _jsx(DashboardIcon, { name: "document" }) }), _jsx("b", { children: title }), _jsx("p", { children: body })] });
-}
-function recentActivityItems(data) {
-    const jobItems = data.jobs.map(job => {
-        const completed = isCompletedJob(job);
-        const verb = completed ? 'completed' : job.status === 'submitted' ? 'submitted' : 'updated';
-        const date = completed ? dateForMonth(job) : job.updatedAt || job.datePosted;
-        return { id: `job-${job.id}`, tab: 'jobs', tone: completed ? 'success' : job.priority === 'Urgent' ? 'urgent' : 'blue', description: `Job "${job.title}" ${verb}`, date };
-    });
-    const ticketItems = (data.supportTickets || []).map(ticket => ({ id: `ticket-${ticket.ticketNumber}`, tab: 'support', tone: ticket.status === 'Resolved' || ticket.status === 'Closed' ? 'success' : 'purple', description: `Ticket "${ticket.subject}" ${ticket.status === 'Open' ? 'created' : 'updated'}`, date: ticket.updatedAt || ticket.createdAt }));
-    const clientItems = canAny(data, ['clients.view_all', 'clients.view']) ? data.clients.map(client => ({ id: `client-${client.id}`, tab: 'clients', tone: 'gold', description: `Client "${client.name}" added`, date: client.createdAt })) : [];
-    return [...jobItems, ...ticketItems, ...clientItems].filter(item => timestamp(item.date)).sort((a, b) => timestamp(b.date) - timestamp(a.date)).slice(0, 5);
-}
-function Overview({ data, setTab }) {
-    const [client, setClient] = useState('');
-    const [pendingMonth, setPendingMonth] = useState('');
-    const [completedMonth, setCompletedMonth] = useState('');
-    const jobs = useMemo(() => client ? data.jobs.filter(job => job.clientId === client) : data.jobs, [data.jobs, client]);
-    const pendingJobs = useMemo(() => jobs.filter(isPendingJob).sort((a, b) => {
-        const priorityDiff = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
-        return priorityDiff || timestamp(a.datePosted) - timestamp(b.datePosted);
-    }), [jobs]);
-    const completedJobs = useMemo(() => jobs.filter(isCompletedJob).sort((a, b) => timestamp(dateForMonth(b)) - timestamp(dateForMonth(a))), [jobs]);
-    const pendingMonths = useMemo(() => sortedMonthKeys(groupByMonth(pendingJobs, job => job.datePosted)), [pendingJobs]);
-    const completedMonths = useMemo(() => sortedMonthKeys(groupByMonth(completedJobs, dateForMonth)), [completedJobs]);
-    useEffect(() => { if (pendingMonth && !pendingMonths.includes(pendingMonth))
-        setPendingMonth(''); }, [pendingMonth, pendingMonths]);
-    useEffect(() => { if (completedMonth && !completedMonths.includes(completedMonth))
-        setCompletedMonth(''); }, [completedMonth, completedMonths]);
-    const visiblePending = pendingMonth ? pendingJobs.filter(job => monthKey(job.datePosted) === pendingMonth) : pendingJobs;
-    const visibleCompleted = completedMonth ? completedJobs.filter(job => monthKey(dateForMonth(job)) === completedMonth) : completedJobs;
-    const canSeeClients = canAny(data, ['clients.view_all', 'clients.view']);
-    const activeClients = canSeeClients ? data.clients.filter(client => client.status === 'active').length : data.user.clientId ? 1 : 0;
-    const accountType = data.user.accountType || data.user.role;
-    const openTickets = (data.supportTickets || []).filter(ticket => !['Resolved', 'Closed'].includes(ticket.status)).length;
-    const overdueJobs = pendingJobs.filter(job => addWorkingHours(new Date(job.datePosted), job.teamOverrideHours ?? job.calculatedHours, data.settings) < new Date()).length;
-    const assignedToMe = data.jobs.filter(job => job.assignedToUserId === data.user.id && isPendingJob(job)).length;
-    const activeEmployees = (data.clientOwners || []).filter(user => user.accountType === 'employee').length;
-    const overviewStats = accountType === 'super_admin'
-        ? [
-            ['blue', 'total', data.jobs.length, 'Total Jobs', 'All visible job records'],
-            ['gold', 'clock', overdueJobs, 'Overdue Jobs', 'Need immediate attention'],
-            ['purple', 'users', activeEmployees, 'Active Employees', 'Internal employee accounts'],
-            ['green', 'users', activeClients, 'Active Clients', 'Current client companies'],
-            ['purple', 'support', openTickets, 'Open Tickets', 'Support requiring action']
-        ]
-        : accountType === 'admin'
-            ? [
-                ['blue', 'total', data.jobs.length, 'Accessible Jobs', 'Your permitted job scope'],
-                ['gold', 'pending', pendingJobs.length, 'Pending Jobs', 'Awaiting completion'],
-                ['green', 'users', activeClients, 'Active Clients', 'Clients in your scope'],
-                ['purple', 'support', openTickets, 'Open Tickets', 'Support in your scope']
-            ]
-            : accountType === 'employee'
-                ? [
-                    ['blue', 'jobs', assignedToMe, 'Assigned to Me', 'Active assigned jobs'],
-                    ['gold', 'clock', overdueJobs, 'Overdue', 'Jobs beyond current TAT'],
-                    ['purple', 'pending', data.jobs.filter(job => job.status === 'in_progress').length, 'In Progress', 'Work currently underway'],
-                    ['green', 'completed', completedJobs.length, 'Completed', 'Delivered jobs in your scope']
-                ]
-                : [
-                    ['blue', 'total', data.jobs.length, 'Submitted Jobs', 'Your organisation jobs'],
-                    ['gold', 'pending', pendingJobs.length, 'Active Jobs', 'Currently in progress'],
-                    ['green', 'completed', completedJobs.length, 'Completed Jobs', 'Successfully delivered'],
-                    ['purple', 'support', openTickets, 'Open Tickets', 'Support conversations']
-                ];
-    const quickActions = [
-        ...(can(data, 'jobs.create') ? [['submit', 'plus', 'Submit a Job', 'Create a new job request']] : []),
-        ...(canAny(data, ['jobs.view_all', 'jobs.view_own']) ? [['jobs', 'jobs', 'View All Jobs', 'Browse all your jobs']] : []),
-        ...(canSeeClients ? [['clients', 'users', 'Clients', 'View clients in your access scope']] : []),
-        ...(canAny(data, ['support.view_all', 'support.view_own', 'support.create']) ? [['support', 'support', 'Support Tickets', 'Get help and support']] : [])
-    ];
-    const activities = recentActivityItems(data);
-    return _jsxs(_Fragment, { children: [
-            _jsxs("section", { className: "dashboard-welcome-card", children: [
-                    _jsxs("div", { children: [_jsxs("h2", { children: ["Welcome back, ", data.user.name, "!"] }), _jsx("p", { children: accountType === 'super_admin' ? 'System-wide operations, people, clients and delivery at a glance.' : accountType === 'admin' ? 'Your authorised operations and delivery workload today.' : accountType === 'employee' ? 'Your assigned work, deadlines and client activity today.' : 'Track your organisation requests, deliveries and support activity.' })] }),
-                    _jsxs("div", { className: "dashboard-date-box", children: [_jsx(DashboardIcon, { name: "calendar" }), _jsx("span", { children: dashboardDate(new Date()) })] })
-                ] }),
-            _jsx("section", { className: "dashboard-stats", "aria-label": "Dashboard statistics", children: overviewStats.map(([tone, icon, value, label, support]) => _jsx(DashboardStat, { tone: tone, icon: icon, value: value, label: label, support: support }, label)) }),
-            _jsxs("section", { className: "dashboard-work-grid", children: [
-                    _jsxs("div", { className: "dashboard-work-left", children: [
-                            _jsxs("article", { className: "dashboard-card dashboard-jobs-card", children: [
-                                    _jsxs("div", { className: "dashboard-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Pending Jobs" }), _jsx("p", { children: "Jobs awaiting completion, by month posted" })] }), _jsxs("span", { className: "dashboard-count-pill", children: [visiblePending.length, visiblePending.length === 1 ? ' Job' : ' Jobs'] })] }),
-                                    _jsxs("div", { className: "dashboard-filter-row", children: [
-                                            canSeeClients && _jsxs("select", { value: client, onChange: e => setClient(e.target.value), "aria-label": "Filter jobs by client", children: [_jsx("option", { value: "", children: "All clients" }), data.clients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id))] }),
-                                            _jsxs("select", { value: pendingMonth, onChange: e => setPendingMonth(e.target.value), "aria-label": "Filter pending jobs by month", children: [_jsx("option", { value: "", children: "All pending months" }), pendingMonths.map(key => _jsx("option", { value: key, children: monthLabel(key) }, key))] })
-                                        ] }),
-                                    visiblePending.length ? _jsx("div", { className: "jobs dashboard-overview-jobs", children: visiblePending.map(job => _jsx(JobCard, { job: job, data: data }, job.id)) }) : _jsx(DashboardEmptyState, { title: "Nothing pending yet.", body: "New active jobs will appear here once submitted." }),
-                                    _jsx("div", { className: "dashboard-card-action", children: _jsxs("button", { type: "button", onClick: () => setTab('jobs'), children: ["View all pending jobs", _jsx(DashboardIcon, { name: "chevron" })] }) })
-                                ] }),
-                            _jsxs("article", { className: "dashboard-card dashboard-jobs-card", children: [
-                                    _jsxs("div", { className: "dashboard-card-head", children: [_jsxs("div", { children: [_jsx("h3", { children: "Completed Jobs" }), _jsx("p", { children: "Jobs completed, by month finished" })] }), _jsxs("span", { className: "dashboard-count-pill", children: [visibleCompleted.length, visibleCompleted.length === 1 ? ' Job' : ' Jobs'] })] }),
-                                    completedJobs.length > 0 && _jsx("div", { className: "dashboard-filter-row", children: _jsxs("select", { value: completedMonth, onChange: e => setCompletedMonth(e.target.value), "aria-label": "Filter completed jobs by month", children: [_jsx("option", { value: "", children: "All completed months" }), completedMonths.map(key => _jsx("option", { value: key, children: monthLabel(key) }, key))] }) }),
-                                    visibleCompleted.length ? _jsx("div", { className: "jobs dashboard-overview-jobs", children: visibleCompleted.map(job => _jsx(JobCard, { job: job, data: data }, job.id)) }) : _jsx(DashboardEmptyState, { title: "Nothing completed yet.", body: "Completed jobs will appear here once finished." })
-                                ] })
-                        ] }),
-                    _jsxs("aside", { className: "dashboard-work-right", children: [
-                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Quick Actions" }), _jsx("div", { className: "dashboard-action-list", children: quickActions.map(([id, icon, title, description]) => _jsxs("button", { type: "button", onClick: () => setTab(id), children: [_jsx("span", { children: _jsx(DashboardIcon, { name: icon }) }), _jsxs("span", { children: [_jsx("b", { children: title }), _jsx("small", { children: description })] }), _jsx(DashboardIcon, { name: "chevron" })] }, id)) })] }),
-                            _jsxs("article", { className: "dashboard-card dashboard-side-card", children: [_jsx("h3", { children: "Recent Activity" }), activities.length ? _jsx("div", { className: "dashboard-activity-list", children: activities.map(item => _jsxs("button", { type: "button", className: `dashboard-activity ${item.tone}`, onClick: () => setTab(item.tab), children: [_jsx("span", { className: "dashboard-activity-dot" }), _jsxs("span", { children: [_jsx("b", { children: item.description }), _jsx("small", { children: shortDateTime(item.date) })] })] }, item.id)) }) : _jsx(DashboardEmptyState, { title: "No recent activity.", body: "Job, ticket, and client updates will appear here." })] })
-                        ] })
-                ] })
-        ] });
-}
-function MonthGroups({ groups, data, empty, editable = false, reload, sortDate = dateForMonth }) {
-    const keys = sortedMonthKeys(groups);
-    if (!keys.length)
-        return _jsx("div", { className: "empty", children: empty });
-    return _jsx(_Fragment, { children: keys.map(key => {
-            const list = [...groups[key]].sort((a, b) => new Date(sortDate(b)).getTime() - new Date(sortDate(a)).getTime());
-            return _jsxs("section", { className: "month-group", children: [_jsxs("h4", { children: [monthLabel(key), " ", _jsxs("span", { children: ["(", list.length, ")"] })] }), _jsx("div", { className: "jobs", children: list.map(job => _jsx(JobCard, { job: job, data: data, editable: editable, reload: reload }, job.id)) })] }, key);
-        }) });
-}
-function Metric({ label, value }) { return _jsxs("div", { className: "metric", children: [_jsx("span", { children: label }), _jsx("strong", { children: value })] }); }
-function Submit({ data, reload }) { const first = data.settings.categories[0]?.name || ''; const [form, setForm] = useState({ clientId: data.clients.find(c => c.status === 'active')?.id || '', title: '', description: '', category: first, priority: 'Medium', postedBy: '', assetLink: '' }); const [message, setMessage] = useState(''); const submit = async (e) => { e.preventDefault(); try {
-    await api.createJob(form);
-    setMessage('Job submitted successfully. All logged-in users will receive the update instantly.');
-    setForm({ ...form, title: '', description: '', postedBy: '', assetLink: '' });
-    await reload();
-}
-catch (err) {
-    setMessage(err.message);
-} }; return _jsxs("form", { className: "card form", onSubmit: submit, children: [_jsx("h2", { children: "New job request" }), message && _jsx("div", { className: "alert", children: message }), data.user.accountType !== 'client' && data.clients.length > 0 && _jsxs("label", { children: ["Client", _jsx("select", { value: form.clientId, onChange: e => setForm({ ...form, clientId: e.target.value }), children: data.clients.filter(c => c.status === 'active').map(c => _jsx("option", { value: c.id, children: c.name }, c.id)) })] }), _jsxs("label", { children: ["Job title", _jsx("input", { required: true, value: form.title, onChange: e => setForm({ ...form, title: e.target.value }) })] }), _jsxs("label", { children: ["Description", _jsx("textarea", { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }) })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category", _jsx("select", { value: form.category, onChange: e => setForm({ ...form, category: e.target.value }), children: data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name)) })] }), _jsxs("label", { children: ["Priority", _jsxs("select", { value: form.priority, onChange: e => setForm({ ...form, priority: e.target.value }), children: [_jsx("option", { children: "Low" }), _jsx("option", { children: "Medium" }), _jsx("option", { children: "High" }), _jsx("option", { children: "Urgent" })] })] })] }), _jsxs("label", { children: ["Asset link", _jsx("input", { value: form.assetLink, onChange: e => setForm({ ...form, assetLink: e.target.value }), placeholder: "Google Drive, Dropbox or another secure URL" })] }), _jsxs("label", { children: ["Posted by", _jsx("input", { required: true, value: form.postedBy, onChange: e => setForm({ ...form, postedBy: e.target.value }) })] }), _jsx("button", { className: "primary", children: "Submit job" })] }); }
-function Jobs({ data, reload }) {
-    const [category, setCategory] = useState('');
-    const [priority, setPriority] = useState('');
-    const [client, setClient] = useState('');
-    const resetFilters = () => {
-        setCategory('');
-        setPriority('');
-        setClient('');
-    };
-    const filtered = useMemo(() => data.jobs.filter(job => (!category || job.category === category) && (!priority || job.priority === priority) && (!client || job.clientId === client)), [data.jobs, category, priority, client]);
-    const pending = useMemo(() => filtered.filter(isPendingJob).sort((a, b) => {
-        const priorityDiff = (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9);
-        return priorityDiff || new Date(a.datePosted).getTime() - new Date(b.datePosted).getTime();
-    }), [filtered]);
-    const completed = useMemo(() => filtered.filter(isCompletedJob).sort((a, b) => new Date(dateForMonth(b)).getTime() - new Date(dateForMonth(a)).getTime()), [filtered]);
-    return _jsxs(_Fragment, { children: [
-            (data.user.accountType !== 'client' && canAny(data, ['jobs.view_all', 'jobs.view_department'])) && _jsx(CategoryLoadGrid, { data: data }),
-            _jsxs("div", { className: "filters", children: [
-                    _jsxs("select", { value: category, onChange: e => setCategory(e.target.value), children: [_jsx("option", { value: "", children: "All categories" }), data.settings.categories.map(c => _jsx("option", { children: c.name }, c.name))] }),
-                    _jsxs("select", { value: priority, onChange: e => setPriority(e.target.value), children: [_jsx("option", { value: "", children: "All priorities" }), ['Urgent', 'High', 'Medium', 'Low'].map(p => _jsx("option", { children: p }, p))] }),
-                    data.user.accountType !== 'client' && data.clients.length > 1 && _jsxs("select", { value: client, onChange: e => setClient(e.target.value), children: [_jsx("option", { value: "", children: "All clients" }), data.clients.map(c => _jsx("option", { value: c.id, children: c.name }, c.id))] }),
-                    _jsx("button", { type: "button", onClick: resetFilters, children: "Reset filters" })
-                ] }),
-            _jsxs("h3", { className: "section-heading", children: ["Pending ", _jsxs("span", { children: ["(", pending.length, ")"] })] }),
-            pending.length ? _jsx("div", { className: "jobs", children: pending.map(job => _jsx(JobCard, { job: job, data: data, editable: true, reload: reload }, job.id)) }) : _jsx("div", { className: "empty", children: "No pending jobs match these filters." }),
-            _jsxs("h3", { className: "section-heading section-heading-spaced", children: ["Completed ", _jsxs("span", { children: ["(", completed.length, ")"] })] }),
-            completed.length ? _jsx("div", { className: "jobs", children: completed.map(job => _jsx(JobCard, { job: job, data: data, editable: true, reload: reload }, job.id)) }) : _jsx("div", { className: "empty", children: "Nothing completed yet." })
-        ] });
-}
-function CategoryLoadGrid({ data }) {
-    return _jsx("div", { className: "load-grid category-load-grid", children: data.settings.categories.map(category => {
-            const count = data.categoryLoad[category.name] || 0;
-            const capacity = data.settings.capacityPerCategory;
-            const pct = Math.min(100, Math.round(count / Math.max(1, capacity) * 100));
-            return _jsxs("div", { className: `load ${count > capacity ? 'over' : ''}`, children: [_jsx("b", { children: category.name }), _jsx("div", { className: "meter", children: _jsx("i", { style: { width: pct + '%' } }) }), _jsxs("span", { children: [count, " pending \u00B7 comfortable capacity ", capacity] })] }, category.name);
-        }) });
-}
-function JobCard({ job, data, editable = false, reload }) {
-    const [status, setStatus] = useState(job.status);
-    const [hours, setHours] = useState(job.teamOverrideHours ?? job.calculatedHours);
-    const [note, setNote] = useState(job.teamOverrideNote || '');
-    const [assignee, setAssignee] = useState(job.assignedToUserId || '');
-    const [department, setDepartment] = useState(job.departmentId || '');
-    const [assignmentNote, setAssignmentNote] = useState(job.assignmentNote || '');
-    const [historyOpen, setHistoryOpen] = useState(false);
-    const [assignmentHistory, setAssignmentHistory] = useState([]);
-    const [historyError, setHistoryError] = useState('');
-    const [historyLoaded, setHistoryLoaded] = useState(false);
-    const effectiveHours = job.teamOverrideHours ?? job.calculatedHours;
-    const due = addWorkingHours(new Date(job.datePosted), effectiveHours, data.settings);
-    const completed = isCompletedJob(job);
-    const teamSet = job.teamOverrideHours != null;
-    const overdue = isPendingJob(job) && due < new Date();
-    const client = clientNameFor(data, job.clientId);
-    const canAssign = canAny(data, ['jobs.assign', 'jobs.reassign']);
-    const canChangeStatus = canAny(data, ['jobs.edit', 'jobs.update_status']);
-    const canOverrideTat = can(data, 'jobs.override_tat');
-    const toggleHistory = async () => {
-        const nextOpen = !historyOpen;
-        setHistoryOpen(nextOpen);
-        if (!nextOpen || historyLoaded || data.user.accountType === 'client')
-            return;
-        try {
-            const result = await api.job(job.id);
-            setAssignmentHistory(result.assignmentHistory || []);
-            setHistoryLoaded(true);
-            setHistoryError('');
-        }
-        catch (err) {
-            setHistoryError(err.message);
-        }
-    };
-    const save = async () => {
-        const patch = {};
-        if (canChangeStatus)
-            patch.status = status;
-        if (canOverrideTat) {
-            patch.teamOverrideHours = Number(hours);
-            patch.teamOverrideNote = note;
-        }
-        if (canAssign) {
-            patch.assignedToUserId = assignee;
-            patch.departmentId = department;
-            patch.assignmentNote = assignmentNote;
-        }
-        await api.updateJob(job.id, patch);
-        await reload?.();
-    };
-    return _jsxs("article", { className: `job priority-${job.priority} ${completed ? 'completed' : ''}`, children: [
-            _jsxs("div", { className: "job-head", children: [
-                    _jsxs("div", { children: [_jsx("h3", { children: job.title }), _jsxs("p", { children: ["Posted by ", _jsx("b", { children: job.postedBy }), " on ", fmt(job.datePosted)] })] }),
-                    _jsxs("div", { className: "badges", children: [
-                            can(data, 'jobs.view_all') && _jsx("span", { className: "badge client", children: client }),
-                            job.assignedToName && _jsx("span", { className: "badge team", children: job.assignedToName }),
-                            job.departmentName && _jsx("span", { className: "badge category", children: job.departmentName }),
-                            _jsx("span", { className: "badge category", children: job.category }),
-                            _jsx("span", { className: `badge ${job.priority}`, children: job.priority }),
-                            teamSet && _jsx("span", { className: "badge team", children: "Team-set TAT" }),
-                            _jsx("span", { className: "badge status", children: statusLabels[job.status] })
-                        ] })
-                ] }),
-            job.description && _jsx("p", { className: "description", children: job.description }),
-            job.assetLink && _jsx("a", { href: job.assetLink, target: "_blank", rel: "noreferrer", children: "View assets \u2197" }),
-            completed ? _jsxs("p", { className: "due", children: ["Completed on ", _jsx("b", { children: fmt(dateForMonth(job)) })] }) : _jsxs("p", { className: "due", children: [teamSet ? "Team TAT: " : "System TAT: ", _jsxs("b", { children: [effectiveHours, " hrs"] }), " - due by ", _jsx("b", { children: fmt(due) }), overdue && _jsx("span", { className: "overdue", children: " (overdue)" })] }),
-            job.teamOverrideNote && _jsxs("div", { className: "team-note", children: ["Team note: ", job.teamOverrideNote] }),
-            job.assignmentNote && _jsxs("div", { className: "team-note", children: ["Assignment note: ", job.assignmentNote] }),
-            data.user.accountType !== 'client' && _jsx("button", { type: "button", className: "job-history-toggle", onClick: toggleHistory, children: historyOpen ? 'Hide assignment history' : 'Assignment history' }),
-            historyOpen && data.user.accountType !== 'client' && _jsxs("div", { className: "job-assignment-history", children: [
-                    historyError && _jsx("div", { className: "alert error", children: historyError }),
-                    !historyLoaded && !historyError && _jsx("small", { children: "Loading assignment history..." }),
-                    historyLoaded && !assignmentHistory.length && _jsx("small", { children: "No assignment changes recorded yet." }),
-                    assignmentHistory.map(item => _jsxs("div", { className: "job-history-item", children: [
-                            _jsxs("b", { children: [item.assignedToName || 'Unassigned', item.departmentName ? ` - ${item.departmentName}` : ''] }),
-                            _jsxs("span", { children: ["Assigned by ", item.assignedByName || item.assignedByUserId || 'System', " on ", shortDateTime(item.createdAt)] }),
-                            item.note && _jsx("small", { children: item.note })
-                        ] }, item.id))
-                ] }),
-            editable && canAny(data, ['jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign']) && _jsxs("div", { className: "editbar job-editbar", children: [
-                    canChangeStatus && _jsx("select", { value: status, onChange: e => setStatus(e.target.value), children: Object.entries(statusLabels).map(([v, l]) => _jsx("option", { value: v, children: l }, v)) }),
-                    canOverrideTat && _jsx("input", { type: "number", min: "1", value: hours, onChange: e => setHours(Number(e.target.value)), "aria-label": "TAT hours" }),
-                    canOverrideTat && _jsx("input", { value: note, onChange: e => setNote(e.target.value), placeholder: "Team TAT note" }),
-                    canAssign && _jsxs("select", { value: assignee, onChange: e => setAssignee(e.target.value), "aria-label": "Assigned employee", children: [_jsx("option", { value: "", children: "Unassigned" }), (data.assignees || []).map(user => _jsx("option", { value: user.id, children: user.departmentName ? `${user.name} - ${user.departmentName}` : user.name }, user.id))] }),
-                    canAssign && _jsxs("select", { value: department, onChange: e => setDepartment(e.target.value), "aria-label": "Job department", children: [_jsx("option", { value: "", children: "No department" }), (data.departments || []).map(item => _jsx("option", { value: item.id, children: item.name }, item.id))] }),
-                    canAssign && _jsx("input", { value: assignmentNote, onChange: e => setAssignmentNote(e.target.value), placeholder: "Assignment note" }),
-                    _jsx("button", { onClick: save, children: "Save" })
-                ] })
-        ] });
-}
-function SettingsPanel({ initial, reload }) { const [s, setS] = useState(initial); const save = async () => { await api.saveSettings(s); await reload(); alert('TAT standards saved.'); }; return _jsxs("section", { className: "card", children: [_jsx("h2", { children: "TAT standards" }), s.categories.map((c, i) => _jsxs("div", { className: "setting-row", children: [_jsx("input", { value: c.name, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, name: e.target.value } : x) }) }), _jsx("input", { type: "number", min: "1", value: c.baseHours, onChange: e => setS({ ...s, categories: s.categories.map((x, n) => n === i ? { ...x, baseHours: Number(e.target.value) } : x) }) }), _jsx("button", { onClick: () => setS({ ...s, categories: s.categories.filter((_, n) => n !== i) }), children: "Remove" })] }, i)), _jsx("button", { onClick: () => setS({ ...s, categories: [...s.categories, { name: 'New category', baseHours: 24 }] }), children: "+ Add category" }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Category capacity", _jsx("input", { type: "number", value: s.capacityPerCategory, onChange: e => setS({ ...s, capacityPerCategory: Number(e.target.value) }) })] }), _jsxs("label", { children: ["Extra hours over capacity", _jsx("input", { type: "number", value: s.bufferHoursPerExtraJob, onChange: e => setS({ ...s, bufferHoursPerExtraJob: Number(e.target.value) }) })] })] }), _jsxs("div", { className: "row", children: [_jsxs("label", { children: ["Start hour", _jsx("input", { type: "number", step: "0.5", value: s.startHour, onChange: e => setS({ ...s, startHour: Number(e.target.value) }) })] }), _jsxs("label", { children: ["End hour", _jsx("input", { type: "number", step: "0.5", value: s.endHour, onChange: e => setS({ ...s, endHour: Number(e.target.value) }) })] })] }), _jsx("button", { className: "primary", onClick: save, children: "Save standards" })] }); }
-function Clients({ data, reload }) {
-    const [form, setForm] = useState({ id: '', name: '', contactName: '', email: '', phone: '', industry: '', accountOwnerUserId: '', createLogin: true, password: '' });
-    const [passwords, setPasswords] = useState({});
-    const [message, setMessage] = useState('');
-    const canEditClients = can(data, 'clients.edit');
-    const canDeleteClients = can(data, 'clients.delete');
-    const canAssignOwner = can(data, 'clients.assign_owner');
-    const create = async () => {
-        try {
-            await api.createClient({
-                ...form,
-                accountOwnerUserId: canAssignOwner ? form.accountOwnerUserId : '',
-                password: form.createLogin ? form.password : ''
-            });
-            setForm({ id: '', name: '', contactName: '', email: '', phone: '', industry: '', accountOwnerUserId: '', createLogin: true, password: '' });
-            setMessage('Client added successfully.');
-            await reload();
-        }
-        catch (err) {
-            setMessage(err.message);
-        }
-    };
-    const update = async (id, patch) => {
-        await api.updateClient(id, patch);
-        await reload();
-    };
-    const resetPassword = async client => {
-        const password = (passwords[client.id] || '').trim();
-        if (!client.hasLogin) {
-            setMessage('This client does not have a login account. Create the login from Users & Roles if required.');
-            return;
-        }
-        if (password.length < 8) {
-            setMessage('Enter a new password with at least 8 characters.');
-            return;
-        }
-        try {
-            await update(client.id, { password });
-            setPasswords(current => ({ ...current, [client.id]: '' }));
-            setMessage('Password reset successfully.');
-        }
-        catch (err) {
-            setMessage(err.message);
-        }
-    };
-    const toggleClient = async (id, status) => {
-        const next = status === 'active' ? 'archived' : 'active';
-        try {
-            await update(id, { status: next });
-            setMessage(next === 'archived' ? 'Client archived.' : 'Client restored.');
-        }
-        catch (err) {
-            setMessage(err.message);
-        }
-    };
-    const deleteClient = async client => {
-        if (!window.confirm(`Permanently delete ${client.name}? This cannot be undone.`))
-            return;
-        try {
-            await api.deleteClient(client.id);
-            setPasswords(current => {
-                const next = { ...current };
-                delete next[client.id];
-                return next;
-            });
-            setMessage('Client deleted.');
-            await reload();
-        }
-        catch (err) {
-            setMessage(err.message);
-        }
-    };
-    return (
-        <section className="card client-management-card">
-            <div className="management-header compact-heading">
-                <div>
-                    <span>Client Management</span>
-                    <h2>Clients</h2>
-                    <p>Manage client companies, ownership and optional client workspace logins.</p>
-                </div>
-            </div>
-            {message && <div className="alert">{message}</div>}
-            <div className="client-table-wrap">
-                <table className="client-table">
-                    <thead><tr><th>Client</th><th>Contact</th><th>Owner</th><th>Login</th><th>Status</th><th>Actions</th></tr></thead>
-                    <tbody>
-                        {data.clients.map(client => (
-                            <tr key={client.id}>
-                                <td data-label="Client"><b>{client.name}</b><small className="table-subtext">{client.id}</small></td>
-                                <td data-label="Contact">{client.contactName || '-'}<small className="table-subtext">{client.email || client.phone || ''}</small></td>
-                                <td data-label="Owner">
-                                    {canAssignOwner ? (
-                                        <select value={client.accountOwnerUserId || ''} onChange={event => update(client.id, { accountOwnerUserId: event.target.value })}>
-                                            <option value="">Unassigned</option>
-                                            {(data.clientOwners || []).map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-                                        </select>
-                                    ) : client.accountOwnerName || '-'}
-                                </td>
-                                <td data-label="Login"><span className={`status-pill ${client.hasLogin ? 'active' : 'archived'}`}>{client.hasLogin ? 'Enabled' : 'Not created'}</span></td>
-                                <td data-label="Status"><span className={`status-pill ${client.status}`}>{client.status}</span></td>
-                                <td data-label="Actions">
-                                    <div className="client-actions client-actions-stacked">
-                                        {canEditClients && client.hasLogin && <div className="client-password-reset"><input type="password" value={passwords[client.id] || ''} onChange={event => setPasswords(current => ({ ...current, [client.id]: event.target.value }))} placeholder="New password (8+)" aria-label={`New password for ${client.name}`} /><button type="button" className="small" onClick={() => resetPassword(client)}>Reset</button></div>}
-                                        {canEditClients && <button type="button" className={client.status === 'active' ? 'danger small' : 'small'} onClick={() => toggleClient(client.id, client.status)}>{client.status === 'active' ? 'Archive' : 'Restore'}</button>}
-                                        {canDeleteClients && <button type="button" className="danger small" onClick={() => deleteClient(client)}>Delete</button>}
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-            {can(data, 'clients.create') && <>
-                <h3>Add client</h3>
-                <div className="management-form client-create-form">
-                    <div className="row">
-                        <label>Client ID<input value={form.id} onChange={event => setForm({ ...form, id: event.target.value.toLowerCase() })} placeholder="company-id" /></label>
-                        <label>Company Name<input value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                        <label>Contact Name<input value={form.contactName} onChange={event => setForm({ ...form, contactName: event.target.value })} /></label>
-                    </div>
-                    <div className="row">
-                        <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-                        <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-                        <label>Industry<input value={form.industry} onChange={event => setForm({ ...form, industry: event.target.value })} /></label>
-                    </div>
-                    {canAssignOwner && <label>Account Owner<select value={form.accountOwnerUserId} onChange={event => setForm({ ...form, accountOwnerUserId: event.target.value })}><option value="">Default to me</option>{(data.clientOwners || []).map(owner => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label>}
-                    <label className="permission-check client-login-toggle"><input type="checkbox" checked={form.createLogin} onChange={event => setForm({ ...form, createLogin: event.target.checked, password: event.target.checked ? form.password : '' })} /> Create Client Login</label>
-                    {form.createLogin && <label>Temporary Password<input type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} placeholder="Minimum 8 characters" /></label>}
-                    <button type="button" className="primary" onClick={create}>+ Add Client</button>
-                </div>
-            </>}
-        </section>
-    );
+
+function formatHourDecimal(dec) {
+  if (dec === undefined || dec === null) return '10:30 AM';
+  const hours = Math.floor(dec);
+  const minutes = Math.round((dec % 1) * 60);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+  const displayMinutes = minutes ? `:${String(minutes).padStart(2, '0')}` : ':00';
+  return `${displayHours}${displayMinutes} ${period}`;
 }
 
-function ManagementTable({ columns, rows, empty }) {
-    if (!rows.length)
-        return <div className="dashboard-empty management-empty"><b>{empty}</b></div>;
+function formatWorkDays(days) {
+  if (!Array.isArray(days) || !days.length) return 'Mon – Fri';
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  if (days.length === 5 && days[0] === 1 && days[4] === 5) return 'Mon – Fri';
+  return days.map(d => dayNames[d]).join(', ');
+}
+
+const initialsFor = value =>
+  (value || 'User')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(p => p[0])
+    .join('')
+    .toUpperCase() || 'U';
+
+const can = (data, permission) => (data?.permissions || data?.user?.permissions || []).includes(permission);
+const canAny = (data, permissions) => permissions.some(permission => can(data, permission));
+
+// Category Icons Mapping
+function CategoryIcon({ category }) {
+  const c = (category || '').toLowerCase();
+  if (c.includes('web') || c.includes('site')) {
+    return <DashboardIcon name="globe" />;
+  }
+  if (c.includes('social') || c.includes('media') && !c.includes('upload')) {
+    return <DashboardIcon name="share" />;
+  }
+  if (c.includes('upload') || c.includes('file')) {
+    return <DashboardIcon name="cloud" />;
+  }
+  if (c.includes('graphic') || c.includes('design')) {
+    return <DashboardIcon name="pen" />;
+  }
+  if (c.includes('copy') || c.includes('content') || c.includes('write')) {
+    return <DashboardIcon name="document" />;
+  }
+  if (c.includes('video') || c.includes('film') || c.includes('edit')) {
+    return <DashboardIcon name="video" />;
+  }
+  if (c.includes('seo') || c.includes('search')) {
+    return <DashboardIcon name="search" />;
+  }
+  return <DashboardIcon name="more" />;
+}
+
+// Master Dashboard Line Icons
+function DashboardIcon({ name }) {
+  switch (name) {
+    case 'overview':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+        </svg>
+      );
+    case 'submit':
+    case 'plus-circle':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="16" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+        </svg>
+      );
+    case 'jobs':
+    case 'briefcase':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
+          <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
+        </svg>
+      );
+    case 'clock':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      );
+    case 'users':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      );
+    case 'support':
+    case 'lifebuoy':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="4" />
+          <line x1="4.93" y1="4.93" x2="9.17" y2="9.17" />
+          <line x1="14.83" y1="14.83" x2="19.07" y2="19.07" />
+          <line x1="14.83" y1="9.17" x2="19.07" y2="4.93" />
+          <line x1="4.93" y1="19.07" x2="9.17" y2="14.83" />
+        </svg>
+      );
+    case 'chat':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      );
+    case 'bell':
+      return (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+      );
+    case 'logout':
+      return (
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" y1="12" x2="9" y2="12" />
+        </svg>
+      );
+    case 'bar-chart':
+      return (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="20" x2="18" y2="10" />
+          <line x1="12" y1="20" x2="12" y2="4" />
+          <line x1="6" y1="20" x2="6" y2="14" />
+        </svg>
+      );
+    case 'check-circle':
+      return (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+          <polyline points="22 4 12 14.01 9 11.01" />
+        </svg>
+      );
+    case 'alert-triangle':
+      return (
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      );
+    case 'zap':
+      return (
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        </svg>
+      );
+    case 'globe':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="2" y1="12" x2="22" y2="12" />
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      );
+    case 'share':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="18" cy="5" r="3" />
+          <circle cx="6" cy="12" r="3" />
+          <circle cx="18" cy="19" r="3" />
+          <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+          <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+        </svg>
+      );
+    case 'cloud':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+        </svg>
+      );
+    case 'pen':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+        </svg>
+      );
+    case 'document':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="16" y1="13" x2="8" y2="13" />
+          <line x1="16" y1="17" x2="8" y2="17" />
+        </svg>
+      );
+    case 'video':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="23 7 16 12 23 17 23 7" />
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+        </svg>
+      );
+    case 'search':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      );
+    case 'more':
+      return (
+        <svg className="workload-cat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="1" />
+          <circle cx="19" cy="12" r="1" />
+          <circle cx="5" cy="12" r="1" />
+        </svg>
+      );
+    case 'chevron-right':
+      return (
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      );
+    case 'chevron-down':
+      return (
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      );
+    case 'menu':
+      return (
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+// Main App Component
+export default function App() {
+  const [auth, setAuth] = useState(Boolean(getToken()));
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [tab, setTab] = useState('overview');
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [supportCreateSignal, setSupportCreateSignal] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.bootstrap();
+      setData(res);
+      setError('');
+    } catch (e) {
+      if (e.message.includes('Session') || e.message.includes('token') || e.message.includes('Authentication')) {
+        setToken(null);
+        setAuth(false);
+      } else {
+        setError(e.message);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!auth) return;
+    load();
+    const socket = io(API_URL || undefined);
+    socket.on('connect', () => setSocketConnected(true));
+    socket.on('disconnect', () => setSocketConnected(false));
+    socket.on('data:changed', load);
+    socket.on('permissions:updated', load);
+    return () => {
+      socket.disconnect();
+    };
+  }, [auth, load]);
+
+  if (!auth) {
+    return <LoginPage onLogin={() => setAuth(true)} />;
+  }
+
+  if (!data) {
     return (
-        <div className="responsive-table management-table-wrap">
-            <table className="management-table">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--ci-bg)' }}>
+        <p style={{ color: 'var(--ci-text-secondary)', fontWeight: 500 }}>{error || 'Loading workspace...'}</p>
+      </div>
+    );
+  }
+
+  const logout = () => {
+    setToken(null);
+    setAuth(false);
+    setData(null);
+  };
+
+  const openSupportModal = () => {
+    setSupportCreateSignal(c => c + 1);
+    setTab('support');
+  };
+
+  return (
+    <DashboardShell
+      data={data}
+      tab={tab}
+      setTab={setTab}
+      logout={logout}
+      socketConnected={socketConnected}
+      openSupportModal={openSupportModal}
+    >
+      {tab === 'overview' && <OverviewPage data={data} setTab={setTab} openSupportModal={openSupportModal} />}
+      {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
+      {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
+      {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
+      {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
+      {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
+      {tab === 'chat' && <TeamChat data={data} reload={load} />}
+    </DashboardShell>
+  );
+}
+
+// ==========================================================================
+// 1. DASHBOARD SHELL (SIDEBAR + TOP HEADER)
+// ==========================================================================
+
+function DashboardShell({ data, tab, setTab, logout, socketConnected, openSupportModal, children }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const user = data.user || {};
+  const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
+
+  // Navigation Items according to strict spec
+  const navItems = isSuperOrAdmin
+    ? [
+        { id: 'overview', label: 'Overview', icon: 'overview' },
+        { id: 'submit', label: 'Submit a Job', icon: 'submit' },
+        { id: 'jobs', label: 'All Jobs', icon: 'jobs' },
+        { id: 'settings', label: 'TAT Standards', icon: 'clock' },
+        { id: 'clients', label: 'Manage Clients', icon: 'users' },
+        { id: 'support', label: 'Support Tickets', icon: 'support' }
+      ]
+    : [
+        { id: 'overview', label: 'Overview', icon: 'overview' },
+        { id: 'submit', label: 'Submit a Job', icon: 'submit' },
+        { id: 'jobs', label: 'My Jobs', icon: 'jobs' },
+        { id: 'support', label: 'Support Tickets', icon: 'support' }
+      ];
+
+  const pageHeaders = {
+    overview: {
+      title: 'Overview',
+      subtitle: 'Realtime visibility across jobs, workload and delivery timelines.'
+    },
+    submit: {
+      title: 'Submit a Job',
+      subtitle: 'Create a new job request and calculate turnaround time.'
+    },
+    jobs: {
+      title: isSuperOrAdmin ? 'All Jobs' : 'My Jobs',
+      subtitle: 'Track, manage and filter all operational work requests.'
+    },
+    settings: {
+      title: 'TAT Standards',
+      subtitle: 'Configure category turnaround times, capacities and working hours.'
+    },
+    clients: {
+      title: 'Manage Clients',
+      subtitle: 'Each client logs in with their own ID and password and only sees their own jobs.'
+    },
+    support: {
+      title: isSuperOrAdmin ? 'Support Tickets' : 'My Support Tickets',
+      subtitle: isSuperOrAdmin ? 'Review, reply to and manage submitted tickets.' : 'Raise a ticket and track your support conversations.'
+    },
+    chat: {
+      title: 'Team Chat',
+      subtitle: 'Real-time team communication, channels and collaboration.'
+    }
+  };
+
+  const currentHeader = pageHeaders[tab] || { title: 'Workspace', subtitle: '' };
+
+  const handleNavClick = id => {
+    setTab(id);
+    setMobileOpen(false);
+  };
+
+  // Real open support tickets count for notification badge
+  const openTicketCount = (data.supportTickets || []).filter(t => !['Resolved', 'Closed'].includes(t.status)).length;
+
+  return (
+    <div className={`app-shell ${mobileOpen ? 'sidebar-open' : ''}`}>
+      <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />
+
+      {/* LEFT SIDEBAR */}
+      <aside className="app-sidebar">
+        {/* BRAND */}
+        <div className="sidebar-header">
+          <div className="sidebar-brand">
+            <span className="brand-logo-text">
+              <span className="brand-navy">CI360</span>
+              <span className="brand-gold">degrees</span>
+            </span>
+            <span className="brand-subtitle">Realtime Job Board</span>
+          </div>
+          <button type="button" className="sidebar-collapse-btn" aria-label="Collapse navigation">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+        </div>
+
+        {/* MAIN CTA */}
+        <button
+          type="button"
+          className="sidebar-cta-btn"
+          onClick={() => handleNavClick('submit')}
+        >
+          <DashboardIcon name="submit" />
+          <span>+ Submit a Job</span>
+        </button>
+
+        {/* NAVIGATION ITEMS */}
+        <nav className="sidebar-nav">
+          {navItems.map(item => {
+            const isActive = tab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => handleNavClick(item.id)}
+              >
+                <DashboardIcon name={item.icon} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* CRITICAL: INTENTIONAL BLANK WHITESPACE RESERVED FOR FUTURE MODULES */}
+        <div className="sidebar-spacer" />
+
+        {/* SIDEBAR FOOTER (USER & LOGOUT) */}
+        <div className="sidebar-footer">
+          <div className="sidebar-user-card">
+            <div className="user-avatar-circle">
+              {initialsFor(user.name)}
+            </div>
+            <div className="sidebar-user-info">
+              <span className="sidebar-user-name">{user.name || 'Workspace User'}</span>
+              <span className="sidebar-user-role">
+                {isSuperOrAdmin ? 'Administrator' : 'Client'}
+              </span>
+            </div>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#98A2B3" strokeWidth="2">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </div>
+
+          <button type="button" className="sidebar-logout-btn" onClick={logout}>
+            <DashboardIcon name="logout" />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <div className="app-main">
+        {/* TOP HEADER */}
+        <header className="top-header">
+          <div className="header-left">
+            <button
+              type="button"
+              className="mobile-menu-toggle"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open menu"
+            >
+              <DashboardIcon name="menu" />
+            </button>
+            <div className="header-title-block">
+              <h1 className="header-page-title">{currentHeader.title}</h1>
+              <p className="header-page-subtitle">{currentHeader.subtitle}</p>
+            </div>
+          </div>
+
+          <div className="header-right">
+            {/* Realtime Status Pill */}
+            <div className={`realtime-status-pill ${socketConnected ? 'connected' : 'disconnected'}`}>
+              <span className="status-dot" />
+              <span>{socketConnected ? 'Realtime Connected' : 'Connecting...'}</span>
+            </div>
+
+            {/* Workspace Dropdown Tag */}
+            <div className="workspace-badge">
+              <span className="workspace-label">Workspace</span>
+              <span className="workspace-value">
+                CI360 Job Board
+                <DashboardIcon name="chevron-down" />
+              </span>
+            </div>
+
+            {/* Notification Bell */}
+            <button
+              type="button"
+              className="notification-bell-btn"
+              title="Notifications"
+              onClick={() => setNotificationOpen(v => !v)}
+            >
+              <DashboardIcon name="bell" />
+              {openTicketCount > 0 && (
+                <span className="notification-badge-count">{openTicketCount}</span>
+              )}
+            </button>
+
+            {/* User Avatar */}
+            <div className="header-user-avatar" title={user.name}>
+              {initialsFor(user.name)}
+            </div>
+          </div>
+        </header>
+
+        {/* PAGE CONTENT */}
+        <main className="app-content">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 2. OVERVIEW DASHBOARD COMPONENT (EXACT MATCH TO DESIGN SPEC)
+// ==========================================================================
+
+function OverviewPage({ data, setTab, openSupportModal }) {
+  const jobs = data.jobs || [];
+  const settings = data.settings || { categories: [], capacityPerCategory: 2, bufferHoursPerExtraJob: 8, startHour: 10.5, endHour: 19, workDays: [1, 2, 3, 4, 5] };
+  const categories = settings.categories || [];
+  const activeJobs = useMemo(() => jobs.filter(isPendingJob), [jobs]);
+  const completedJobs = useMemo(() => jobs.filter(isCompletedJob), [jobs]);
+  const urgentJobs = useMemo(() => activeJobs.filter(j => j.priority === 'Urgent'), [activeJobs]);
+
+  const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
+  const activeClientsCount = (data.clients || []).filter(c => c.status === 'active').length;
+
+  // Active jobs by category count
+  const activeByCategory = useMemo(() => {
+    const counts = {};
+    for (const j of activeJobs) {
+      counts[j.category] = (counts[j.category] || 0) + 1;
+    }
+    return counts;
+  }, [activeJobs]);
+
+  // Support Tickets Status Counts
+  const tickets = data.supportTickets || [];
+  const ticketCounts = useMemo(() => {
+    const map = { Open: 0, 'In Progress': 0, 'Waiting for User': 0, Resolved: 0, Closed: 0 };
+    for (const t of tickets) {
+      if (map[t.status] !== undefined) {
+        map[t.status] += 1;
+      }
+    }
+    return map;
+  }, [tickets]);
+
+  // Recently updated 4-6 jobs
+  const recentJobs = useMemo(() => {
+    return [...jobs]
+      .sort((a, b) => new Date(b.updatedAt || b.datePosted).getTime() - new Date(a.updatedAt || a.datePosted).getTime())
+      .slice(0, 5);
+  }, [jobs]);
+
+  const stripeColors = ['#E63946', '#1D4ED8', '#10B981', '#F59E0B', '#8B5CF6'];
+
+  return (
+    <div className="overview-grid">
+      {/* LEFT / CENTER MAJOR COLUMN */}
+      <div className="overview-left-col">
+        {/* CARD 1: CURRENT WORKLOAD */}
+        <section className="saas-card">
+          <div className="card-header">
+            <div className="card-title-group">
+              <DashboardIcon name="bar-chart" />
+              <h2 className="card-title">Current Workload</h2>
+            </div>
+          </div>
+
+          <div className="workload-table-wrap">
+            <table className="workload-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Active Jobs</th>
+                  <th>Capacity</th>
+                  <th>Utilization</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categories.map(cat => {
+                  const activeCount = activeByCategory[cat.name] || 0;
+                  const capacity = cat.baseCapacity || settings.capacityPerCategory || 2;
+                  const utilPct = capacity > 0 ? Math.round((activeCount / capacity) * 100) : 0;
+
+                  let tone = 'gray';
+                  if (utilPct > 100) tone = 'red';
+                  else if (utilPct > 50) tone = 'amber';
+                  else if (utilPct > 0) tone = 'green';
+
+                  return (
+                    <tr key={cat.name}>
+                      <td>
+                        <div className="workload-cat-cell">
+                          <CategoryIcon category={cat.name} />
+                          <span>{cat.name}</span>
+                        </div>
+                      </td>
+                      <td className="workload-count-num">{activeCount}</td>
+                      <td>{capacity}</td>
+                      <td>
+                        <div className="workload-util-cell">
+                          <span className={`workload-util-pct ${tone}`}>{utilPct}%</span>
+                          <div className="workload-progress-track">
+                            <div
+                              className={`workload-progress-fill ${tone}`}
+                              style={{ width: `${Math.min(utilPct, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* CARD 2: RECENTLY UPDATED JOBS */}
+        <section className="saas-card">
+          <div className="card-header">
+            <div className="card-title-group">
+              <h2 className="card-title">Recently Updated Jobs</h2>
+            </div>
+          </div>
+
+          <div className="recent-jobs-list">
+            {recentJobs.length === 0 ? (
+              <div className="empty-state-box">
+                <p className="empty-state-title">No jobs found</p>
+                <p className="empty-state-text">New active jobs will appear here once submitted.</p>
+              </div>
+            ) : (
+              recentJobs.map((job, idx) => {
+                const stripe = stripeColors[idx % stripeColors.length];
+                const dueDate = addWorkingHours(
+                  new Date(job.datePosted),
+                  job.teamOverrideHours ?? job.calculatedHours,
+                  settings
+                );
+
+                return (
+                  <div
+                    key={job.id}
+                    className="recent-job-item"
+                    style={{ '--job-stripe': stripe }}
+                  >
+                    <div className="recent-job-main">
+                      <span className="recent-job-title">{job.title}</span>
+                      <span className="recent-job-posted">
+                        Posted by {job.postedBy || 'Member'} · {formatDisplayDateTime(job.datePosted)}
+                      </span>
+                    </div>
+
+                    <div className="recent-job-badges-wrap">
+                      <span className="badge badge-category">{job.category}</span>
+                      <span className={`badge ${priorityBadgeClasses[job.priority] || 'badge-priority-medium'}`}>
+                        {job.priority}
+                      </span>
+                      <span className={`badge ${statusBadgeClasses[job.status] || 'badge-status-submitted'}`}>
+                        {statusLabels[job.status] || job.status}
+                      </span>
+                      <span className="recent-job-due">
+                        Due: {formatDisplayDate(dueDate)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="card-view-all-btn"
+            onClick={() => setTab('jobs')}
+          >
+            <span>View All Jobs</span>
+            <DashboardIcon name="chevron-right" />
+          </button>
+        </section>
+      </div>
+
+      {/* RIGHT RAIL INFORMATION COLUMN */}
+      <div className="overview-right-col">
+        {/* PANEL 1: JOB OVERVIEW 2x2 METRICS */}
+        <section className="saas-card">
+          <div className="card-header">
+            <h2 className="card-title">Job Overview</h2>
+            <span className="card-badge-pill">
+              Current
+              <DashboardIcon name="chevron-down" />
+            </span>
+          </div>
+
+          <div className="metrics-2x2-grid">
+            {/* Metric 1: Active Jobs */}
+            <div className="metric-box">
+              <div className="metric-box-top">
+                <div className="metric-icon-wrap green">
+                  <DashboardIcon name="jobs" />
+                </div>
+              </div>
+              <span className="metric-title">Active Jobs</span>
+              <span className="metric-number">{activeJobs.length}</span>
+              <span className="metric-subtext">Across all categories</span>
+            </div>
+
+            {/* Metric 2: Completed */}
+            <div className="metric-box">
+              <div className="metric-box-top">
+                <div className="metric-icon-wrap green">
+                  <DashboardIcon name="check-circle" />
+                </div>
+              </div>
+              <span className="metric-title">Completed</span>
+              <span className="metric-number">{completedJobs.length}</span>
+              <span className="metric-subtext">This period</span>
+            </div>
+
+            {/* Metric 3: Urgent */}
+            <div className="metric-box">
+              <div className="metric-box-top">
+                <div className="metric-icon-wrap red">
+                  <DashboardIcon name="alert-triangle" />
+                </div>
+              </div>
+              <span className="metric-title">Urgent</span>
+              <span className="metric-number">{urgentJobs.length}</span>
+              <span className="metric-subtext">Requires immediate attention</span>
+            </div>
+
+            {/* Metric 4: Clients or My Jobs */}
+            <div className="metric-box">
+              <div className="metric-box-top">
+                <div className="metric-icon-wrap blue">
+                  <DashboardIcon name="users" />
+                </div>
+              </div>
+              <span className="metric-title">{isSuperOrAdmin ? 'Clients' : 'My Jobs'}</span>
+              <span className="metric-number">{isSuperOrAdmin ? activeClientsCount : jobs.length}</span>
+              <span className="metric-subtext">{isSuperOrAdmin ? 'Active clients' : 'Your organisation jobs'}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* PANEL 2: WORKLOAD OVERVIEW */}
+        <section className="saas-card">
+          <div className="card-header">
+            <h2 className="card-title">Workload Overview</h2>
+            <span className="card-badge-pill">
+              Current
+              <DashboardIcon name="chevron-down" />
+            </span>
+          </div>
+
+          <div className="workload-overview-legend">
+            <div className="legend-item">
+              <span className="legend-square navy" />
+              <span>Active Jobs</span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-square gray" />
+              <span>Capacity</span>
+            </div>
+          </div>
+
+          <div className="workload-bar-list">
+            {categories.map(cat => {
+              const activeCount = activeByCategory[cat.name] || 0;
+              const capacity = cat.baseCapacity || settings.capacityPerCategory || 2;
+              const maxScale = Math.max(capacity * 1.5, activeCount, 1);
+              const activeWidth = (activeCount / maxScale) * 100;
+
+              let ratioTone = 'gray';
+              if (activeCount > capacity) ratioTone = 'red';
+              else if (activeCount === capacity && activeCount > 0) ratioTone = 'amber';
+              else if (activeCount > 0) ratioTone = 'green';
+
+              return (
+                <div key={cat.name} className="workload-bar-row">
+                  <span className="workload-bar-label">{cat.name}</span>
+                  <div className="workload-bar-track-wrap">
+                    <div
+                      className="workload-bar-active-fill"
+                      style={{ width: `${activeWidth}%` }}
+                    />
+                  </div>
+                  <span className={`workload-bar-ratio ${ratioTone}`}>
+                    {activeCount} / {capacity}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* PANEL 3: SUMMARY SPLIT CARDS */}
+        <div className="summary-split-grid">
+          {/* Support Tickets Summary */}
+          <div className="summary-compact-card">
+            <div>
+              <div className="summary-card-head">
+                <DashboardIcon name="support" />
+                <span>Support Tickets</span>
+              </div>
+              <div className="summary-kv-list">
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Open</span>
+                  <span className="summary-kv-val" style={{ color: '#175CD3' }}>{ticketCounts['Open']}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">In Progress</span>
+                  <span className="summary-kv-val" style={{ color: '#F79009' }}>{ticketCounts['In Progress']}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Waiting for User</span>
+                  <span className="summary-kv-val" style={{ color: '#027A48' }}>{ticketCounts['Waiting for User']}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Resolved</span>
+                  <span className="summary-kv-val">{ticketCounts['Resolved']}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Closed</span>
+                  <span className="summary-kv-val">{ticketCounts['Closed']}</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="summary-footer-btn"
+              onClick={() => setTab('support')}
+            >
+              <span>View all tickets</span>
+              <DashboardIcon name="chevron-right" />
+            </button>
+          </div>
+
+          {/* TAT Standards Summary */}
+          <div className="summary-compact-card">
+            <div>
+              <div className="summary-card-head">
+                <DashboardIcon name="clock" />
+                <span>TAT Standards</span>
+              </div>
+              <div className="summary-kv-list">
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Category Capacity</span>
+                  <span className="summary-kv-val">{settings.capacityPerCategory}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Extra Hours Over Capacity</span>
+                  <span className="summary-kv-val">{settings.bufferHoursPerExtraJob}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Working Hours</span>
+                  <span className="summary-kv-val">
+                    {formatHourDecimal(settings.startHour)} – {formatHourDecimal(settings.endHour)}
+                  </span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Work Days</span>
+                  <span className="summary-kv-val">{formatWorkDays(settings.workDays)}</span>
+                </div>
+                <div className="summary-kv-row">
+                  <span className="summary-kv-key">Total Categories</span>
+                  <span className="summary-kv-val">{categories.length}</span>
+                </div>
+              </div>
+            </div>
+            {isSuperOrAdmin && (
+              <button
+                type="button"
+                className="summary-footer-btn"
+                onClick={() => setTab('settings')}
+              >
+                <span>Manage Standards</span>
+                <DashboardIcon name="chevron-right" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* PANEL 4: QUICK ACTIONS */}
+        <section className="saas-card">
+          <div className="card-header" style={{ marginBottom: '14px' }}>
+            <div className="card-title-group" style={{ color: 'var(--ci-gold)' }}>
+              <DashboardIcon name="zap" />
+              <h2 className="card-title" style={{ color: 'var(--ci-text)' }}>Quick Actions</h2>
+            </div>
+          </div>
+
+          <div className="quick-actions-list">
+            <button
+              type="button"
+              className="quick-action-pill-btn"
+              onClick={() => setTab('submit')}
+            >
+              <DashboardIcon name="submit" />
+              <span>+ Submit a Job</span>
+            </button>
+
+            <button
+              type="button"
+              className="quick-action-pill-btn"
+              onClick={() => setTab('jobs')}
+            >
+              <DashboardIcon name="jobs" />
+              <span>View All Jobs</span>
+            </button>
+
+            <button
+              type="button"
+              className="quick-action-pill-btn"
+              onClick={openSupportModal}
+            >
+              <DashboardIcon name="support" />
+              <span>Raise Ticket</span>
+            </button>
+
+            {isSuperOrAdmin && (
+              <>
+                <button
+                  type="button"
+                  className="quick-action-pill-btn"
+                  onClick={() => setTab('clients')}
+                >
+                  <DashboardIcon name="users" />
+                  <span>Manage Clients</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="quick-action-pill-btn"
+                  onClick={() => setTab('settings')}
+                >
+                  <DashboardIcon name="clock" />
+                  <span>TAT Standards</span>
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 3. SUBMIT A JOB PAGE
+// ==========================================================================
+
+function SubmitJobPage({ data, reload, setTab }) {
+  const categories = data.settings?.categories || [];
+  const firstCat = categories[0]?.name || 'Website Changes';
+  const defaultClient = data.clients?.find(c => c.status === 'active')?.id || '';
+  const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
+
+  const [form, setForm] = useState({
+    clientId: defaultClient,
+    title: '',
+    description: '',
+    category: firstCat,
+    priority: 'Medium',
+    postedBy: data.user?.name || '',
+    assetLink: ''
+  });
+
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const handleSubmit = async e => {
+    e.preventDefault();
+    if (!form.title.trim()) return setError('Please enter a job title');
+    try {
+      setSubmitting(true);
+      setError('');
+      await api.createJob(form);
+      setSuccess('Job submitted successfully!');
+      await reload();
+      setTimeout(() => {
+        setTab('jobs');
+      }, 900);
+    } catch (err) {
+      setError(err.message || 'Failed to submit job');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+      <div className="saas-card">
+        <div className="card-header">
+          <h2 className="card-title" style={{ fontSize: '18px' }}>New job request</h2>
+        </div>
+
+        {error && <div className="alert-banner error">{error}</div>}
+        {success && <div className="alert-banner success">{success}</div>}
+
+        <form onSubmit={handleSubmit}>
+          {isSuperOrAdmin && (
+            <div className="form-group">
+              <label className="form-label">Client</label>
+              <select
+                className="form-select"
+                value={form.clientId}
+                onChange={e => setForm({ ...form, clientId: e.target.value })}
+                required
+              >
+                {data.clients?.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Job Title</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="e.g. Website banner update"
+              value={form.title}
+              onChange={e => setForm({ ...form, title: e.target.value })}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Description</label>
+            <textarea
+              className="form-textarea"
+              placeholder="Describe the requirements and scope for this request..."
+              value={form.description}
+              onChange={e => setForm({ ...form, description: e.target.value })}
+              required
+            />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Category</label>
+              <select
+                className="form-select"
+                value={form.category}
+                onChange={e => setForm({ ...form, category: e.target.value })}
+              >
+                {categories.map(cat => (
+                  <option key={cat.name} value={cat.name}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Priority</label>
+              <select
+                className="form-select"
+                value={form.priority}
+                onChange={e => setForm({ ...form, priority: e.target.value })}
+              >
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Asset Link</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Google Drive, Dropbox or another secure URL"
+                value={form.assetLink}
+                onChange={e => setForm({ ...form, assetLink: e.target.value })}
+              />
+              <span className="form-hint">Google Drive, Dropbox or another secure URL</span>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Posted By</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Your full name"
+                value={form.postedBy}
+                onChange={e => setForm({ ...form, postedBy: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setTab('overview')}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={submitting}
+            >
+              {submitting ? 'Submitting...' : 'Submit Job'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================================================
+// 4. JOB LIST PAGE (ALL JOBS / MY JOBS)
+// ==========================================================================
+
+function JobsListPage({ data, reload }) {
+  const jobs = data.jobs || [];
+  const settings = data.settings || {};
+  const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
+
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
+
+  // Editing Job Modal State
+  const [editingJob, setEditingJob] = useState(null);
+  const [editStatus, setEditStatus] = useState('');
+  const [editOverrideHours, setEditOverrideHours] = useState('');
+  const [editOverrideNote, setEditOverrideNote] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(j => {
+      if (categoryFilter && j.category !== categoryFilter) return false;
+      if (priorityFilter && j.priority !== priorityFilter) return false;
+      if (statusFilter && j.status !== statusFilter) return false;
+      if (clientFilter && j.clientId !== clientFilter) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchTitle = (j.title || '').toLowerCase().includes(q);
+        const matchDesc = (j.description || '').toLowerCase().includes(q);
+        const matchPosted = (j.postedBy || '').toLowerCase().includes(q);
+        if (!matchTitle && !matchDesc && !matchPosted) return false;
+      }
+      return true;
+    });
+  }, [jobs, categoryFilter, priorityFilter, statusFilter, clientFilter, search]);
+
+  const openEditModal = job => {
+    setEditingJob(job);
+    setEditStatus(job.status);
+    setEditOverrideHours(job.teamOverrideHours ?? '');
+    setEditOverrideNote(job.teamOverrideNote ?? '');
+  };
+
+  const saveJobUpdate = async e => {
+    e.preventDefault();
+    if (!editingJob) return;
+    try {
+      setSavingEdit(true);
+      await api.updateJob(editingJob.id, {
+        status: editStatus,
+        teamOverrideHours: editOverrideHours === '' ? null : Number(editOverrideHours),
+        teamOverrideNote: editOverrideNote
+      });
+      setEditingJob(null);
+      await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to update job');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  return (
+    <div>
+      {/* FILTER TOOLBAR */}
+      <div className="filter-toolbar">
+        <div className="filter-search-box">
+          <DashboardIcon name="search" />
+          <input
+            type="text"
+            placeholder="Search by title, description or author..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
+        <select
+          className="filter-select"
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
+        >
+          <option value="">All Categories</option>
+          {settings.categories?.map(c => (
+            <option key={c.name} value={c.name}>{c.name}</option>
+          ))}
+        </select>
+
+        <select
+          className="filter-select"
+          value={priorityFilter}
+          onChange={e => setPriorityFilter(e.target.value)}
+        >
+          <option value="">All Priorities</option>
+          <option value="Urgent">Urgent</option>
+          <option value="High">High</option>
+          <option value="Medium">Medium</option>
+          <option value="Low">Low</option>
+        </select>
+
+        <select
+          className="filter-select"
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+        >
+          <option value="">All Statuses</option>
+          <option value="submitted">Submitted</option>
+          <option value="under_review">Under Review</option>
+          <option value="in_progress">In Progress</option>
+          <option value="waiting_client">Waiting for Client</option>
+          <option value="revision_requested">Revision Requested</option>
+          <option value="on_hold">On Hold</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+
+        {isSuperOrAdmin && (
+          <select
+            className="filter-select"
+            value={clientFilter}
+            onChange={e => setClientFilter(e.target.value)}
+          >
+            <option value="">All Clients</option>
+            {data.clients?.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      {/* JOBS DATA TABLE */}
+      <div className="data-table-container">
+        {filteredJobs.length === 0 ? (
+          <div className="empty-state-box">
+            <p className="empty-state-title">No jobs found.</p>
+            <p className="empty-state-text">Try adjusting your filters or search criteria.</p>
+          </div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Job Title</th>
+                {isSuperOrAdmin && <th>Client</th>}
+                <th>Category</th>
+                <th>Priority</th>
+                <th>Status</th>
+                <th>Due Date</th>
+                <th>Posted By</th>
+                {isSuperOrAdmin && <th>Action</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredJobs.map(job => {
+                const dueDate = addWorkingHours(
+                  new Date(job.datePosted),
+                  job.teamOverrideHours ?? job.calculatedHours,
+                  settings
+                );
+
+                return (
+                  <tr key={job.id}>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <strong style={{ color: 'var(--ci-text)', fontSize: '14px' }}>{job.title}</strong>
+                        {job.assetLink && (
+                          <a
+                            href={job.assetLink}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '12px', marginTop: '2px', color: 'var(--ci-info)' }}
+                          >
+                            View Asset Link ↗
+                          </a>
+                        )}
+                      </div>
+                    </td>
+
+                    {isSuperOrAdmin && (
+                      <td style={{ fontWeight: 500, color: 'var(--ci-text)' }}>
+                        {data.clients?.find(c => c.id === job.clientId)?.name || job.clientId}
+                      </td>
+                    )}
+
+                    <td>
+                      <span className="badge badge-category">{job.category}</span>
+                    </td>
+
+                    <td>
+                      <span className={`badge ${priorityBadgeClasses[job.priority] || 'badge-priority-medium'}`}>
+                        {job.priority}
+                      </span>
+                    </td>
+
+                    <td>
+                      <span className={`badge ${statusBadgeClasses[job.status] || 'badge-status-submitted'}`}>
+                        {statusLabels[job.status] || job.status}
+                      </span>
+                    </td>
+
+                    <td style={{ fontWeight: 600, color: 'var(--ci-text)' }}>
+                      {formatDisplayDate(dueDate)}
+                    </td>
+
+                    <td style={{ color: 'var(--ci-text-secondary)', fontSize: '13px' }}>
+                      {job.postedBy}
+                    </td>
+
+                    {isSuperOrAdmin && (
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => openEditModal(job)}
+                        >
+                          Manage
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ADMIN EDIT JOB MODAL */}
+      {editingJob && (
+        <div className="modal-backdrop" onClick={() => setEditingJob(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Manage Job: {editingJob.title}</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setEditingJob(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={saveJobUpdate}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">Job Status</label>
+                  <select
+                    className="form-select"
+                    value={editStatus}
+                    onChange={e => setEditStatus(e.target.value)}
+                  >
+                    <option value="submitted">Submitted</option>
+                    <option value="under_review">Under Review</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="waiting_client">Waiting for Client</option>
+                    <option value="revision_requested">Revision Requested</option>
+                    <option value="on_hold">On Hold</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Team TAT Override Hours (optional)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    className="form-control"
+                    placeholder={`Calculated default: ${editingJob.calculatedHours} hours`}
+                    value={editOverrideHours}
+                    onChange={e => setEditOverrideHours(e.target.value)}
+                  />
+                  <span className="form-hint">Leave blank to use automatic TAT calculation.</span>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Team TAT Override Note</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="Reason for TAT adjustment..."
+                    value={editOverrideNote}
+                    onChange={e => setEditOverrideNote(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setEditingJob(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================================================
+// 5. TAT STANDARDS PAGE (ADMIN ONLY)
+// ==========================================================================
+
+function TatStandardsPage({ data, reload }) {
+  const [settings, setSettings] = useState(() => data.settings || {
+    categories: [],
+    capacityPerCategory: 2,
+    bufferHoursPerExtraJob: 8,
+    startHour: 10.5,
+    endHour: 19,
+    workDays: [1, 2, 3, 4, 5]
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState('');
+
+  const updateCategoryName = (idx, name) => {
+    setSettings(prev => ({
+      ...prev,
+      categories: prev.categories.map((c, i) => i === idx ? { ...c, name } : c)
+    }));
+  };
+
+  const updateCategoryHours = (idx, baseHours) => {
+    setSettings(prev => ({
+      ...prev,
+      categories: prev.categories.map((c, i) => i === idx ? { ...c, baseHours: Number(baseHours) } : c)
+    }));
+  };
+
+  const removeCategory = idx => {
+    setSettings(prev => ({
+      ...prev,
+      categories: prev.categories.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const addCategory = () => {
+    setSettings(prev => ({
+      ...prev,
+      categories: [...prev.categories, { name: 'New category', baseHours: 24 }]
+    }));
+  };
+
+  const handleSave = async e => {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setSuccess('');
+      await api.saveSettings(settings);
+      await reload();
+      setSuccess('TAT standards saved successfully!');
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      alert(err.message || 'Failed to save standards');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: '840px', margin: '0 auto' }}>
+      <div className="saas-card">
+        <div className="card-header">
+          <h2 className="card-title">TAT Standards</h2>
+        </div>
+
+        {success && <div className="alert-banner success">{success}</div>}
+
+        <form onSubmit={handleSave}>
+          <div style={{ marginBottom: '24px' }}>
+            <h3 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '12px', color: 'var(--ci-text)' }}>
+              Category Base Hours
+            </h3>
+
+            <div className="data-table-container">
+              <table className="data-table">
                 <thead>
-                    <tr>{columns.map(column => <th key={column.key}>{column.label}</th>)}</tr>
+                  <tr>
+                    <th>Category Name</th>
+                    <th>Base Hours</th>
+                    <th style={{ width: '80px' }}>Action</th>
+                  </tr>
                 </thead>
                 <tbody>
-                    {rows.map(row => (
-                        <tr key={row.id}>
-                            {columns.map(column => (
-                                <td data-label={column.label} key={column.key}>{column.render ? column.render(row) : row[column.key]}</td>
-                            ))}
-                        </tr>
-                    ))}
-                </tbody>
-            </table>
-        </div>
-    );
-}
-
-function Employees({ data, reload }) {
-    const [users, setUsers] = useState([]);
-    const [directoryUsers, setDirectoryUsers] = useState([]);
-    const [roles, setRoles] = useState([]);
-    const [departments, setDepartments] = useState([]);
-    const [designations, setDesignations] = useState([]);
-    const [error, setError] = useState('');
-    const [message, setMessage] = useState('');
-    const [loading, setLoading] = useState(true);
-    const [form, setForm] = useState({ id: '', name: '', email: '', phone: '', password: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '', roleId: 'employee' });
-    const canViewEmployees = can(data, 'employees.view');
-    const canCreateEmployees = can(data, 'employees.create');
-    const canEditEmployees = can(data, 'employees.edit');
-    const loadEmployees = useCallback(async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const [usersResult, rolesResult, departmentsResult, designationsResult] = await Promise.all([
-                canAny(data, ['employees.view', 'employees.create', 'employees.edit']) ? api.users() : Promise.resolve({ users: [] }),
-                can(data, 'roles.view') ? api.roles() : Promise.resolve({ roles: [] }),
-                canAny(data, ['employees.view', 'employees.create', 'employees.edit']) ? api.departments() : Promise.resolve({ departments: [] }),
-                canAny(data, ['employees.view', 'employees.create', 'employees.edit']) ? api.designations() : Promise.resolve({ designations: [] })
-            ]);
-            const directory = (usersResult.users || []).filter(user => user.accountType !== 'client');
-            setDirectoryUsers(directory);
-            setUsers(directory.filter(user => user.accountType === 'employee'));
-            setRoles((rolesResult.roles || []).filter(role => role.roleType !== 'client' && role.status === 'active'));
-            setDepartments(departmentsResult.departments || []);
-            setDesignations(designationsResult.designations || []);
-        }
-        catch (err) {
-            setError(err.message);
-        }
-        finally {
-            setLoading(false);
-        }
-    }, [data, canViewEmployees]);
-    useEffect(() => { loadEmployees(); }, [loadEmployees]);
-    const activeEmployees = users.filter(user => user.status === 'active').length;
-    const createEmployee = async event => {
-        event.preventDefault();
-        setError('');
-        setMessage('');
-        try {
-            await api.createUser({ ...form, accountType: 'employee', roleId: form.roleId || 'employee' });
-            setForm({ id: '', name: '', email: '', phone: '', password: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '', roleId: 'employee' });
-            setMessage('Employee created successfully.');
-            await loadEmployees();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const updateEmployee = async (employee, patch) => {
-        setError('');
-        setMessage('');
-        try {
-            await api.updateUser(employee.id, patch);
-            setMessage('Employee updated.');
-            await loadEmployees();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return (
-        <section className="management-page">
-            <div className="management-header">
-                <div>
-                    <span>Employee Management</span>
-                    <h2>Employees</h2>
-                    <p>Internal employee accounts, department structure, designations and reporting lines.</p>
-                </div>
-            </div>
-            {message && <div className="alert success">{message}</div>}
-            {error && <div className="alert error">{error}</div>}
-            {canViewEmployees && <div className="management-stats">
-                <DashboardStat tone="blue" icon="users" value={users.length} label="Employees" support="Internal employee accounts" />
-                <DashboardStat tone="green" icon="completed" value={activeEmployees} label="Active" support="Currently enabled" />
-                <DashboardStat tone="purple" icon="clock" value={users.filter(user => user.lastLogin).length} label="Logged In" support="Have login history" />
-            </div>}
-            {canCreateEmployees && <article className="dashboard-card management-card">
-                <div className="dashboard-card-head"><div><h3>Add Employee</h3><p>Create an employee account and place it in the company hierarchy.</p></div></div>
-                <form className="management-form" onSubmit={createEmployee}>
-                    <div className="row">
-                        <label>Employee User ID<input required value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
-                        <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                        <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-                    </div>
-                    <div className="row">
-                        <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-                        <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
-                        <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
-                    </div>
-                    <div className="row">
-                        <label>Department<select value={form.departmentId} onChange={event => setForm({ ...form, departmentId: event.target.value })}><option value="">None</option>{departments.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                        <label>Designation<select value={form.designationId} onChange={event => setForm({ ...form, designationId: event.target.value })}><option value="">None</option>{designations.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                        <label>Reporting Manager<select value={form.managerUserId} onChange={event => setForm({ ...form, managerUserId: event.target.value })}><option value="">No manager</option>{directoryUsers.filter(user => user.status === 'active').map(user => <option key={user.id} value={user.id}>{user.name}</option>)}</select></label>
-                    </div>
-                    {can(data, 'users.assign_role') && roles.length > 0 && <label>Role<select value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>{roles.filter(role => role.id !== 'super_admin' && role.id !== 'admin').map(role => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>}
-                    <label>Temporary Password<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
-                    <button className="primary">+ Add Employee</button>
-                </form>
-            </article>}
-            {canViewEmployees && <article className="dashboard-card management-card">
-                <div className="dashboard-card-head"><div><h3>Team Directory</h3><p>{loading ? 'Loading employees...' : `${users.length} employee${users.length === 1 ? '' : 's'} in the workspace.`}</p></div></div>
-                <ManagementTable
-                    empty="No employees found."
-                    rows={users}
-                    columns={[
-                        { key: 'name', label: 'Employee', render: user => <><b>{user.name}</b><small className="table-subtext">{user.employeeId || user.id}</small></> },
-                        { key: 'email', label: 'Contact', render: user => <>{user.email || '-'}<small className="table-subtext">{user.phone || ''}</small></> },
-                        { key: 'departmentName', label: 'Department', render: user => canEditEmployees ? <select value={user.departmentId || ''} onChange={event => updateEmployee(user, { departmentId: event.target.value })}><option value="">None</option>{departments.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : user.departmentName || '-' },
-                        { key: 'designationName', label: 'Designation', render: user => canEditEmployees ? <select value={user.designationId || ''} onChange={event => updateEmployee(user, { designationId: event.target.value })}><option value="">None</option>{designations.filter(item => item.status === 'active').map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select> : user.designationName || '-' },
-                        { key: 'managerName', label: 'Manager', render: user => canEditEmployees ? <select value={user.managerUserId || ''} onChange={event => updateEmployee(user, { managerUserId: event.target.value })}><option value="">None</option>{directoryUsers.filter(manager => manager.id !== user.id && manager.status === 'active').map(manager => <option key={manager.id} value={manager.id}>{manager.name}</option>)}</select> : user.managerName || '-' },
-                        { key: 'status', label: 'Status', render: user => canEditEmployees ? <select value={user.status} onChange={event => updateEmployee(user, { status: event.target.value })}><option value="active">active</option><option value="archived">archived</option></select> : <span className={`status-pill ${user.status}`}>{user.status}</span> },
-                        { key: 'lastLogin', label: 'Last Login', render: user => user.lastLogin ? shortDateTime(user.lastLogin) : '-' }
-                    ]}
-                />
-            </article>}
-            {!canViewEmployees && !canCreateEmployees && <DashboardEmptyState title="No employee access." body="Your role does not have Employee Management permissions." />}
-        </section>
-    );
-}
-
-const summarizeAuditDetails = details => {
-    const entries = Object.entries(details || {}).filter(([, value]) => value !== undefined && value !== null && value !== '');
-    if (!entries.length)
-        return '-';
-    return entries.slice(0, 4).map(([key, value]) => {
-        const text = Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}` : String(value);
-        return `${key}: ${text.length > 80 ? `${text.slice(0, 77)}...` : text}`;
-    }).join(' | ');
-};
-
-function AuditLogs() {
-    const [logs, setLogs] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    useEffect(() => {
-        let active = true;
-        api.auditLogs()
-            .then(result => { if (active) setLogs(result.logs || []); })
-            .catch(err => { if (active) setError(err.message); })
-            .finally(() => { if (active) setLoading(false); });
-        return () => { active = false; };
-    }, []);
-    return (
-        <section className="management-page">
-            <div className="management-header">
-                <div>
-                    <span>Security</span>
-                    <h2>Audit Logs</h2>
-                    <p>Recent administrative and workflow events recorded by the system.</p>
-                </div>
-            </div>
-            {error && <div className="alert error">{error}</div>}
-            <article className="dashboard-card management-card">
-                <div className="dashboard-card-head">
-                    <div>
-                        <h3>Recent Activity</h3>
-                        <p>{loading ? 'Loading audit history...' : `${logs.length} recent event${logs.length === 1 ? '' : 's'}.`}</p>
-                    </div>
-                </div>
-                <ManagementTable
-                    empty="No audit logs found."
-                    rows={logs}
-                    columns={[
-                        { key: 'createdAt', label: 'Time', render: log => shortDateTime(log.createdAt) },
-                        { key: 'actorId', label: 'Actor' },
-                        { key: 'action', label: 'Action', render: log => <span className="status-pill active">{log.action}</span> },
-                        { key: 'entityType', label: 'Entity' },
-                        { key: 'entityId', label: 'Entity ID' },
-                        { key: 'details', label: 'Details', render: log => summarizeAuditDetails(log.details) }
-                    ]}
-                />
-            </article>
-        </section>
-    );
-}
-
-function UsersRoles({ data, reload }) {
-    const [activePanel, setActivePanel] = useState('users');
-    const [users, setUsers] = useState([]);
-    const [roles, setRoles] = useState([]);
-    const [permissions, setPermissions] = useState([]);
-    const [departments, setDepartments] = useState([]);
-    const [designations, setDesignations] = useState([]);
-    const [selectedRoleId, setSelectedRoleId] = useState('');
-    const [draftPermissions, setDraftPermissions] = useState([]);
-    const [message, setMessage] = useState('');
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(true);
-    const [form, setForm] = useState({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
-    const [roleForm, setRoleForm] = useState({ name: '', description: '', roleType: 'internal', level: 40 });
-    const loadManagement = useCallback(async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const [usersResult, rolesResult, permissionsResult, departmentsResult, designationsResult] = await Promise.all([
-                canAny(data, ['users.view', 'users.edit']) ? api.users() : Promise.resolve({ users: [] }),
-                canAny(data, ['roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions', 'users.assign_role']) ? api.roles() : Promise.resolve({ roles: [] }),
-                can(data, 'roles.manage_permissions') ? api.permissions() : Promise.resolve({ permissions: [] }),
-                canAny(data, ['departments.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.departments() : Promise.resolve({ departments: [] }),
-                canAny(data, ['designations.manage', 'users.view', 'users.create', 'users.edit', 'employees.view', 'employees.create', 'employees.edit']) ? api.designations() : Promise.resolve({ designations: [] })
-            ]);
-            setUsers(usersResult.users || []);
-            setRoles(rolesResult.roles || []);
-            setPermissions(permissionsResult.permissions || []);
-            setDepartments(departmentsResult.departments || []);
-            setDesignations(designationsResult.designations || []);
-        }
-        catch (err) {
-            setError(err.message);
-        }
-        finally {
-            setLoading(false);
-        }
-    }, [data]);
-    useEffect(() => { loadManagement(); }, [loadManagement]);
-    useEffect(() => {
-        if (selectedRoleId || !roles.length) return;
-        setSelectedRoleId(roles[0].id);
-    }, [roles, selectedRoleId]);
-    const selectedRole = roles.find(role => role.id === selectedRoleId);
-    useEffect(() => {
-        setDraftPermissions(selectedRole?.permissions || []);
-    }, [selectedRoleId, selectedRole]);
-    const canManageSuperAdmin = data.user.accountType === 'super_admin' || data.user.roleSlug === 'super_admin';
-    const roleOptions = useMemo(() => roles.filter(role => {
-        const typeMatches = form.accountType === 'client' ? role.roleType === 'client' : role.roleType !== 'client';
-        if (!typeMatches)
-            return false;
-        if (!canManageSuperAdmin && Number(role.level || 0) >= 80)
-            return false;
-        return role.id !== 'super_admin' || (canManageSuperAdmin && form.accountType === 'super_admin');
-    }), [roles, form.accountType, canManageSuperAdmin]);
-    const internalUsers = useMemo(() => users.filter(user => user.accountType !== 'client'), [users]);
-    const canEditUsers = canAny(data, ['users.edit', 'employees.edit']);
-    const canEditRoles = can(data, 'roles.edit');
-    const managementTabs = useMemo(() => [
-        canAny(data, ['users.view', 'users.create', 'users.edit', 'users.assign_role']) && ['users', 'Users'],
-        canAny(data, ['roles.view', 'roles.create', 'roles.edit', 'roles.manage_permissions']) && ['roles', 'Roles'],
-        can(data, 'roles.manage_permissions') && ['permissions', 'Permissions'],
-        can(data, 'departments.manage') && ['departments', 'Departments'],
-        can(data, 'designations.manage') && ['designations', 'Designations'],
-        can(data, 'users.view') && ['hierarchy', 'Hierarchy']
-    ].filter(Boolean), [data]);
-    useEffect(() => {
-        if (managementTabs.length && !managementTabs.some(([id]) => id === activePanel))
-            setActivePanel(managementTabs[0][0]);
-    }, [activePanel, managementTabs]);
-    useEffect(() => {
-        if (roleOptions.some(role => role.id === form.roleId)) return;
-        setForm(current => ({ ...current, roleId: roleOptions[0]?.id || '' }));
-    }, [form.accountType, form.roleId, roleOptions]);
-    const permissionGroups = useMemo(() => permissions.reduce((groups, permission) => {
-        groups[permission.module] = [...(groups[permission.module] || []), permission];
-        return groups;
-    }, {}), [permissions]);
-    const togglePermission = permissionId => {
-        setDraftPermissions(current => current.includes(permissionId)
-            ? current.filter(item => item !== permissionId)
-            : [...current, permissionId]);
-    };
-    const saveRolePermissions = async () => {
-        if (!selectedRole)
-            return;
-        try {
-            await api.updateRolePermissions(selectedRole.id, draftPermissions);
-            setMessage('Role permissions saved.');
-            await loadManagement();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const createUser = async event => {
-        event.preventDefault();
-        try {
-            await api.createUser(form);
-            setMessage('User created successfully.');
-            setForm({ id: '', name: '', email: '', phone: '', password: '', accountType: 'employee', roleId: roleOptions[0]?.id || '', clientId: '', employeeId: '', joiningDate: '', departmentId: '', designationId: '', managerUserId: '' });
-            setActivePanel('users');
-            await loadManagement();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const createRole = async event => {
-        event.preventDefault();
-        setMessage('');
-        setError('');
-        try {
-            await api.createRole({ ...roleForm, level: Number(roleForm.level), permissions: [] });
-            setRoleForm({ name: '', description: '', roleType: 'internal', level: 40 });
-            setMessage('Role created. Select it below to configure permissions.');
-            await loadManagement();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const updateRole = async (role, patch) => {
-        try {
-            await api.updateRole(role.id, patch);
-            setMessage('Role updated.');
-            await loadManagement();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const updateUser = async (user, patch) => {
-        try {
-            await api.updateUser(user.id, patch);
-            setMessage('User updated.');
-            await loadManagement();
-            await reload?.();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return (
-        <section className="management-page">
-            <div className="management-header">
-                <div>
-                    <span>Access Control</span>
-                    <h2>Users & Roles</h2>
-                    <p>Database-backed roles, permissions, and account access.</p>
-                </div>
-            </div>
-            {message && <div className="alert success">{message}</div>}
-            {error && <div className="alert error">{error}</div>}
-            <div className="management-tabs" role="tablist" aria-label="Users and roles sections">
-                {managementTabs.map(([id, label]) => (
-                    <button type="button" className={activePanel === id ? 'active' : ''} onClick={() => setActivePanel(id)} key={id}>{label}</button>
-                ))}
-            </div>
-            {activePanel === 'users' && (
-                <>
-                    {can(data, 'users.create') && (
-                        <article className="dashboard-card management-card">
-                            <div className="dashboard-card-head">
-                                <div>
-                                    <h3>Add User</h3>
-                                    <p>Create Admin, Employee, or Client accounts with a protected role.</p>
-                                </div>
-                            </div>
-                            <form className="management-form" onSubmit={createUser}>
-                                <div className="row">
-                                    <label>User ID<input required value={form.id} onChange={event => setForm({ ...form, id: event.target.value })} /></label>
-                                    <label>Full Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                                </div>
-                                <div className="row">
-                                    <label>Email<input type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-                                    <label>Phone<input value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-                                </div>
-                                <div className="row">
-                                    <label>Account Type
-                                        <select value={form.accountType} onChange={event => setForm({ ...form, accountType: event.target.value, clientId: '', departmentId: '', designationId: '', managerUserId: '' })}>
-                                            <option value="employee">Employee</option>
-                                            {canManageSuperAdmin && <option value="admin">Admin</option>}
-                                            <option value="client">Client</option>
-                                            {canManageSuperAdmin && <option value="super_admin">Super Admin</option>}
-                                        </select>
-                                    </label>
-                                    <label>Role
-                                        <select required value={form.roleId} onChange={event => setForm({ ...form, roleId: event.target.value })}>
-                                            {roleOptions.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
-                                        </select>
-                                    </label>
-                                </div>
-                                {form.accountType === 'client' ? (
-                                    <label>Client Organization
-                                        <select required value={form.clientId} onChange={event => setForm({ ...form, clientId: event.target.value })}>
-                                            <option value="">Select client</option>
-                                            {data.clients.map(client => <option value={client.id} key={client.id}>{client.name}</option>)}
-                                        </select>
-                                    </label>
-                                ) : (
-                                    <>
-                                        <div className="row">
-                                            <label>Department
-                                                <select value={form.departmentId} onChange={event => setForm({ ...form, departmentId: event.target.value })}>
-                                                    <option value="">No department</option>
-                                                    {departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-                                                </select>
-                                            </label>
-                                            <label>Designation
-                                                <select value={form.designationId} onChange={event => setForm({ ...form, designationId: event.target.value })}>
-                                                    <option value="">No designation</option>
-                                                    {designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
-                                                </select>
-                                            </label>
-                                        </div>
-                                        <div className="row">
-                                            <label>Reporting Manager
-                                                <select value={form.managerUserId} onChange={event => setForm({ ...form, managerUserId: event.target.value })}>
-                                                    <option value="">No manager</option>
-                                                    {internalUsers.map(user => <option value={user.id} key={user.id}>{user.name}</option>)}
-                                                </select>
-                                            </label>
-                                            <label>Employee ID<input value={form.employeeId} onChange={event => setForm({ ...form, employeeId: event.target.value })} /></label>
-                                            <label>Joining Date<input type="date" value={form.joiningDate} onChange={event => setForm({ ...form, joiningDate: event.target.value })} /></label>
-                                        </div>
-                                    </>
-                                )}
-                                <label>Temporary Password<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} /></label>
-                                <button className="primary">Create User</button>
-                            </form>
-                        </article>
-                    )}
-                    <article className="dashboard-card management-card">
-                        <div className="dashboard-card-head">
-                            <div>
-                                <h3>Users</h3>
-                                <p>{loading ? 'Loading users...' : `${users.length} account${users.length === 1 ? '' : 's'} in the workspace.`}</p>
-                            </div>
-                        </div>
-                        <ManagementTable
-                            empty="No users found."
-                            rows={users}
-                            columns={[
-                                { key: 'name', label: 'Name', render: user => <b>{user.name}</b> },
-                                { key: 'id', label: 'User ID' },
-                                { key: 'email', label: 'Email', render: user => user.email || '-' },
-                                { key: 'accountType', label: 'Type', render: user => <span className={`status-pill ${user.accountType}`}>{user.accountType}</span> },
-                                { key: 'roleName', label: 'Role', render: user => can(data, 'users.assign_role') && user.accountType !== 'client' && user.id !== data.user.id ? <select value={user.roleId || ''} onChange={event => updateUser(user, { roleId: event.target.value })}>{roles.filter(role => role.roleType !== 'client' && (canManageSuperAdmin || Number(role.level || 0) < 80) && (user.accountType === 'super_admin' ? role.id === 'super_admin' : role.id !== 'super_admin')).map(role => <option value={role.id} key={role.id}>{role.name}</option>)}</select> : user.roleName },
-                                { key: 'departmentName', label: 'Department', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.departmentId || ''} onChange={event => updateUser(user, { departmentId: event.target.value })}><option value="">None</option>{departments.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.departmentName || '-' },
-                                { key: 'designationName', label: 'Designation', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.designationId || ''} onChange={event => updateUser(user, { designationId: event.target.value })}><option value="">None</option>{designations.filter(item => item.status === 'active').map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select> : user.designationName || '-' },
-                                { key: 'managerName', label: 'Manager', render: user => user.accountType === 'client' ? '-' : canEditUsers ? <select value={user.managerUserId || ''} onChange={event => updateUser(user, { managerUserId: event.target.value })}><option value="">None</option>{internalUsers.filter(manager => manager.id !== user.id).map(manager => <option value={manager.id} key={manager.id}>{manager.name}</option>)}</select> : user.managerName || '-' },
-                                { key: 'status', label: 'Status', render: user => canEditUsers ? <select value={user.status} onChange={event => updateUser(user, { status: event.target.value })}><option value="active">active</option><option value="archived">archived</option></select> : <span className={`status-pill ${user.status}`}>{user.status}</span> }
-                            ]}
+                  {settings.categories.map((cat, i) => (
+                    <tr key={i}>
+                      <td>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={cat.name}
+                          onChange={e => updateCategoryName(i, e.target.value)}
+                          required
                         />
-                    </article>
-                </>
-            )}
-            {activePanel === 'roles' && (
-                <article className="dashboard-card management-card">
-                    <div className="dashboard-card-head">
-                        <div>
-                            <h3>Role Permissions</h3>
-                            <p>{loading ? 'Loading permission catalog...' : 'Select a role and control module access.'}</p>
-                        </div>
-                    </div>
-                    {can(data, 'roles.create') && (
-                        <form className="management-form compact" onSubmit={createRole}>
-                            <div className="row">
-                                <label>Role Name<input required value={roleForm.name} onChange={event => setRoleForm({ ...roleForm, name: event.target.value })} /></label>
-                                <label>Role Type
-                                    <select value={roleForm.roleType} onChange={event => setRoleForm({ ...roleForm, roleType: event.target.value })}>
-                                        <option value="internal">Internal</option>
-                                        <option value="client">Client</option>
-                                    </select>
-                                </label>
-                                <label>Level<input type="number" min="0" max={canManageSuperAdmin ? "100" : "79"} value={roleForm.level} onChange={event => setRoleForm({ ...roleForm, level: event.target.value })} /></label>
-                            </div>
-                            <label>Description<input value={roleForm.description} onChange={event => setRoleForm({ ...roleForm, description: event.target.value })} /></label>
-                            <button className="primary">Create Role</button>
-                        </form>
-                    )}
-                    {roles.length ? (
-                        <>
-                            <ManagementTable
-                                empty="No roles available."
-                                rows={roles}
-                                columns={[
-                                    { key: 'name', label: 'Role', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.name} onBlur={event => event.target.value.trim() && event.target.value.trim() !== role.name && updateRole(role, { name: event.target.value.trim() })} /> : <b>{role.name}</b> },
-                                    { key: 'description', label: 'Description', render: role => canEditRoles && role.id !== 'super_admin' ? <input defaultValue={role.description || ''} onBlur={event => event.target.value !== (role.description || '') && updateRole(role, { description: event.target.value })} /> : role.description || '-' },
-                                    { key: 'roleType', label: 'Type', render: role => canEditRoles && !role.isSystem ? <select value={role.roleType} onChange={event => updateRole(role, { roleType: event.target.value })}><option value="internal">internal</option><option value="client">client</option></select> : <span className={`status-pill ${role.roleType}`}>{role.roleType}</span> },
-                                    { key: 'level', label: 'Level', render: role => canEditRoles && role.id !== 'super_admin' ? <input type="number" min="0" max="100" defaultValue={role.level} onBlur={event => Number(event.target.value) !== Number(role.level) && updateRole(role, { level: Number(event.target.value) })} /> : role.level },
-                                    { key: 'status', label: 'Status', render: role => canEditRoles && !role.isSystem ? <select value={role.status} onChange={event => updateRole(role, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> : <span className={`status-pill ${role.status}`}>{role.status}</span> }
-                                ]}
-                            />
-                            <label className="management-select">Role
-                                <select value={selectedRoleId} onChange={event => setSelectedRoleId(event.target.value)}>
-                                    {roles.map(role => <option value={role.id} key={role.id}>{role.name}</option>)}
-                                </select>
-                            </label>
-                            <div className="permission-groups">
-                                {Object.entries(permissionGroups).map(([module, items]) => (
-                                    <section className="permission-group" key={module}>
-                                        <h4>{module.replace(/_/g, ' ')}</h4>
-                                        <div>
-                                            {items.map(permission => (
-                                                <label className="permission-check" key={permission.id}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={draftPermissions.includes(permission.id)}
-                                                        onChange={() => togglePermission(permission.id)}
-                                                        disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}
-                                                    />
-                                                    <span>{permission.label}</span>
-                                                </label>
-                                            ))}
-                                        </div>
-                                    </section>
-                                ))}
-                            </div>
-                            {selectedRole?.id === 'super_admin' && <p className="field-note">Super Admin permissions are protected and always include every permission.</p>}
-                            <button type="button" className="primary" onClick={saveRolePermissions} disabled={!can(data, 'roles.manage_permissions') || selectedRole?.id === 'super_admin'}>Save Role Permissions</button>
-                        </>
-                    ) : <DashboardEmptyState title="No roles available." body="Roles will appear here after the RBAC catalog is seeded." />}
-                </article>
-            )}
-            {activePanel === 'permissions' && <UserPermissionsPanel users={users} permissions={permissions} currentUser={data.user} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
-            {activePanel === 'departments' && <DepartmentsPanel departments={departments} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
-            {activePanel === 'designations' && <DesignationsPanel designations={designations} reloadManagement={loadManagement} setMessage={setMessage} setError={setError} />}
-            {activePanel === 'hierarchy' && <HierarchyPanel users={internalUsers} />}
-        </section>
-    );
+                      </td>
+                      <td style={{ width: '140px' }}>
+                        <input
+                          type="number"
+                          min="1"
+                          className="form-control"
+                          value={cat.baseHours}
+                          onChange={e => updateCategoryHours(i, e.target.value)}
+                          required
+                        />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ color: 'var(--ci-danger)' }}
+                          onClick={() => removeCategory(i)}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ marginTop: '12px' }}
+              onClick={addCategory}
+            >
+              + Add Category
+            </button>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Category Capacity</label>
+              <input
+                type="number"
+                min="1"
+                className="form-control"
+                value={settings.capacityPerCategory}
+                onChange={e => setSettings({ ...settings, capacityPerCategory: Number(e.target.value) })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Extra Hours Over Capacity</label>
+              <input
+                type="number"
+                min="0"
+                className="form-control"
+                value={settings.bufferHoursPerExtraJob}
+                onChange={e => setSettings({ ...settings, bufferHoursPerExtraJob: Number(e.target.value) })}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Start Hour (Decimal, e.g. 10.5 for 10:30 AM)</label>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                max="24"
+                className="form-control"
+                value={settings.startHour}
+                onChange={e => setSettings({ ...settings, startHour: Number(e.target.value) })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">End Hour (Decimal, e.g. 19 for 7:00 PM)</label>
+              <input
+                type="number"
+                step="0.5"
+                min="0"
+                max="24"
+                className="form-control"
+                value={settings.endHour}
+                onChange={e => setSettings({ ...settings, endHour: Number(e.target.value) })}
+                required
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving...' : 'Save Standards'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
 
-function UserPermissionsPanel({ users, permissions, currentUser, reloadManagement, setMessage, setError }) {
-    const editableUsers = useMemo(() => users.filter(user => user.accountType !== 'super_admin'), [users]);
-    const [selectedUserId, setSelectedUserId] = useState('');
-    const [overrideMap, setOverrideMap] = useState({});
-    const [inheritedPermissions, setInheritedPermissions] = useState([]);
-    const [effectivePermissions, setEffectivePermissions] = useState([]);
-    const [allowedPermissionIds, setAllowedPermissionIds] = useState(null);
-    const [loading, setLoading] = useState(false);
-    useEffect(() => {
-        if (selectedUserId || !editableUsers.length)
-            return;
-        const first = editableUsers.find(user => user.id !== currentUser.id) || editableUsers[0];
-        setSelectedUserId(first?.id || '');
-    }, [editableUsers, selectedUserId, currentUser.id]);
-    useEffect(() => {
-        if (!selectedUserId)
-            return;
-        let active = true;
-        setLoading(true);
-        api.userPermissionOverrides(selectedUserId)
-            .then(result => {
-                if (!active)
-                    return;
-                setOverrideMap((result.overrides || []).reduce((map, override) => ({ ...map, [override.permissionId]: override.effect }), {}));
-                setInheritedPermissions(result.inheritedPermissions || []);
-                setEffectivePermissions(result.effectivePermissions || []);
-                setAllowedPermissionIds(result.allowedPermissionIds || null);
-            })
-            .catch(err => active && setError(err.message))
-            .finally(() => active && setLoading(false));
-        return () => { active = false; };
-    }, [selectedUserId, setError]);
-    const selectedUser = users.find(user => user.id === selectedUserId);
-    const permissionGroups = useMemo(() => permissions
-        .filter(permission => !allowedPermissionIds || allowedPermissionIds.includes(permission.id))
-        .reduce((groups, permission) => {
-            groups[permission.module] = [...(groups[permission.module] || []), permission];
-            return groups;
-        }, {}), [permissions, allowedPermissionIds]);
-    const setOverride = (permissionId, effect) => {
-        setOverrideMap(current => {
-            const next = { ...current };
-            if (!effect)
-                delete next[permissionId];
-            else
-                next[permissionId] = effect;
-            return next;
-        });
-    };
-    const save = async () => {
-        if (!selectedUser || selectedUser.id === currentUser.id)
-            return;
-        const grants = Object.entries(overrideMap).filter(([, effect]) => effect === 'grant').map(([permissionId]) => permissionId);
-        const revokes = Object.entries(overrideMap).filter(([, effect]) => effect === 'revoke').map(([permissionId]) => permissionId);
-        try {
-            await api.updateUserPermissionOverrides(selectedUser.id, { grants, revokes });
-            setMessage('User permission overrides saved.');
-            await reloadManagement();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return (
-        <article className="dashboard-card management-card">
-            <div className="dashboard-card-head">
-                <div>
-                    <h3>User Permission Overrides</h3>
-                    <p>Grant or revoke individual permissions without changing the user's role.</p>
-                </div>
-            </div>
-            {editableUsers.length ? (
-                <>
-                    <label className="management-select">User
-                        <select value={selectedUserId} onChange={event => setSelectedUserId(event.target.value)}>
-                            {editableUsers.map(user => <option value={user.id} key={user.id}>{user.name} - {user.roleName || user.accountType}</option>)}
-                        </select>
-                    </label>
-                    {selectedUser?.id === currentUser.id && <div className="alert error">You cannot change your own permission overrides.</div>}
-                    {loading ? <div className="dashboard-empty management-empty"><b>Loading overrides...</b></div> : (
-                        <div className="permission-groups override-groups">
-                            {Object.entries(permissionGroups).map(([module, items]) => (
-                                <section className="permission-group" key={module}>
-                                    <h4>{module.replace(/_/g, ' ')}</h4>
-                                    <div>
-                                        {items.map(permission => (
-                                            <label className="permission-check permission-override" key={permission.id}>
-                                                <span>{permission.label}<small className={`permission-effective ${effectivePermissions.includes(permission.id) ? 'allowed' : 'denied'}`}>Role: {inheritedPermissions.includes(permission.id) ? 'Allowed' : 'Denied'} · Effective: {effectivePermissions.includes(permission.id) ? 'Allowed' : 'Denied'}</small></span>
-                                                <select value={overrideMap[permission.id] || ''} onChange={event => setOverride(permission.id, event.target.value)}>
-                                                    <option value="">Inherit</option>
-                                                    <option value="grant">Grant</option>
-                                                    <option value="revoke">Revoke</option>
-                                                </select>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </section>
-                            ))}
-                        </div>
-                    )}
-                    <button type="button" className="primary" onClick={save} disabled={!selectedUser || selectedUser.id === currentUser.id}>Save User Overrides</button>
-                </>
-            ) : <DashboardEmptyState title="No editable users." body="Create a non-Super Admin user before assigning individual overrides." />}
-        </article>
-    );
-}
+// ==========================================================================
+// 6. MANAGE CLIENTS PAGE (ADMIN ONLY)
+// ==========================================================================
 
-function DepartmentsPanel({ departments, reloadManagement, setMessage, setError }) {
-    const [form, setForm] = useState({ name: '', code: '', description: '' });
-    const create = async event => {
-        event.preventDefault();
-        try {
-            await api.createDepartment(form);
-            setForm({ name: '', code: '', description: '' });
-            setMessage('Department created.');
-            await reloadManagement();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const update = async (department, patch) => {
-        try {
-            await api.updateDepartment(department.id, patch);
-            setMessage('Department updated.');
-            await reloadManagement();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return (
-        <article className="dashboard-card management-card">
-            <div className="dashboard-card-head">
-                <div>
-                    <h3>Departments</h3>
-                    <p>Create and manage internal departments used by employees and assignments.</p>
-                </div>
-            </div>
-            <form className="management-form compact" onSubmit={create}>
-                <div className="row">
-                    <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                    <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
-                    <label>Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
-                </div>
-                <button className="primary">Add Department</button>
-            </form>
-            <ManagementTable
-                empty="No departments found."
-                rows={departments}
-                columns={[
-                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
-                    { key: 'code', label: 'Code' },
-                    { key: 'description', label: 'Description', render: item => item.description || '-' },
-                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> },
-                    { key: 'updatedAt', label: 'Updated', render: item => item.updatedAt ? shortDateTime(item.updatedAt) : '-' }
-                ]}
-            />
-        </article>
-    );
-}
+function ManageClientsPage({ data, reload }) {
+  const clients = data.clients || [];
 
-function DesignationsPanel({ designations, reloadManagement, setMessage, setError }) {
-    const [form, setForm] = useState({ name: '', code: '', description: '', hierarchyLevel: 10 });
-    const create = async event => {
-        event.preventDefault();
-        try {
-            await api.createDesignation({ ...form, hierarchyLevel: Number(form.hierarchyLevel) });
-            setForm({ name: '', code: '', description: '', hierarchyLevel: 10 });
-            setMessage('Designation created.');
-            await reloadManagement();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    const update = async (designation, patch) => {
-        try {
-            await api.updateDesignation(designation.id, patch);
-            setMessage('Designation updated.');
-            await reloadManagement();
-        }
-        catch (err) {
-            setError(err.message);
-        }
-    };
-    return (
-        <article className="dashboard-card management-card">
-            <div className="dashboard-card-head">
-                <div>
-                    <h3>Designations</h3>
-                    <p>Configure organization levels without hard-coding your company structure.</p>
-                </div>
-            </div>
-            <form className="management-form compact" onSubmit={create}>
-                <div className="row">
-                    <label>Name<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-                    <label>Code<input value={form.code} onChange={event => setForm({ ...form, code: event.target.value })} placeholder="Auto if blank" /></label>
-                    <label>Hierarchy Level<input type="number" min="0" max="999" value={form.hierarchyLevel} onChange={event => setForm({ ...form, hierarchyLevel: event.target.value })} /></label>
-                </div>
-                <label>Description<input value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} /></label>
-                <button className="primary">Add Designation</button>
-            </form>
-            <ManagementTable
-                empty="No designations found."
-                rows={designations}
-                columns={[
-                    { key: 'name', label: 'Name', render: item => <b>{item.name}</b> },
-                    { key: 'code', label: 'Code' },
-                    { key: 'hierarchyLevel', label: 'Level', render: item => <input type="number" min="0" max="999" value={item.hierarchyLevel} onChange={event => update(item, { hierarchyLevel: Number(event.target.value) })} /> },
-                    { key: 'description', label: 'Description', render: item => item.description || '-' },
-                    { key: 'status', label: 'Status', render: item => <select value={item.status} onChange={event => update(item, { status: event.target.value })}><option value="active">active</option><option value="inactive">inactive</option></select> }
-                ]}
-            />
-        </article>
-    );
-}
+  const [newClientId, setNewClientId] = useState('');
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientPass, setNewClientPass] = useState('');
+  const [newClientConfirm, setNewClientConfirm] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-function HierarchyPanel({ users }) {
-    const byManager = useMemo(() => users.reduce((groups, user) => {
-        const key = user.managerUserId || 'root';
-        groups[key] = [...(groups[key] || []), user];
-        return groups;
-    }, {}), [users]);
-    const roots = byManager.root || [];
-    const renderNode = (user, depth = 0) => (
-        <div className="hierarchy-node" style={{ marginLeft: `${Math.min(depth, 5) * 18}px` }} key={user.id}>
-            <div>
-                <b>{user.name}</b>
-                <span>{user.designationName || user.roleName || user.accountType}</span>
-            </div>
-            <small>{user.departmentName || 'No department'}</small>
-            {(byManager[user.id] || []).map(child => renderNode(child, depth + 1))}
+  // Password reset modal
+  const [resetModalClient, setResetModalClient] = useState(null);
+  const [resetPass, setResetPass] = useState('');
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  const handleAddClient = async e => {
+    e.preventDefault();
+    if (!newClientId.trim() || !newClientName.trim()) return setError('Please fill all fields');
+    if (newClientPass !== newClientConfirm) return setError('Passwords do not match');
+    if (newClientPass.length < 8) return setError('Password must be at least 8 characters');
+
+    try {
+      setAdding(true);
+      setError('');
+      await api.createClient({
+        id: newClientId.trim(),
+        name: newClientName.trim(),
+        password: newClientPass
+      });
+      setSuccess(`Client "${newClientName}" created successfully!`);
+      setNewClientId('');
+      setNewClientName('');
+      setNewClientPass('');
+      setNewClientConfirm('');
+      await reload();
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err) {
+      setError(err.message || 'Failed to create client');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const handleToggleStatus = async client => {
+    const nextStatus = client.status === 'active' ? 'archived' : 'active';
+    try {
+      await api.updateClient(client.id, { status: nextStatus });
+      await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to update client status');
+    }
+  };
+
+  const handleResetPassword = async e => {
+    e.preventDefault();
+    if (resetPass !== resetConfirm) return alert('Passwords do not match');
+    if (resetPass.length < 8) return alert('Password must be at least 8 characters');
+    try {
+      setResetting(true);
+      await api.updateClient(resetModalClient.id, { password: resetPass });
+      setResetModalClient(null);
+      setResetPass('');
+      setResetConfirm('');
+      alert('Password updated successfully!');
+    } catch (err) {
+      alert(err.message || 'Failed to reset password');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* ADD CLIENT CARD */}
+      <div className="saas-card">
+        <div className="card-header">
+          <h2 className="card-title">Add Client</h2>
         </div>
-    );
-    return (
-        <article className="dashboard-card management-card">
-            <div className="dashboard-card-head">
-                <div>
-                    <h3>Hierarchy</h3>
-                    <p>Reporting structure based on each user's manager assignment.</p>
-                </div>
+
+        {error && <div className="alert-banner error">{error}</div>}
+        {success && <div className="alert-banner success">{success}</div>}
+
+        <form onSubmit={handleAddClient}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Client ID</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. acme_corp"
+                value={newClientId}
+                onChange={e => setNewClientId(e.target.value)}
+                required
+              />
             </div>
-            {roots.length ? <div className="hierarchy-tree">{roots.map(user => renderNode(user))}</div> : <DashboardEmptyState title="No hierarchy yet." body="Assign reporting managers to build the organization tree." />}
-        </article>
-    );
+
+            <div className="form-group">
+              <label className="form-label">Name</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Acme Corporation"
+                value={newClientName}
+                onChange={e => setNewClientName(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Temporary Password</label>
+              <input
+                type="password"
+                className="form-control"
+                placeholder="Minimum 8 characters"
+                value={newClientPass}
+                onChange={e => setNewClientPass(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Confirm Password</label>
+              <input
+                type="password"
+                className="form-control"
+                placeholder="Re-enter password"
+                value={newClientConfirm}
+                onChange={e => setNewClientConfirm(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+            <button type="submit" className="btn btn-primary" disabled={adding}>
+              {adding ? 'Adding...' : '+ Add Client'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* CLIENTS TABLE */}
+      <div className="saas-card">
+        <div className="card-header">
+          <h2 className="card-title">Clients Directory</h2>
+        </div>
+
+        <div className="data-table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Client ID</th>
+                <th>Client Name</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clients.map(client => (
+                <tr key={client.id}>
+                  <td style={{ fontWeight: 600 }}>{client.id}</td>
+                  <td>{client.name}</td>
+                  <td>
+                    <span className={`badge ${client.status === 'active' ? 'badge-status-completed' : 'badge-status-on-hold'}`}>
+                      {client.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setResetModalClient(client)}
+                      >
+                        Reset Password
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${client.status === 'active' ? 'btn-secondary' : 'btn-primary'}`}
+                        style={client.status === 'active' ? { color: 'var(--ci-danger)' } : {}}
+                        onClick={() => handleToggleStatus(client)}
+                      >
+                        {client.status === 'active' ? 'Remove' : 'Restore'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* RESET PASSWORD MODAL */}
+      {resetModalClient && (
+        <div className="modal-backdrop" onClick={() => setResetModalClient(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Reset Password: {resetModalClient.name}</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setResetModalClient(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleResetPassword}>
+              <div className="modal-body">
+                <div className="form-group">
+                  <label className="form-label">New Password</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    value={resetPass}
+                    onChange={e => setResetPass(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Confirm New Password</label>
+                  <input
+                    type="password"
+                    className="form-control"
+                    value={resetConfirm}
+                    onChange={e => setResetConfirm(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setResetModalClient(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={resetting}
+                >
+                  {resetting ? 'Resetting...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ==========================================================================
+// 7. LOGIN PAGE COMPONENT
+// ==========================================================================
+
+function LoginPage({ onLogin }) {
+  const [id, setId] = useState('');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async e => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      setError('');
+      const r = await api.login(id.trim(), password);
+      setToken(r.token, remember);
+      onLogin();
+    } catch (err) {
+      setError(err.message || 'Incorrect ID or password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-page-wrap">
+      <div className="auth-card-container">
+        <div className="auth-brand-header">
+          <h1>
+            <span className="brand-navy">CI360</span>
+            <span className="brand-gold">degrees</span>
+          </h1>
+          <p>Realtime Job Board</p>
+        </div>
+
+        <h2 className="auth-form-title">Job Board Sign In</h2>
+        <p className="auth-form-sub">Sign in to access your workspace.</p>
+
+        {error && <div className="alert-banner error">{error}</div>}
+
+        <form onSubmit={submit}>
+          <div className="form-group">
+            <label className="form-label">Email or User ID</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="name@company.com or workspace ID"
+              value={id}
+              onChange={e => setId(e.target.value)}
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Password</label>
+            <input
+              type="password"
+              className="form-control"
+              placeholder="Enter your password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+          </div>
+
+          <div className="auth-remember-row">
+            <label className="auth-remember-label">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={e => setRemember(e.target.checked)}
+              />
+              <span>Remember me</span>
+            </label>
+          </div>
+
+          <button
+            type="submit"
+            className="auth-submit-btn"
+            disabled={loading}
+          >
+            {loading ? 'Signing in...' : 'Log In'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 }
