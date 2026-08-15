@@ -11,9 +11,7 @@ const clientDist = path.join(projectRoot, 'client', 'dist');
 
 fs.rmSync(distDir, { recursive: true, force: true });
 fs.mkdirSync(distDir, { recursive: true });
-for (const name of fs.readdirSync(srcDir)) {
-  if (name.endsWith('.js')) fs.copyFileSync(path.join(srcDir, name), path.join(distDir, name));
-}
+fs.cpSync(srcDir, distDir, { recursive: true });
 if (!fs.existsSync(path.join(clientDist, 'index.html'))) {
   throw new Error('Client build not found. Run the root build command so the client builds first.');
 }
