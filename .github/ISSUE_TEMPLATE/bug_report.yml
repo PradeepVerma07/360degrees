@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a problem in the CI360 React app or backend.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What went wrong?
+      placeholder: Describe the issue and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the shortest path that shows the issue.
+      placeholder: |
+        1. Log in as ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Client dashboard
+        - Admin dashboard
+        - Jobs
+        - Support tickets
+        - Login/auth
+        - API/backend
+        - Database
+        - Android APK
+        - Deployment
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add screenshots, console errors, API responses, or logs.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Localhost, Hostinger production, Android APK, browser/version
+    validations:
+      required: true

@@ -1,0 +1,25 @@
+{
+  "name": "ci360-realtime-job-board",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm run start -w server",
+    "hostinger-build": "npm install && npm run build",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.4.2"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2"
+  }
+}

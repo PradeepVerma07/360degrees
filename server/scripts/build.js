@@ -1,0 +1,21 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const serverRoot = path.resolve(here, '..');
+const projectRoot = path.resolve(serverRoot, '..');
+const srcDir = path.join(serverRoot, 'src');
+const distDir = path.join(serverRoot, 'dist');
+const clientDist = path.join(projectRoot, 'client', 'dist');
+
+fs.rmSync(distDir, { recursive: true, force: true });
+fs.mkdirSync(distDir, { recursive: true });
+for (const name of fs.readdirSync(srcDir)) {
+  if (name.endsWith('.js')) fs.copyFileSync(path.join(srcDir, name), path.join(distDir, name));
+}
+if (!fs.existsSync(path.join(clientDist, 'index.html'))) {
+  throw new Error('Client build not found. Run the root build command so the client builds first.');
+}
+fs.cpSync(clientDist, path.join(distDir, 'public'), { recursive: true });
+console.log('Server build created at server/dist');
