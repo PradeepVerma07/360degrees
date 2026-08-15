@@ -81,5 +81,11 @@ export const api = {
     clearSupportTicketMessages: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}/messages`, { method: 'DELETE' }),
     deleteSupportTicket: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}`, { method: 'DELETE' }),
     deleteSupportTickets: (ticketNumbers) => request('/api/support-tickets/bulk-delete', { method: 'POST', body: JSON.stringify({ ticketNumbers }) }),
-    downloadTicketAttachment: (ticketNumber, attachmentId, fileName) => download(`/api/support-tickets/${ticketNumber}/attachments/${attachmentId}`, fileName)
+    downloadTicketAttachment: (ticketNumber, attachmentId, fileName) => download(`/api/support-tickets/${ticketNumber}/attachments/${attachmentId}`, fileName),
+    chatChannels: () => request('/api/chat/channels'),
+    createChatChannel: (data) => request('/api/chat/channels', { method: 'POST', body: JSON.stringify(data) }),
+    chatMessages: (channelId, params = {}) => request(`/api/chat/channels/${channelId}/messages${params.limit ? `?limit=${params.limit}` : ''}`),
+    sendChatMessage: (channelId, data) => request(`/api/chat/channels/${channelId}/messages`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteChatMessage: (id) => request(`/api/chat/messages/${id}`, { method: 'DELETE' }),
+    clearChatChannel: (channelId) => request(`/api/chat/channels/${channelId}/clear`, { method: 'POST' })
 };

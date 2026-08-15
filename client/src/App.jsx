@@ -4,6 +4,7 @@ import { io } from 'socket.io-client';
 import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
+import TeamChat from './TeamChat';
 import ci360LogoMark from './assets/ci360-logo-mark.png';
 import './styles.css';
 const statusLabels = { submitted: 'Submitted', under_review: 'Under Review', in_progress: 'In Progress', waiting_client: 'Waiting for Client', revision_requested: 'Revision Requested', on_hold: 'On Hold', completed: 'Completed', cancelled: 'Cancelled' };
@@ -35,6 +36,7 @@ const knownDashboardTabs = {
     overview: 'Overview',
     submit: 'Submit a Job',
     jobs: 'Job Board',
+    chat: 'Team Chat',
     settings: 'TAT Standards',
     clients: 'Clients',
     employees: 'Employees',
@@ -43,8 +45,8 @@ const knownDashboardTabs = {
     audit: 'Audit Logs'
 };
 const fallbackModulesFor = data => data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin'
-    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']]
-    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['support', 'Support Tickets']];
+    ? [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['chat', 'Team Chat'], ['settings', 'TAT Standards'], ['clients', 'Manage Clients'], ['support', 'Support Tickets']]
+    : [['overview', 'Overview'], ['submit', 'Submit a Job'], ['jobs', 'By Category'], ['chat', 'Team Chat'], ['support', 'Support Tickets']];
 const initialAuthMode = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('reset_token'))
@@ -109,6 +111,8 @@ export default function App() {
             ? _jsx(Submit, { data: data, reload: load })
             : activeTab === 'jobs' && canAny(data, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'])
                 ? _jsx(Jobs, { data: data, reload: load })
+                : activeTab === 'chat' && canAny(data, ['chat.view', 'chat.send'])
+                    ? _jsx(TeamChat, { data: data, reload: load })
                 : activeTab === 'settings' && canAny(data, ['settings.view', 'settings.edit'])
                     ? _jsx(SettingsPanel, { initial: data.settings, reload: load })
                     : activeTab === 'clients' && canAny(data, ['clients.view_all', 'clients.view', 'clients.create'])
@@ -214,11 +218,12 @@ function AdminSignup({ onMode }) {
         </div>
     );
 }
-const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support', audit: 'document' };
+const dashboardTabIcons = { overview: 'overview', submit: 'submit', jobs: 'jobs', chat: 'chat', settings: 'clock', clients: 'users', employees: 'users', users: 'users', support: 'support', audit: 'document' };
 const dashboardTabDescriptions = {
     overview: 'Workspace summary',
     submit: 'Create a request',
     jobs: 'Browse every job',
+    chat: 'Team messaging & channels',
     settings: 'Turnaround rules',
     clients: 'Client access',
     employees: 'Internal team',
@@ -248,6 +253,7 @@ function DashboardIcon({ name }) {
         overview: ['M4 13h6V4H4z', 'M14 20h6v-9h-6z', 'M4 20h6v-4H4z', 'M14 8h6V4h-6z'],
         submit: ['M12 5v14', 'M5 12h14', 'M5 4h14v16H5z'],
         jobs: ['M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2', 'M4 7h16v12H4z', 'M9 12h6'],
+        chat: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z', 'M8 10h.01', 'M12 10h.01', 'M16 10h.01'],
         clock: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 7v5l3 2'],
         users: ['M16 18a4 4 0 0 0-8 0', 'M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M20 18a3.5 3.5 0 0 0-3-3.45', 'M17 5.3a2.6 2.6 0 0 1 0 5.4'],
         support: ['M5 18v-5a7 7 0 0 1 14 0v5', 'M5 18h3v-5H5z', 'M16 18h3v-5h-3z', 'M16 19a4 4 0 0 1-8 0'],

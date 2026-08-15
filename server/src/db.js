@@ -241,6 +241,46 @@ export async function initialiseDatabase() {
       ON UPDATE CASCADE ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+  await query(`CREATE TABLE IF NOT EXISTS chat_channels (
+    id VARCHAR(100) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(500) NULL,
+    type ENUM('public','private','direct') NOT NULL DEFAULT 'public',
+    created_by VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS chat_messages (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    channel_id VARCHAR(100) NOT NULL,
+    sender_id VARCHAR(100) NOT NULL,
+    sender_name VARCHAR(255) NOT NULL,
+    sender_role VARCHAR(50) NOT NULL,
+    body LONGTEXT NOT NULL,
+    attachment_name VARCHAR(500) NULL,
+    attachment_type VARCHAR(255) NULL,
+    attachment_size INT UNSIGNED NULL,
+    attachment_data LONGTEXT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_chat_channel (channel_id),
+    INDEX idx_chat_sender (sender_id),
+    CONSTRAINT fk_chat_messages_channel FOREIGN KEY (channel_id) REFERENCES chat_channels(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  const defaultChannels = [
+    ['general', 'general', 'General team discussion, announcements, and company news', 'public'],
+    ['project-updates', 'project-updates', 'Live project progress, status updates, and deliverables', 'public'],
+    ['creative-design', 'creative-design', 'Design feedback, creative assets, and review drafts', 'public'],
+    ['client-support', 'client-support', 'Client coordination, queries, and rapid help desk', 'public']
+  ];
+  for (const [id, name, description, type] of defaultChannels) {
+    await query(
+      'INSERT IGNORE INTO chat_channels (id, name, description, type) VALUES (?, ?, ?, ?)',
+      [id, name, description, type]
+    );
+  }
+
   await initialiseRbacSchema();
   await seedRbacDefaults();
 

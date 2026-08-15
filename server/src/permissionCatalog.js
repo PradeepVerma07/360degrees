@@ -34,6 +34,9 @@ export const permissions = [
   ['support.reply', 'support', 'reply', 'Reply to support tickets'],
   ['support.assign', 'support', 'assign', 'Assign support tickets'],
   ['support.manage', 'support', 'manage', 'Manage support tickets'],
+  ['chat.view', 'chat', 'view', 'View team chat'],
+  ['chat.send', 'chat', 'send', 'Send chat messages'],
+  ['chat.manage', 'chat', 'manage', 'Manage channels and moderate team chat'],
   ['settings.view', 'settings', 'view', 'View settings'],
   ['settings.edit', 'settings', 'edit', 'Edit settings'],
   ['audit.view', 'audit', 'view', 'View audit logs']
@@ -71,6 +74,9 @@ export const rolePermissions = {
     'support.reply',
     'support.assign',
     'support.manage',
+    'chat.view',
+    'chat.send',
+    'chat.manage',
     'settings.view',
     'settings.edit'
   ],
@@ -81,7 +87,9 @@ export const rolePermissions = {
     'clients.view',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'chat.view',
+    'chat.send'
   ],
   client: [
     'dashboard.view',
@@ -89,7 +97,9 @@ export const rolePermissions = {
     'jobs.create',
     'support.view_own',
     'support.create',
-    'support.reply'
+    'support.reply',
+    'chat.view',
+    'chat.send'
   ]
 };
 
@@ -97,6 +107,7 @@ export const moduleCatalog = [
   { id: 'overview', label: 'Overview', permissionAny: ['dashboard.view'] },
   { id: 'submit', label: 'Submit a Job', permissionAny: ['jobs.create'] },
   { id: 'jobs', label: 'Job Board', permissionAny: ['jobs.view_all', 'jobs.view_own', 'jobs.view_department'] },
+  { id: 'chat', label: 'Team Chat', permissionAny: ['chat.view', 'chat.send'] },
   { id: 'settings', label: 'TAT Standards', permissionAny: ['settings.view', 'settings.edit'] },
   { id: 'clients', label: 'Clients', permissionAny: ['clients.view_all', 'clients.view', 'clients.create'] },
   { id: 'employees', label: 'Employees', permissionAny: ['employees.view', 'employees.create', 'employees.edit'] },

@@ -1416,6 +1416,180 @@ app.put('/api/rbac/roles/:id/permissions', requireAuth, requirePermission('roles
     res.json({ ok: true });
 });
 
+// --- TEAM CHAT API ---
+const mapChatMessage = row => ({
+    id: row.id,
+    channelId: row.channel_id,
+    senderId: row.sender_id,
+    senderName: row.sender_name,
+    senderRole: row.sender_role,
+    body: row.body,
+    attachmentName: row.attachment_name,
+    attachmentType: row.attachment_type,
+    attachmentSize: row.attachment_size,
+    attachmentData: row.attachment_data,
+    createdAt: row.created_at
+});
+
+app.get('/api/chat/channels', requireAuth, requirePermission('chat.view'), async (req, res) => {
+    const channels = await query(`
+        SELECT c.*,
+            (SELECT COUNT(*) FROM chat_messages m WHERE m.channel_id = c.id) AS messageCount,
+            (SELECT m.created_at FROM chat_messages m WHERE m.channel_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastMessageAt,
+            (SELECT m.body FROM chat_messages m WHERE m.channel_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastMessageBody,
+            (SELECT m.sender_name FROM chat_messages m WHERE m.channel_id = c.id ORDER BY m.id DESC LIMIT 1) AS lastMessageSender
+        FROM chat_channels c
+        ORDER BY c.created_at ASC
+    `);
+    const users = await query(`
+        SELECT id, name, COALESCE(account_type, role) AS role, client_id AS clientId, status
+        FROM users
+        WHERE status = 'active'
+        ORDER BY name ASC
+    `);
+    res.json({
+        channels: channels.map(c => ({
+            id: c.id,
+            name: c.name,
+            description: c.description,
+            type: c.type,
+            createdBy: c.created_by,
+            createdAt: c.created_at,
+            messageCount: Number(c.messageCount || 0),
+            lastMessage: c.lastMessageAt ? {
+                at: c.lastMessageAt,
+                body: c.lastMessageBody,
+                sender: c.lastMessageSender
+            } : null
+        })),
+        members: users.map(u => ({
+            id: u.id,
+            name: u.name,
+            role: u.role,
+            status: u.status
+        }))
+    });
+});
+
+app.post('/api/chat/channels', requireAuth, requirePermission('chat.manage'), async (req, res) => {
+    const parsed = z.object({
+        name: z.string().trim().min(2).max(100).regex(/^[a-z0-9-_]+$/i, 'Channel name must contain only letters, numbers, hyphens or underscores'),
+        description: z.string().trim().max(500).default(''),
+        type: z.enum(['public', 'private', 'direct']).default('public')
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const channelId = parsed.data.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const existing = await one('SELECT id FROM chat_channels WHERE id=?', [channelId]);
+    if (existing)
+        return res.status(409).json({ error: 'A channel with this name already exists' });
+    await query(
+        'INSERT INTO chat_channels (id, name, description, type, created_by) VALUES (?, ?, ?, ?, ?)',
+        [channelId, parsed.data.name.toLowerCase(), parsed.data.description, parsed.data.type, req.user.id]
+    );
+    const newChannel = {
+        id: channelId,
+        name: parsed.data.name.toLowerCase(),
+        description: parsed.data.description,
+        type: parsed.data.type,
+        createdBy: req.user.id,
+        createdAt: new Date().toISOString(),
+        messageCount: 0,
+        lastMessage: null
+    };
+    await audit(req.user.id, 'create_channel', 'chat_channel', channelId, parsed.data);
+    io.emit('chat:channel_created', newChannel);
+    emitRefresh();
+    res.status(201).json({ channel: newChannel });
+});
+
+app.get('/api/chat/channels/:channelId/messages', requireAuth, requirePermission('chat.view'), async (req, res) => {
+    const channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    if (!channel)
+        return res.status(404).json({ error: 'Channel not found' });
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
+    const rows = await query(
+        `SELECT * FROM chat_messages WHERE channel_id=? ORDER BY id DESC LIMIT ?`,
+        [req.params.channelId, limit]
+    );
+    res.json({
+        messages: rows.reverse().map(mapChatMessage)
+    });
+});
+
+app.post('/api/chat/channels/:channelId/messages', requireAuth, requirePermission('chat.send'), async (req, res) => {
+    const channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    if (!channel)
+        return res.status(404).json({ error: 'Channel not found' });
+    const parsed = z.object({
+        body: z.string().trim().max(10000).default(''),
+        attachment: z.object({
+            name: z.string().min(1).max(500),
+            type: z.string().min(1).max(255),
+            size: z.number().int().nonnegative().max(15 * 1024 * 1024),
+            data: z.string().min(1)
+        }).nullable().optional()
+    }).refine(data => data.body.length > 0 || !!data.attachment, {
+        message: 'Message body or attachment is required'
+    }).safeParse(req.body);
+    if (!parsed.success)
+        return res.status(400).json({ error: parsed.error.issues[0].message });
+    const { body, attachment } = parsed.data;
+    const senderRole = req.user.roleName || req.user.accountType || req.user.role || 'Member';
+    const result = await query(
+        `INSERT INTO chat_messages (channel_id, sender_id, sender_name, sender_role, body, attachment_name, attachment_type, attachment_size, attachment_data)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            req.params.channelId,
+            req.user.id,
+            req.user.name,
+            senderRole,
+            body,
+            attachment ? attachment.name : null,
+            attachment ? attachment.type : null,
+            attachment ? attachment.size : null,
+            attachment ? attachment.data : null
+        ]
+    );
+    const newMessage = {
+        id: result.insertId,
+        channelId: req.params.channelId,
+        senderId: req.user.id,
+        senderName: req.user.name,
+        senderRole,
+        body,
+        attachmentName: attachment ? attachment.name : null,
+        attachmentType: attachment ? attachment.type : null,
+        attachmentSize: attachment ? attachment.size : null,
+        attachmentData: attachment ? attachment.data : null,
+        createdAt: new Date().toISOString()
+    };
+    io.emit('chat:message', newMessage);
+    res.status(201).json({ message: newMessage });
+});
+
+app.delete('/api/chat/messages/:id', requireAuth, async (req, res) => {
+    const message = await one('SELECT * FROM chat_messages WHERE id=?', [req.params.id]);
+    if (!message)
+        return res.status(404).json({ error: 'Message not found' });
+    const canDelete = hasPermission(req.user, 'chat.manage') || message.sender_id === req.user.id;
+    if (!canDelete)
+        return res.status(403).json({ error: 'You do not have permission to delete this message' });
+    await query('DELETE FROM chat_messages WHERE id=?', [req.params.id]);
+    io.emit('chat:message_deleted', { id: Number(req.params.id), channelId: message.channel_id });
+    res.json({ ok: true });
+});
+
+app.post('/api/chat/channels/:channelId/clear', requireAuth, requirePermission('chat.manage'), async (req, res) => {
+    const channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    if (!channel)
+        return res.status(404).json({ error: 'Channel not found' });
+    await query('DELETE FROM chat_messages WHERE channel_id=?', [req.params.channelId]);
+    await audit(req.user.id, 'clear_channel', 'chat_channel', req.params.channelId, {});
+    io.emit('chat:cleared', { channelId: req.params.channelId });
+    res.json({ ok: true });
+});
+
 app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (_req, res) => {
     const rows = await query(`SELECT id,actor_id actorId,action,entity_type entityType,entity_id entityId,details,created_at createdAt
       FROM audit_logs ORDER BY created_at DESC,id DESC LIMIT 150`);
@@ -1444,7 +1618,15 @@ if (publicDir) {
         res.sendFile(path.join(publicDir, 'index.html'));
     });
 }
-io.on('connection', socket => { socket.emit('connected', { at: new Date().toISOString() }); });
+io.on('connection', socket => {
+    socket.emit('connected', { at: new Date().toISOString() });
+    socket.on('chat:typing', data => {
+        socket.broadcast.emit('chat:typing', data);
+    });
+    socket.on('chat:stop_typing', data => {
+        socket.broadcast.emit('chat:stop_typing', data);
+    });
+});
 app.use((error, _req, res, _next) => {
     console.error(error);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });
