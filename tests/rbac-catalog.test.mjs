@@ -14,6 +14,7 @@ test('Client defaults contain only client-safe permissions', () => {
   assert.ok(!rolePermissions.client.some(permission => permission.startsWith('users.')));
   assert.ok(!rolePermissions.client.some(permission => permission.startsWith('roles.')));
   assert.ok(!rolePermissions.client.some(permission => permission.startsWith('employees.')));
+  assert.ok(!rolePermissions.client.some(permission => permission.startsWith('productivity.')));
   assert.ok(!rolePermissions.client.includes('audit.view'));
   assert.ok(!rolePermissions.client.includes('settings.edit'));
 });
@@ -22,6 +23,7 @@ test('Employee defaults do not inherit internal administration', () => {
   assert.ok(rolePermissions.employee.includes('jobs.view_own'));
   assert.ok(rolePermissions.employee.includes('clients.view'));
   assert.ok(rolePermissions.employee.includes('chat.view'));
+  assert.ok(rolePermissions.employee.includes('productivity.view'));
   assert.ok(!rolePermissions.employee.includes('users.view'));
   assert.ok(!rolePermissions.employee.includes('roles.manage_permissions'));
   assert.ok(!rolePermissions.employee.includes('audit.view'));
@@ -33,4 +35,5 @@ test('Dynamic module catalog exposes enterprise management modules only through 
   assert.ok(byId.users.permissionAny.includes('roles.manage_permissions'));
   assert.ok(byId.jobs.permissionAny.includes('jobs.view_department'));
   assert.ok(byId.chat.permissionAny.includes('chat.view'));
+  assert.ok(byId.productivity.permissionAny.includes('productivity.view'));
 });

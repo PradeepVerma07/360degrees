@@ -4,6 +4,7 @@ import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
+import ProductivityIntelligence from './ProductivityIntelligence';
 import './styles.css';
 
 const statusLabels = {
@@ -180,6 +181,14 @@ function DashboardIcon({ name }) {
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
       );
+    case 'productivity':
+    case 'trending-up':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+          <polyline points="17 6 23 6 23 12" />
+        </svg>
+      );
     case 'bell':
       return (
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -343,6 +352,7 @@ export default function App() {
     socket.on('disconnect', () => setSocketConnected(false));
     socket.on('data:changed', load);
     socket.on('permissions:updated', load);
+    socket.on('productivity:changed', load);
     return () => {
       socket.disconnect();
     };
@@ -383,6 +393,7 @@ export default function App() {
       {tab === 'overview' && <OverviewPage data={data} setTab={setTab} openSupportModal={openSupportModal} />}
       {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
       {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
+      {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
       {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
       {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
       {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
@@ -400,13 +411,15 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const [notificationOpen, setNotificationOpen] = useState(false);
   const user = data.user || {};
   const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
+  const hasProductivityAccess = can(data, 'productivity.view');
 
-  // Navigation Items according to strict spec
+  // Navigation Items according to strict spec + dynamic productivity permission
   const navItems = isSuperOrAdmin
     ? [
         { id: 'overview', label: 'Overview', icon: 'overview' },
         { id: 'submit', label: 'Submit a Job', icon: 'submit' },
         { id: 'jobs', label: 'All Jobs', icon: 'jobs' },
+        ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
         { id: 'settings', label: 'TAT Standards', icon: 'clock' },
         { id: 'clients', label: 'Manage Clients', icon: 'users' },
         { id: 'support', label: 'Support Tickets', icon: 'support' }
@@ -415,6 +428,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
         { id: 'overview', label: 'Overview', icon: 'overview' },
         { id: 'submit', label: 'Submit a Job', icon: 'submit' },
         { id: 'jobs', label: 'My Jobs', icon: 'jobs' },
+        ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
         { id: 'support', label: 'Support Tickets', icon: 'support' }
       ];
 
@@ -430,6 +444,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
     jobs: {
       title: isSuperOrAdmin ? 'All Jobs' : 'My Jobs',
       subtitle: 'Track, manage and filter all operational work requests.'
+    },
+    productivity: {
+      title: 'Productivity Intelligence',
+      subtitle: 'Workforce capacity, revenue attribution, throughput targets, and account roster analytics.'
     },
     settings: {
       title: 'TAT Standards',

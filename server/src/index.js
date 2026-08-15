@@ -24,6 +24,7 @@ import {
 import { requireAuth, signToken } from './auth.js';
 import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, requirePermission } from './permissions.js';
 import { calculateHours } from './tat.js';
+import { createProductivityRouter } from './routes/productivity.js';
 const app = express();
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1606,6 +1607,8 @@ app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (
         })
     });
 });
+
+app.use('/api/productivity', requireAuth, createProductivityRouter(io));
 const publicDir = [
     path.resolve(__dirname, 'public'),
     path.resolve(process.cwd(), 'client/dist')

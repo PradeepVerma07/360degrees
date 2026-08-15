@@ -1554,6 +1554,92 @@ a {
   border: 1px solid var(--ci-success-border);
 }
 
+.alert-banner.info {
+  background: var(--ci-info-bg);
+  color: var(--ci-info);
+  border: 1px solid var(--ci-info-border);
+}
+
+/* ==========================================================================
+   PRODUCTIVITY INTELLIGENCE STYLING
+   ========================================================================== */
+
+.prod-subnav-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prod-subnav-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ci-text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.prod-subnav-btn:hover {
+  background: var(--ci-surface);
+  color: var(--ci-text);
+}
+
+.prod-subnav-btn.active {
+  background: var(--ci-navy);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+
+.prod-period-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.prod-period-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ci-text-secondary);
+}
+
+.prod-period-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--ci-surface);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--ci-border);
+}
+
+.prod-period-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ci-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.prod-period-btn:hover {
+  color: var(--ci-text);
+}
+
+.prod-period-btn.active {
+  background: #FFFFFF;
+  color: var(--ci-navy);
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
 /* ==========================================================================
    RESPONSIVE BREAKPOINTS
    ========================================================================== */

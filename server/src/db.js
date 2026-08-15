@@ -283,6 +283,8 @@ export async function initialiseDatabase() {
 
   await initialiseRbacSchema();
   await seedRbacDefaults();
+  await initialiseProductivitySchema();
+  await seedProductivityDefaults();
 
   await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
   await ensureEnvironmentSuperAdmin();
@@ -687,4 +689,219 @@ export async function seedDemoUsers() {
 export async function audit(actorId, action, entityType, entityId, details = {}, connection = pool) {
   await query('INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,details) VALUES (?,?,?,?,?)',
     [actorId, action, entityType, entityId, JSON.stringify(details)], connection);
+}
+
+export async function initialiseProductivitySchema() {
+  await query(`CREATE TABLE IF NOT EXISTS productivity_services (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    reference_hours DECIMAL(6,2) NOT NULL DEFAULT 10.00,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_services_active (is_active)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_employee_settings (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL UNIQUE,
+    weekly_capacity_hours DECIMAL(6,2) NOT NULL DEFAULT 40.00,
+    productivity_status ENUM('active','intern','vendor','inactive') NOT NULL DEFAULT 'active',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_emp_status (productivity_status),
+    CONSTRAINT fk_prod_emp_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_external_resources (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NULL,
+    status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_jobs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    core_job_id VARCHAR(100) NULL,
+    client_id VARCHAR(100) NOT NULL,
+    start_date VARCHAR(40) NOT NULL,
+    completion_date VARCHAR(40) NULL,
+    value_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+    description LONGTEXT NULL,
+    created_by_user_id VARCHAR(100) NOT NULL,
+    deleted_at DATETIME(3) NULL,
+    deleted_by_user_id VARCHAR(100) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_jobs_client (client_id),
+    INDEX idx_prod_jobs_start (start_date),
+    INDEX idx_prod_jobs_completion (completion_date),
+    INDEX idx_prod_jobs_deleted (deleted_at),
+    CONSTRAINT fk_prod_jobs_client FOREIGN KEY (client_id) REFERENCES clients(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_prod_jobs_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_job_services (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    productivity_job_id BIGINT UNSIGNED NOT NULL,
+    service_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uq_prod_job_service (productivity_job_id, service_id),
+    INDEX idx_prod_job_svc_service (service_id),
+    CONSTRAINT fk_prod_job_svc_job FOREIGN KEY (productivity_job_id) REFERENCES productivity_jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_job_svc_svc FOREIGN KEY (service_id) REFERENCES productivity_services(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_job_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    productivity_job_id BIGINT UNSIGNED NOT NULL,
+    user_id VARCHAR(100) NULL,
+    external_resource_id BIGINT UNSIGNED NULL,
+    revenue_percent DECIMAL(5,2) NOT NULL DEFAULT 100.00,
+    hours_spent DECIMAL(6,2) NOT NULL DEFAULT 0.00,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_job_assign_user (user_id),
+    INDEX idx_prod_job_assign_job (productivity_job_id),
+    CONSTRAINT fk_prod_assign_job FOREIGN KEY (productivity_job_id) REFERENCES productivity_jobs(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_assign_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_prod_assign_ext FOREIGN KEY (external_resource_id) REFERENCES productivity_external_resources(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_account_rosters (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    client_id VARCHAR(100) NOT NULL UNIQUE,
+    nature ENUM('Existing','Prospect') NOT NULL DEFAULT 'Existing',
+    difficulty TINYINT UNSIGNED NOT NULL DEFAULT 5,
+    comments TEXT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_roster_nature (nature),
+    INDEX idx_prod_roster_diff (difficulty),
+    CONSTRAINT fk_prod_roster_client FOREIGN KEY (client_id) REFERENCES clients(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_account_roster_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    roster_id BIGINT UNSIGNED NOT NULL,
+    responsibility_key ENUM('strategy','cs','website','design','copy','edit','shoot','seo','smo','qc') NOT NULL,
+    assignee_type ENUM('employee','external','tbd') NOT NULL DEFAULT 'employee',
+    user_id VARCHAR(100) NULL,
+    external_name VARCHAR(255) NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_roster_assign_user (user_id),
+    INDEX idx_prod_roster_assign_resp (responsibility_key),
+    CONSTRAINT fk_prod_roster_asgn_roster FOREIGN KEY (roster_id) REFERENCES productivity_account_rosters(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_roster_asgn_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE SET NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_targets (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id VARCHAR(100) NOT NULL,
+    service_id BIGINT UNSIGNED NULL,
+    quantity DECIMAL(8,2) NOT NULL DEFAULT 1.00,
+    unit ENUM('count','hours') NOT NULL DEFAULT 'count',
+    period ENUM('day','week','month') NOT NULL DEFAULT 'week',
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id VARCHAR(100) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_targets_user (user_id),
+    INDEX idx_prod_targets_service (service_id),
+    INDEX idx_prod_targets_active (is_active),
+    CONSTRAINT fk_prod_target_user FOREIGN KEY (user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_target_service FOREIGN KEY (service_id) REFERENCES productivity_services(id)
+      ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_prod_target_creator FOREIGN KEY (created_by_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE RESTRICT
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_salary_grades (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id VARCHAR(100) NOT NULL,
+    label VARCHAR(100) NOT NULL,
+    min_amount DECIMAL(14,2) NOT NULL,
+    max_amount DECIMAL(14,2) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    INDEX idx_prod_salary_owner (owner_user_id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  await query(`CREATE TABLE IF NOT EXISTS productivity_salary_assignments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    owner_user_id VARCHAR(100) NOT NULL,
+    employee_user_id VARCHAR(100) NOT NULL,
+    grade_id BIGINT UNSIGNED NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    UNIQUE KEY uq_prod_sal_asgn (owner_user_id, employee_user_id),
+    INDEX idx_prod_sal_asgn_emp (employee_user_id),
+    CONSTRAINT fk_prod_sal_asgn_user FOREIGN KEY (employee_user_id) REFERENCES users(id)
+      ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_sal_asgn_grade FOREIGN KEY (grade_id) REFERENCES productivity_salary_grades(id)
+      ON UPDATE CASCADE ON DELETE CASCADE
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+}
+
+export async function seedProductivityDefaults() {
+  const defaultServices = [
+    ['Website full build', 40.00],
+    ['Connector Apps / Small Web Additions', 12.00],
+    ['Social Media Optimisation', 8.00],
+    ['Design', 6.00],
+    ['Standees / Backdrops / Advertisements', 8.00],
+    ['Films & Edits', 16.00],
+    ['Animation / Motion Graphics', 24.00],
+    ['Reels & Shorts', 6.00],
+    ['Podcasts', 12.00],
+    ['Strategy & Presentations', 16.00],
+    ['Business Development', 10.00],
+    ['Paper Advertisement Design', 6.00],
+    ['Other Design Interventions', 8.00],
+    ['Photography / Filming', 10.00]
+  ];
+
+  for (const [name, refHours] of defaultServices) {
+    await query(
+      'INSERT IGNORE INTO productivity_services (name, reference_hours, is_active) VALUES (?, ?, 1)',
+      [name, refHours]
+    );
+  }
+
+  // Seed default salary grades for system owner / super_admin
+  const defaultSalaryGrades = [
+    ['Grade A', 0.00, 25000.00],
+    ['Grade B', 25000.00, 45000.00],
+    ['Grade C', 45000.00, 75000.00],
+    ['Grade D', 75000.00, 125000.00],
+    ['Grade E', 125000.00, 200000.00]
+  ];
+
+  const adminUser = await one("SELECT id FROM users WHERE account_type='super_admin' OR role='super_admin' LIMIT 1");
+  const ownerId = adminUser ? adminUser.id : 'superadmin';
+
+  const existingGrades = await query('SELECT COUNT(*) as count FROM productivity_salary_grades WHERE owner_user_id=?', [ownerId]);
+  if (Number(existingGrades[0]?.count || 0) === 0) {
+    for (const [label, min, max] of defaultSalaryGrades) {
+      await query(
+        'INSERT INTO productivity_salary_grades (owner_user_id, label, min_amount, max_amount) VALUES (?, ?, ?, ?)',
+        [ownerId, label, min, max]
+      );
+    }
+  }
 }
