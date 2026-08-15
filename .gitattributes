@@ -1,0 +1,10 @@
+# GitHub Linguist Language Configuration
+*.js linguist-language=JavaScript
+*.jsx linguist-language=JavaScript
+*.mjs linguist-language=JavaScript
+*.css linguist-language=CSS
+*.sql linguist-language=SQL
+
+# Vendored files to exclude from language statistics
+android/** linguist-vendored
+apk/** linguist-vendored
