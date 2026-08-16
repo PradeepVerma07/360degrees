@@ -283,6 +283,7 @@ export async function initialiseDatabase() {
       [id, name, description, type]
     );
   }
+  await query("ALTER TABLE chat_channels MODIFY COLUMN type ENUM('public','private','direct') NOT NULL DEFAULT 'public'").catch(() => {});
 
   await initialiseRbacSchema();
   await seedRbacDefaults();

@@ -312,7 +312,12 @@ app.get('/api/health', async (_req, res) => res.status(databaseReady ? 200 : 503
 app.use('/api', (_req, res, next) => {
     if (databaseReady)
         return next();
-    res.status(503).json({ error: 'Database is not ready' });
+    const health = databaseHealthDetails();
+    res.status(503).json({
+        error: databaseInitError ? `Database connecting: ${databaseInitError.message || databaseInitError.code}` : 'Database is initializing...',
+        code: databaseInitError?.code || 'DB_STARTING',
+        hint: health.hint || 'Database is connecting. Please ensure your MySQL database credentials in .env are correct.'
+    });
 });
 app.post('/api/auth/login', async (req, res) => {
     const parsed = z.object({ id: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);

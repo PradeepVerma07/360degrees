@@ -22,8 +22,11 @@ async function request(path, options = {}) {
         }
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok)
-        throw new Error(data.error || 'Request failed');
+    if (!response.ok) {
+        const errorMsg = data.error || (response.status === 503 ? 'Database connecting / not ready' : 'Request failed');
+        const hint = data.hint ? ` (${data.hint})` : '';
+        throw new Error(errorMsg + hint);
+    }
     return data;
 }
 async function download(path, fileName) {
