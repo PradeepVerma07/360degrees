@@ -3274,6 +3274,14 @@ a {
   padding: 0 12px 8px;
   overflow-x: auto;
   border-bottom: 1px solid var(--ci-border-light);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.support-filter-chips::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .support-chip {
@@ -3494,6 +3502,14 @@ a {
   gap: 5px;
   overflow-x: auto;
   padding-bottom: 6px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.support-canned-chips::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .support-canned-btn {

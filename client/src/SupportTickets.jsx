@@ -693,8 +693,8 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
                   )}
 
                   {/* Quick canned replies */}
-                  <div className="support-canned-chips">
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ci-text-secondary)' }}>Quick:</span>
+                  <div className="support-canned-chips" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ci-text-secondary)', flexShrink: 0 }}>Quick:</span>
                     {quickCannedReplies.map((replyTextOption, i) => (
                       <button
                         key={i}
