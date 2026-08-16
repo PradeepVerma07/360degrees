@@ -2129,11 +2129,68 @@ a {
     grid-template-columns: 1fr !important;
     height: auto !important;
   }
+
+  /* Team Chat Mobile Layout */
+  .wa-app-layout {
+    height: calc(100dvh - 85px) !important;
+    min-height: 0 !important;
+    border-radius: 8px !important;
+    flex-direction: column !important;
+    width: 100% !important;
+  }
+
+  .wa-utility-rail {
+    display: none !important;
+  }
+
+  .wa-chats-sidebar {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Modal Mobile Adaptations */
+  .modal-backdrop {
+    padding: 10px !important;
+    align-items: flex-end !important;
+  }
+
+  .modal-dialog {
+    max-width: 100% !important;
+    max-height: 92vh !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+  }
+
+  .modal-header {
+    padding: 16px 14px !important;
+  }
+
+  .modal-body {
+    padding: 16px 14px !important;
+  }
+
+  .modal-footer {
+    padding: 12px 14px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .modal-footer button {
+    flex: 1 !important;
+  }
 }
 
 @media (max-width: 480px) {
   .stats-grid, .saas-stats-grid, .overview-kpi-grid, .kpi-row {
     grid-template-columns: 1fr !important;
+  }
+
+  .app-content {
+    padding: 12px 8px 36px !important;
+  }
+
+  .top-header {
+    padding: 0 10px !important;
   }
 }
 

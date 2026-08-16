@@ -632,7 +632,7 @@ function ProductivityAnalysisTab({ data }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* BUSINESS TRAJECTORY KPIS */}
-      <div className="metrics-2x2-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="metrics-2x2-grid stats-grid">
         <div className="metric-box">
           <span className="metric-title">Total Revenue Logged</span>
           <span className="metric-number" style={{ color: 'var(--ci-navy)' }}>
@@ -1080,7 +1080,7 @@ function ProductivityReportsTab({ reports, services, selectedService, onSelectSe
         <div className="card-header">
           <h3 className="card-title">Organization Delivery Totals</h3>
         </div>
-        <div className="metrics-2x2-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <div className="metrics-2x2-grid stats-grid">
           <div className="metric-box">
             <span className="metric-title">Month to Date (MTD)</span>
             <span className="metric-number">{organizationTotals.mtd.jobs} jobs</span>
