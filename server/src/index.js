@@ -105,31 +105,52 @@ const jobSelect = `SELECT j.*,
     assigned.name assigned_to_name,
     assigned_by.name assigned_by_name,
     creator.name created_by_name,
-    department.name department_name
+    department.name department_name,
+    delegated_to.name delegated_to_name,
+    delegated_by.name delegated_by_name
   FROM jobs j
   LEFT JOIN users assigned ON assigned.id=j.assigned_to_user_id
   LEFT JOIN users assigned_by ON assigned_by.id=j.assigned_by_user_id
   LEFT JOIN users creator ON creator.id=j.created_by_user_id
-  LEFT JOIN departments department ON department.id=j.department_id`;
-const mapJob = (row, includeInternal = true) => ({
-    id: row.id, clientId: row.client_id, title: row.title, description: row.description, category: row.category,
-    priority: row.priority, postedBy: row.posted_by, assetLink: row.asset_link, calculatedHours: row.calculated_hours,
-    teamOverrideHours: row.team_override_hours, status: row.status,
-    datePosted: row.date_posted, dateCompleted: row.date_completed, updatedAt: row.updated_at,
-    ...(includeInternal ? {
-        teamOverrideNote: row.team_override_note,
-        createdByUserId: row.created_by_user_id,
-        createdByName: row.created_by_name,
-        assignedToUserId: row.assigned_to_user_id,
-        assignedToName: row.assigned_to_name,
-        assignedByUserId: row.assigned_by_user_id,
-        assignedByName: row.assigned_by_name,
-        departmentId: row.department_id,
-        departmentName: row.department_name,
-        assignmentDate: row.assignment_date,
-        assignmentNote: row.assignment_note
-    } : {})
-});
+  LEFT JOIN departments department ON department.id=j.department_id
+  LEFT JOIN users delegated_to ON delegated_to.id=j.delegated_to_user_id
+  LEFT JOIN users delegated_by ON delegated_by.id=j.delegated_by_user_id`;
+const mapJob = (row, includeInternal = true) => {
+    let delegationStatus = row.delegation_status || 'none';
+    if (delegationStatus === 'pending' && row.delegation_deadline) {
+        if (new Date(row.delegation_deadline).getTime() <= Date.now()) {
+            delegationStatus = 'auto_accepted';
+        }
+    }
+    return {
+        id: row.id, clientId: row.client_id, title: row.title, description: row.description, category: row.category,
+        priority: row.priority, postedBy: row.posted_by, assetLink: row.asset_link, calculatedHours: row.calculated_hours,
+        teamOverrideHours: row.team_override_hours, status: row.status,
+        datePosted: row.date_posted, dateCompleted: row.date_completed, updatedAt: row.updated_at,
+        delegationStatus,
+        delegatedToUserId: row.delegated_to_user_id,
+        delegatedToName: row.delegated_to_name,
+        delegatedByUserId: row.delegated_by_user_id,
+        delegatedByName: row.delegated_by_name,
+        delegationDeadline: row.delegation_deadline,
+        delegationNote: row.delegation_note,
+        delegationSharePercent: row.delegation_share_percent,
+        rejectionReason: row.rejection_reason,
+        ...(includeInternal ? {
+            teamOverrideNote: row.team_override_note,
+            createdByUserId: row.created_by_user_id,
+            createdByName: row.created_by_name,
+            assignedToUserId: row.assigned_to_user_id,
+            assignedToName: row.assigned_to_name,
+            assignedByUserId: row.assigned_by_user_id,
+            assignedByName: row.assigned_by_name,
+            departmentId: row.department_id,
+            departmentName: row.department_name,
+            assignmentDate: row.assignment_date,
+            assignmentNote: row.assignment_note
+        } : {})
+    };
+};
 const ticketCategories = ['Technical Issue', 'Account Issue', 'Job Posting Issue', 'Candidate Issue', 'Client Issue', 'Billing Issue', 'Feature Request', 'General Support'];
 const ticketPriorities = ['Low', 'Medium', 'High', 'Urgent'];
 const ticketStatuses = ['Open', 'In Progress', 'Waiting for User', 'Resolved', 'Closed'];
@@ -451,7 +472,16 @@ app.get('/api/jobs/:id', requireAuth, requirePermission('jobs.view_own', 'jobs.v
     res.json({ job: mapJob(row, req.user.accountType !== 'client'), assignmentHistory });
 });
 app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req, res) => {
-    const schema = z.object({ clientId: z.string().optional(), title: z.string().min(2), description: z.string().default(''), category: z.string().min(1), priority: z.enum(['Low', 'Medium', 'High', 'Urgent']), postedBy: z.string().min(2), assetLink: z.string().default('') });
+    const schema = z.object({
+        clientId: z.string().optional(),
+        title: z.string().min(2),
+        description: z.string().default(''),
+        category: z.string().min(1),
+        priority: z.enum(['Low', 'Medium', 'High', 'Urgent']),
+        postedBy: z.string().min(2),
+        assetLink: z.string().default(''),
+        assignedToUserId: z.string().trim().optional()
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
@@ -467,10 +497,131 @@ app.post('/api/jobs', requireAuth, requirePermission('jobs.create'), async (req,
     const id = 'j' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     const now = new Date().toISOString();
     const calculatedHours = calculateHours(await settings(), await categoryLoad(), parsed.data.category, parsed.data.priority);
-    await query(`INSERT INTO jobs (id,client_id,title,description,category,priority,posted_by,created_by_user_id,asset_link,calculated_hours,status,date_posted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`, [id, clientId, parsed.data.title, parsed.data.description, parsed.data.category, parsed.data.priority, parsed.data.postedBy, user.id, parsed.data.assetLink, calculatedHours, now, now]);
-    await audit(user.id, 'create', 'job', id, parsed.data);
+
+    // Auto-assign to Urna / Mansi (or client-selected assignee)
+    let assignedToUserId = parsed.data.assignedToUserId || null;
+    let assignmentNote = 'Direct assignment';
+    if (!assignedToUserId) {
+        const leadUsers = await query("SELECT id, name FROM users WHERE name IN ('Urna', 'Mansi') AND is_active=1 ORDER BY (name='Urna') DESC");
+        if (leadUsers.length > 0) {
+            assignedToUserId = leadUsers[0].id;
+            assignmentNote = `Auto-assigned to ${leadUsers[0].name} (CS / Operations Lead)`;
+        }
+    }
+
+    await transaction(async connection => {
+        await query(`INSERT INTO jobs (id,client_id,title,description,category,priority,posted_by,created_by_user_id,assigned_to_user_id,assigned_by_user_id,assignment_date,assignment_note,asset_link,calculated_hours,status,date_posted,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,'submitted',?,?)`, [
+            id, clientId, parsed.data.title, parsed.data.description, parsed.data.category, parsed.data.priority,
+            parsed.data.postedBy, user.id, assignedToUserId, user.id, now, assignmentNote,
+            parsed.data.assetLink, calculatedHours, now, now
+        ], connection);
+
+        if (assignedToUserId) {
+            await query(`INSERT INTO job_assignments (job_id, assigned_to_user_id, assigned_by_user_id, note) VALUES (?, ?, ?, ?)`, [
+                id, assignedToUserId, user.id, assignmentNote
+            ], connection);
+        }
+
+        await audit(user.id, 'create', 'job', id, { ...parsed.data, autoAssignedTo: assignedToUserId }, connection);
+    });
+
     emitRefresh();
-    res.status(201).json({ job: mapJob(await one('SELECT * FROM jobs WHERE id=?', [id])) });
+    res.status(201).json({ job: mapJob(await one(`${jobSelect} WHERE j.id=?`, [id])) });
+});
+
+app.post('/api/jobs/:id/delegate', requireAuth, async (req, res) => {
+    const { delegatedToUserId, note = '', sharePercent = 100 } = req.body;
+    if (!delegatedToUserId) return res.status(400).json({ error: 'Please select a team member to delegate to' });
+    const job = await one('SELECT * FROM jobs WHERE id=?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    const targetUser = await one("SELECT id, name FROM users WHERE id=? AND is_active=1", [delegatedToUserId]);
+    if (!targetUser) return res.status(400).json({ error: 'Active team member not found' });
+
+    const deadline = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(); // 4 hours window
+    const now = new Date().toISOString();
+    const shareNum = Math.min(100, Math.max(1, Number(sharePercent) || 100));
+
+    await transaction(async connection => {
+        await query(
+            `UPDATE jobs 
+             SET delegation_status='pending', delegated_to_user_id=?, delegated_by_user_id=?,
+                 delegation_deadline=?, delegation_note=?, delegation_share_percent=?, rejection_reason=NULL, updated_at=?
+             WHERE id=?`,
+            [delegatedToUserId, req.user.id, deadline, note, shareNum, now, req.params.id],
+            connection
+        );
+        await query(
+            `INSERT INTO job_assignments (job_id, previous_assignee_user_id, assigned_to_user_id, assigned_by_user_id, note)
+             VALUES (?, ?, ?, ?, ?)`,
+            [req.params.id, job.assigned_to_user_id, delegatedToUserId, req.user.id, `Delegated to ${targetUser.name} (${shareNum}% split, 4hr response window): ${note}`],
+            connection
+        );
+        await audit(req.user.id, 'delegate', 'job', req.params.id, { delegatedToUserId, sharePercent: shareNum, deadline }, connection);
+    });
+
+    emitRefresh();
+    const updated = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    res.json({ job: mapJob(updated, req.user.accountType !== 'client') });
+});
+
+app.post('/api/jobs/:id/accept-delegation', requireAuth, async (req, res) => {
+    const job = await one('SELECT * FROM jobs WHERE id=?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const now = new Date().toISOString();
+
+    await transaction(async connection => {
+        await query(
+            `UPDATE jobs 
+             SET delegation_status='accepted', assigned_to_user_id=COALESCE(delegated_to_user_id, assigned_to_user_id),
+                 status=CASE WHEN status='submitted' THEN 'in_progress' ELSE status END,
+                 updated_at=?
+             WHERE id=?`,
+            [now, req.params.id],
+            connection
+        );
+        await query(
+            `INSERT INTO job_assignments (job_id, previous_assignee_user_id, assigned_to_user_id, assigned_by_user_id, note)
+             VALUES (?, ?, ?, ?, ?)`,
+            [req.params.id, job.delegated_by_user_id, req.user.id, req.user.id, 'Delegation accepted by assignee'],
+            connection
+        );
+        await audit(req.user.id, 'accept_delegation', 'job', req.params.id, {}, connection);
+    });
+
+    emitRefresh();
+    const updated = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    res.json({ job: mapJob(updated, req.user.accountType !== 'client') });
+});
+
+app.post('/api/jobs/:id/reject-delegation', requireAuth, async (req, res) => {
+    const { reason = 'Unable to accept task within schedule' } = req.body;
+    const job = await one('SELECT * FROM jobs WHERE id=?', [req.params.id]);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    const now = new Date().toISOString();
+
+    await transaction(async connection => {
+        await query(
+            `UPDATE jobs 
+             SET delegation_status='rejected', rejection_reason=?,
+                 assigned_to_user_id=COALESCE(delegated_by_user_id, assigned_to_user_id),
+                 updated_at=?
+             WHERE id=?`,
+            [reason, now, req.params.id],
+            connection
+        );
+        await query(
+            `INSERT INTO job_assignments (job_id, previous_assignee_user_id, assigned_to_user_id, assigned_by_user_id, note)
+             VALUES (?, ?, ?, ?, ?)`,
+            [req.params.id, job.delegated_to_user_id, job.delegated_by_user_id, req.user.id, `Delegation Rejected: ${reason}`],
+            connection
+        );
+        await audit(req.user.id, 'reject_delegation', 'job', req.params.id, { reason }, connection);
+    });
+
+    emitRefresh();
+    const updated = await one(`${jobSelect} WHERE j.id=?`, [req.params.id]);
+    res.json({ job: mapJob(updated, req.user.accountType !== 'client') });
 });
 app.patch('/api/jobs/:id', requireAuth, requirePermission('jobs.edit', 'jobs.update_status', 'jobs.override_tat', 'jobs.assign', 'jobs.reassign'), async (req, res) => {
     const schema = z.object({

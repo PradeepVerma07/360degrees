@@ -413,6 +413,13 @@ async function initialiseRbacSchema() {
   await addColumnIfMissing('jobs', 'department_id', 'BIGINT UNSIGNED NULL AFTER assigned_by_user_id');
   await addColumnIfMissing('jobs', 'assignment_date', 'VARCHAR(40) NULL AFTER department_id');
   await addColumnIfMissing('jobs', 'assignment_note', 'TEXT NULL AFTER assignment_date');
+  await addColumnIfMissing('jobs', 'delegation_status', "VARCHAR(30) NOT NULL DEFAULT 'none' AFTER assignment_note");
+  await addColumnIfMissing('jobs', 'delegated_to_user_id', 'VARCHAR(100) NULL AFTER delegation_status');
+  await addColumnIfMissing('jobs', 'delegated_by_user_id', 'VARCHAR(100) NULL AFTER delegated_to_user_id');
+  await addColumnIfMissing('jobs', 'delegation_deadline', 'VARCHAR(40) NULL AFTER delegated_by_user_id');
+  await addColumnIfMissing('jobs', 'delegation_note', 'TEXT NULL AFTER delegation_deadline');
+  await addColumnIfMissing('jobs', 'delegation_share_percent', 'INT NOT NULL DEFAULT 100 AFTER delegation_note');
+  await addColumnIfMissing('jobs', 'rejection_reason', 'TEXT NULL AFTER delegation_share_percent');
 
   await query(`CREATE TABLE IF NOT EXISTS job_assignments (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

@@ -1765,8 +1765,18 @@ a {
     padding: 16px 12px 28px;
   }
 
+  .overview-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+
   .form-row, .summary-split-grid, .metrics-2x2-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+  }
+
+  .data-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

@@ -1302,24 +1302,68 @@ function ProductivityLogJobTab({ clients, services, employees, onJobLogged }) {
             </div>
           </div>
 
-          {/* SERVICES MULTI-SELECT */}
+          {/* SERVICES MULTI-SELECT DROPDOWN */}
           <div className="form-group">
-            <label className="form-label">Services Attached (Select one or more)</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
-              {services.map(s => {
-                const isSelected = selectedServiceIds.includes(s.id);
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => toggleService(s.id)}
-                  >
-                    {isSelected ? '✓ ' : '+ '} {s.name}
-                  </button>
-                );
-              })}
-            </div>
+            <label className="form-label">Services Attached</label>
+            <select
+              className="form-select"
+              value=""
+              onChange={e => {
+                const id = Number(e.target.value);
+                if (id && !selectedServiceIds.includes(id)) {
+                  setSelectedServiceIds([...selectedServiceIds, id]);
+                }
+              }}
+            >
+              <option value="">-- Choose and attach services (Click to add) --</option>
+              {services.map(s => (
+                <option key={s.id} value={s.id} disabled={selectedServiceIds.includes(s.id)}>
+                  {s.name} ({s.referenceHours || s.reference_hours}h) {selectedServiceIds.includes(s.id) ? '✓ Attached' : ''}
+                </option>
+              ))}
+            </select>
+
+            {/* Selected Service Badges */}
+            {selectedServiceIds.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                {selectedServiceIds.map(id => {
+                  const s = services.find(x => x.id === id);
+                  if (!s) return null;
+                  return (
+                    <span
+                      key={id}
+                      className="badge badge-category"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '4px 10px',
+                        fontSize: '12px',
+                        background: 'var(--ci-surface)',
+                        color: 'var(--ci-navy)',
+                        border: '1px solid var(--ci-border)'
+                      }}
+                    >
+                      ✓ {s.name} ({s.referenceHours || s.reference_hours}h)
+                      <button
+                        type="button"
+                        onClick={() => setSelectedServiceIds(selectedServiceIds.filter(x => x !== id))}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--ci-danger)',
+                          fontWeight: 'bold',
+                          padding: '0 2px'
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="form-group">

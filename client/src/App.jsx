@@ -1303,6 +1303,7 @@ function SubmitJobPage({ data, reload, setTab }) {
   const defaultClient = data.clients?.find(c => c.status === 'active')?.id || '';
   const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
   const employees = (data?.clientOwners || []).filter(u => u.accountType !== 'client' && u.role !== 'client');
+  const leadUser = employees.find(u => u.name === 'Urna') || employees.find(u => u.name === 'Mansi') || employees[0];
 
   const [servicesList, setServicesList] = useState([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
@@ -1321,11 +1322,12 @@ function SubmitJobPage({ data, reload, setTab }) {
     assetLink: '',
     startDate: new Date().toISOString().substring(0, 10),
     completionDate: '',
-    valueAmount: ''
+    valueAmount: '',
+    assignedToUserId: leadUser?.id || ''
   });
 
   const [assignments, setAssignments] = useState([
-    { userId: employees[0]?.id || data.user?.id || '', revenuePercent: 100, hoursSpent: '' }
+    { userId: leadUser?.id || employees[0]?.id || data.user?.id || '', revenuePercent: 100, hoursSpent: '' }
   ]);
 
   const [submitting, setSubmitting] = useState(false);
@@ -1333,12 +1335,6 @@ function SubmitJobPage({ data, reload, setTab }) {
   const [success, setSuccess] = useState('');
 
   const totalRevPercent = assignments.reduce((sum, a) => sum + Number(a.revenuePercent || 0), 0);
-
-  const toggleService = id => {
-    setSelectedServiceIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
 
   const addAssignee = () => {
     setAssignments(prev => [
@@ -1391,7 +1387,7 @@ function SubmitJobPage({ data, reload, setTab }) {
         }
       }
 
-      setSuccess('Job submitted and logged successfully!');
+      setSuccess('Job submitted and assigned successfully!');
       await reload();
       setTimeout(() => {
         setTab('jobs');
@@ -1408,7 +1404,7 @@ function SubmitJobPage({ data, reload, setTab }) {
       <div className="saas-card">
         <div className="card-header">
           <div>
-            <h2 className="card-title" style={{ fontSize: '18px' }}>Submit & Log a Job</h2>
+            <h2 className="card-title" style={{ fontSize: '18px' }}>Submit a Job</h2>
             <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>
               Complete the deliverables, timing, services, and team allocations
             </span>
@@ -1421,7 +1417,7 @@ function SubmitJobPage({ data, reload, setTab }) {
         <form onSubmit={handleSubmit}>
           {/* Client & Title */}
           <div className="form-row">
-            {isSuperOrAdmin && (
+            {isSuperOrAdmin ? (
               <div className="form-group" style={{ flex: 1 }}>
                 <label className="form-label">Client / Account</label>
                 <select
@@ -1437,7 +1433,7 @@ function SubmitJobPage({ data, reload, setTab }) {
                   ))}
                 </select>
               </div>
-            )}
+            ) : null}
 
             <div className="form-group" style={{ flex: 1.5 }}>
               <label className="form-label">Job Title / Deliverable</label>
@@ -1490,26 +1486,95 @@ function SubmitJobPage({ data, reload, setTab }) {
             )}
           </div>
 
-          {/* Services Multi-Select Chips */}
-          {servicesList.length > 0 && isSuperOrAdmin && (
+          {/* Team Member Assignment (Client / Admin selectable, default Urna/Mansi) */}
+          <div className="form-group">
+            <label className="form-label">Assign Team Member (Lead / Owner)</label>
+            <select
+              className="form-select"
+              value={form.assignedToUserId}
+              onChange={e => {
+                const uid = e.target.value;
+                setForm({ ...form, assignedToUserId: uid });
+                if (uid) {
+                  setAssignments([{ userId: uid, revenuePercent: 100, hoursSpent: '' }]);
+                }
+              }}
+            >
+              <option value="">Auto-Assign (Urna / Mansi — Operations Leads)</option>
+              {employees.map(emp => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} {emp.name === 'Urna' || emp.name === 'Mansi' ? '★ (Operations Lead)' : `(${emp.departmentName || emp.role || 'Staff'})`}
+                </option>
+              ))}
+            </select>
+            <span className="form-hint" style={{ marginTop: '3px' }}>
+              Jobs are automatically assigned to Urna & Mansi for triage, and can be delegated or shared with other team members.
+            </span>
+          </div>
+
+          {/* Services Multi-Select Dropdown */}
+          {servicesList.length > 0 && (
             <div className="form-group">
-              <label className="form-label">Services Attached (Select all that apply)</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
-                {servicesList.map(s => {
-                  const isSelected = selectedServiceIds.includes(s.id);
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
-                      style={{ fontSize: '12px', padding: '3px 9px' }}
-                      onClick={() => toggleService(s.id)}
-                    >
-                      {isSelected ? '✓ ' : '+ '} {s.name} ({s.referenceHours || s.reference_hours}h)
-                    </button>
-                  );
-                })}
-              </div>
+              <label className="form-label">Services Attached</label>
+              <select
+                className="form-select"
+                value=""
+                onChange={e => {
+                  const id = Number(e.target.value);
+                  if (id && !selectedServiceIds.includes(id)) {
+                    setSelectedServiceIds([...selectedServiceIds, id]);
+                  }
+                }}
+              >
+                <option value="">-- Choose and attach services (Click to add) --</option>
+                {servicesList.map(s => (
+                  <option key={s.id} value={s.id} disabled={selectedServiceIds.includes(s.id)}>
+                    {s.name} ({s.referenceHours || s.reference_hours}h) {selectedServiceIds.includes(s.id) ? '✓ Attached' : ''}
+                  </option>
+                ))}
+              </select>
+
+              {/* Selected Service Badges */}
+              {selectedServiceIds.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                  {selectedServiceIds.map(id => {
+                    const s = servicesList.find(x => x.id === id);
+                    if (!s) return null;
+                    return (
+                      <span
+                        key={id}
+                        className="badge badge-category"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '4px 10px',
+                          fontSize: '12px',
+                          background: 'var(--ci-surface)',
+                          color: 'var(--ci-navy)',
+                          border: '1px solid var(--ci-border)'
+                        }}
+                      >
+                        ✓ {s.name} ({s.referenceHours || s.reference_hours}h)
+                        <button
+                          type="button"
+                          onClick={() => setSelectedServiceIds(selectedServiceIds.filter(x => x !== id))}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--ci-danger)',
+                            fontWeight: 'bold',
+                            padding: '0 2px'
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1689,6 +1754,8 @@ function JobsListPage({ data, reload }) {
   const jobs = data.jobs || [];
   const settings = data.settings || {};
   const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
+  const employees = (data?.clientOwners || []).filter(u => u.accountType !== 'client' && u.role !== 'client');
+  const currentUserId = data.user?.id;
 
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -1703,6 +1770,18 @@ function JobsListPage({ data, reload }) {
   const [editOverrideNote, setEditOverrideNote] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Delegation Modal State
+  const [delegatingJob, setDelegatingJob] = useState(null);
+  const [delegateUserId, setDelegateUserId] = useState('');
+  const [delegateSharePercent, setDelegateSharePercent] = useState(100);
+  const [delegateNote, setDelegateNote] = useState('');
+  const [submittingDelegation, setSubmittingDelegation] = useState(false);
+
+  // Rejection Modal State
+  const [rejectingJob, setRejectingJob] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [submittingReject, setSubmittingReject] = useState(false);
+
   const filteredJobs = useMemo(() => {
     return jobs.filter(j => {
       if (categoryFilter && j.category !== categoryFilter) return false;
@@ -1714,7 +1793,8 @@ function JobsListPage({ data, reload }) {
         const matchTitle = (j.title || '').toLowerCase().includes(q);
         const matchDesc = (j.description || '').toLowerCase().includes(q);
         const matchPosted = (j.postedBy || '').toLowerCase().includes(q);
-        if (!matchTitle && !matchDesc && !matchPosted) return false;
+        const matchAssigned = (j.assignedToName || '').toLowerCase().includes(q);
+        if (!matchTitle && !matchDesc && !matchPosted && !matchAssigned) return false;
       }
       return true;
     });
@@ -1725,6 +1805,13 @@ function JobsListPage({ data, reload }) {
     setEditStatus(job.status);
     setEditOverrideHours(job.teamOverrideHours ?? '');
     setEditOverrideNote(job.teamOverrideNote ?? '');
+  };
+
+  const openDelegateModal = job => {
+    setDelegatingJob(job);
+    setDelegateUserId(employees[0]?.id || '');
+    setDelegateSharePercent(100);
+    setDelegateNote('');
   };
 
   const saveJobUpdate = async e => {
@@ -1746,6 +1833,49 @@ function JobsListPage({ data, reload }) {
     }
   };
 
+  const handleSendDelegation = async e => {
+    e.preventDefault();
+    if (!delegatingJob || !delegateUserId) return;
+    try {
+      setSubmittingDelegation(true);
+      await api.delegateJob(delegatingJob.id, {
+        delegatedToUserId: delegateUserId,
+        sharePercent: Number(delegateSharePercent) || 100,
+        note: delegateNote
+      });
+      setDelegatingJob(null);
+      await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to delegate job');
+    } finally {
+      setSubmittingDelegation(false);
+    }
+  };
+
+  const handleAccept = async jobId => {
+    try {
+      await api.acceptDelegation(jobId);
+      await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to accept job');
+    }
+  };
+
+  const handleRejectSubmit = async e => {
+    e.preventDefault();
+    if (!rejectingJob) return;
+    try {
+      setSubmittingReject(true);
+      await api.rejectDelegation(rejectingJob.id, rejectReason);
+      setRejectingJob(null);
+      await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to reject job');
+    } finally {
+      setSubmittingReject(false);
+    }
+  };
+
   return (
     <div>
       {/* FILTER TOOLBAR */}
@@ -1754,7 +1884,7 @@ function JobsListPage({ data, reload }) {
           <DashboardIcon name="search" />
           <input
             type="text"
-            placeholder="Search by title, description or author..."
+            placeholder="Search by title, description, author or assignee..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1824,14 +1954,14 @@ function JobsListPage({ data, reload }) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Job Title</th>
+                <th>Job Deliverable</th>
                 {isSuperOrAdmin && <th>Client</th>}
                 <th>Category</th>
                 <th>Priority</th>
                 <th>Status</th>
+                <th>Assigned Lead & Transfer</th>
                 <th>Due Date</th>
-                <th>Posted By</th>
-                {isSuperOrAdmin && <th>Action</th>}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1842,21 +1972,31 @@ function JobsListPage({ data, reload }) {
                   settings
                 );
 
+                const isDelegationPending = job.delegationStatus === 'pending';
+                const deadlineMs = job.delegationDeadline ? new Date(job.delegationDeadline).getTime() - Date.now() : 0;
+                const hoursLeft = Math.max(0, Math.floor(deadlineMs / 3600000));
+                const minsLeft = Math.max(0, Math.floor((deadlineMs % 3600000) / 60000));
+                const isAssignedToMe = job.delegatedToUserId === currentUserId || job.assignedToUserId === currentUserId;
+                const canTransfer = isSuperOrAdmin || job.assignedToUserId === currentUserId || job.createdByName === data.user?.name;
+
                 return (
                   <tr key={job.id}>
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        <strong style={{ color: 'var(--ci-text)', fontSize: '14px' }}>{job.title}</strong>
+                        <strong style={{ color: 'var(--ci-text)', fontSize: '13.5px' }}>{job.title}</strong>
                         {job.assetLink && (
                           <a
                             href={job.assetLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            style={{ fontSize: '12px', marginTop: '2px', color: 'var(--ci-info)' }}
+                            style={{ fontSize: '11.5px', marginTop: '2px', color: 'var(--ci-info)' }}
                           >
                             View Asset Link ↗
                           </a>
                         )}
+                        <span style={{ fontSize: '11px', color: 'var(--ci-text-secondary)', marginTop: '2px' }}>
+                          Posted by: {job.postedBy}
+                        </span>
                       </div>
                     </td>
 
@@ -1882,25 +2022,101 @@ function JobsListPage({ data, reload }) {
                       </span>
                     </td>
 
-                    <td style={{ fontWeight: 600, color: 'var(--ci-text)' }}>
+                    {/* Assigned Lead & 4-Hour Delegation Status */}
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontWeight: 600, fontSize: '12.5px', color: 'var(--ci-navy)' }}>
+                            {job.assignedToName || 'Urna (Auto-assigned Lead)'}
+                          </span>
+                        </div>
+
+                        {/* Delegation Badges & Response Windows */}
+                        {isDelegationPending && deadlineMs > 0 && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <span className="badge badge-priority-urgent" style={{ fontSize: '10.5px', padding: '2px 6px' }}>
+                              ⏳ Pending Accept ({hoursLeft}h {minsLeft}m left → Auto-confirms)
+                            </span>
+                            {job.delegatedToName && (
+                              <span style={{ fontSize: '11px', color: 'var(--ci-text-secondary)' }}>
+                                To: <strong>{job.delegatedToName}</strong> ({job.delegationSharePercent}% split)
+                              </span>
+                            )}
+                            {(isAssignedToMe || isSuperOrAdmin) && (
+                              <div style={{ display: 'flex', gap: '4px', marginTop: '3px' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-primary"
+                                  style={{ fontSize: '11px', padding: '2px 8px', background: 'var(--ci-success)', borderColor: 'var(--ci-success)' }}
+                                  onClick={() => handleAccept(job.id)}
+                                >
+                                  ✓ Accept
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-secondary"
+                                  style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--ci-danger)' }}
+                                  onClick={() => {
+                                    setRejectingJob(job);
+                                    setRejectReason('');
+                                  }}
+                                >
+                                  ✕ Reject
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {job.delegationStatus === 'auto_accepted' && (
+                          <span className="badge badge-status-completed" style={{ fontSize: '10.5px' }}>
+                            ✓ Auto-Confirmed after 4h
+                          </span>
+                        )}
+
+                        {job.delegationStatus === 'accepted' && (
+                          <span className="badge badge-status-completed" style={{ fontSize: '10.5px' }}>
+                            ✓ Confirmed by {job.delegatedToName || 'Assignee'}
+                          </span>
+                        )}
+
+                        {job.delegationStatus === 'rejected' && (
+                          <span className="badge badge-priority-urgent" style={{ fontSize: '10.5px' }} title={job.rejectionReason}>
+                            ✕ Rejected (Returned to Lead)
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    <td style={{ fontWeight: 600, color: 'var(--ci-text)', fontSize: '12.5px' }}>
                       {formatDisplayDate(dueDate)}
                     </td>
 
-                    <td style={{ color: 'var(--ci-text-secondary)', fontSize: '13px' }}>
-                      {job.postedBy}
+                    <td>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        {canTransfer && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '11.5px', padding: '3px 8px', whiteSpace: 'nowrap' }}
+                            title="Transfer or share work with another team member"
+                            onClick={() => openDelegateModal(job)}
+                          >
+                            ↗ Transfer / Share
+                          </button>
+                        )}
+                        {isSuperOrAdmin && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            style={{ fontSize: '11.5px', padding: '3px 8px' }}
+                            onClick={() => openEditModal(job)}
+                          >
+                            Manage
+                          </button>
+                        )}
+                      </div>
                     </td>
-
-                    {isSuperOrAdmin && (
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => openEditModal(job)}
-                        >
-                          Manage
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -1908,6 +2124,147 @@ function JobsListPage({ data, reload }) {
           </table>
         )}
       </div>
+
+      {/* DELEGATE / TRANSFER WORK MODAL (4-HOUR WINDOW) */}
+      {delegatingJob && (
+        <div className="modal-backdrop" onClick={() => setDelegatingJob(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">Transfer / Share Work: {delegatingJob.title}</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setDelegatingJob(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSendDelegation}>
+              <div className="modal-body">
+                <div className="alert-banner info" style={{ marginBottom: '14px', fontSize: '12px' }}>
+                  ℹ <strong>4-Hour Response Window:</strong> The assigned employee will have 4 hours to accept or reject. If 4 hours elapse without rejection, the work is automatically confirmed.
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Transfer / Share With Employee</label>
+                  <select
+                    className="form-select"
+                    value={delegateUserId}
+                    onChange={e => setDelegateUserId(e.target.value)}
+                    required
+                  >
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.departmentName || emp.role || 'Staff'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Work Allocation / Split Percentage</label>
+                  <select
+                    className="form-select"
+                    value={delegateSharePercent}
+                    onChange={e => setDelegateSharePercent(Number(e.target.value))}
+                  >
+                    <option value="100">100% — Full Job Transfer</option>
+                    <option value="75">75% — Primary Lead Share</option>
+                    <option value="50">50% — Equal 50/50 Sub-Task Split</option>
+                    <option value="30">30% — Support / Sub-Task Share</option>
+                    <option value="20">20% — Quality Control / Review Share</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Instructions / Scope Note for Assignee</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    placeholder="Describe specific tasks, deliverables, guidelines or handover notes..."
+                    value={delegateNote}
+                    onChange={e => setDelegateNote(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setDelegatingJob(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submittingDelegation}
+                >
+                  {submittingDelegation ? 'Delegating...' : 'Send Delegation (4hr Window)'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REJECT DELEGATION MODAL */}
+      {rejectingJob && (
+        <div className="modal-backdrop" onClick={() => setRejectingJob(null)}>
+          <div className="modal-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: '460px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">Decline / Reject Assignment</h3>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setRejectingJob(null)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleRejectSubmit}>
+              <div className="modal-body">
+                <p style={{ fontSize: '13px', color: 'var(--ci-text-secondary)', marginBottom: '12px' }}>
+                  Decline assignment for: <strong>{rejectingJob.title}</strong>. This job will immediately return to the delegating lead (Urna / Mansi).
+                </p>
+
+                <div className="form-group">
+                  <label className="form-label">Reason for Declining</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    placeholder="e.g. Schedule capacity full, requires additional brief from client..."
+                    value={rejectReason}
+                    onChange={e => setRejectReason(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setRejectingJob(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ background: 'var(--ci-danger)', borderColor: 'var(--ci-danger)' }}
+                  disabled={submittingReject}
+                >
+                  {submittingReject ? 'Submitting...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ADMIN EDIT JOB MODAL */}
       {editingJob && (
