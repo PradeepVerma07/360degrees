@@ -1653,15 +1653,15 @@ const publicDir = [
 if (publicDir) {
     console.log(`[CI360] Serving frontend static build from: ${publicDir}`);
     app.use(express.static(publicDir));
-    app.get('*', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
+    app.use((req, res, next) => {
+        if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
             return next();
         res.sendFile(path.join(publicDir, 'index.html'));
     });
 } else {
     console.warn('[CI360] Warning: No frontend build directory with index.html found. Checked candidates around:', process.cwd());
-    app.get('*', (req, res, next) => {
-        if (req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
+    app.use((req, res, next) => {
+        if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
             return next();
         res.status(200).send(`<!DOCTYPE html>
 <html lang="en">
