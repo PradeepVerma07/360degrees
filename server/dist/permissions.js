@@ -68,6 +68,12 @@ export async function loadUserContext(userId) {
   ) : [];
   const permissions = new Set(permissionRows.map(item => item.permission_id));
 
+  // Merge catalog default permissions for the role
+  const catalogDefaults = rolePermissions[roleId] || rolePermissions[fallbackType] || [];
+  for (const p of catalogDefaults) {
+    permissions.add(p);
+  }
+
   if (!permissions.size && !row.role_id) {
     for (const permission of legacyPermissionFallback[fallbackType] || [])
       permissions.add(permission);

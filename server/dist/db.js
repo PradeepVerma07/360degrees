@@ -482,8 +482,34 @@ async function seedRbacDefaults() {
 }
 
 async function mapExistingUsersToRbac() {
-  await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' AND (role_id IS NULL OR role_id='')");
-  await query("UPDATE users SET account_type='client', role_id='client' WHERE role='client' AND (role_id IS NULL OR role_id='')");
+  await query("UPDATE users SET account_type='super_admin', role_id='super_admin' WHERE role='super_admin' OR account_type='super_admin'");
+  await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' OR name IN ('Pramit', 'Aashit', 'Urna')");
+
+  // Ensure internal company employees (e.g. Meshwa Kadia, Mansi, John, etc.) have employee role
+  const teamMemberNames = [
+    'Meshwa', 'Meshwa Kadia', 'Mansi', 'Chitra', 'Arushi', 'Manan', 'Mary', 'Ajay',
+    'Aarya', 'Aadya', 'John', 'Dhawal', 'Ekta', 'Khushi', 'Reehan', 'Pradeep',
+    'Harshada', 'Arjun', 'Shalini', 'External'
+  ];
+  for (const name of teamMemberNames) {
+    await query(
+      "UPDATE users SET account_type='employee', role='employee', role_id='employee', client_id=NULL WHERE (name LIKE ? OR email LIKE ?) AND account_type!='super_admin' AND name NOT IN ('Pramit', 'Aashit', 'Urna')",
+      [`%${name}%`, `%${name.toLowerCase().replace(/[^a-z]/g, '')}%@360degrees.com`]
+    );
+  }
+
+  // Ensure anyone with employee settings is mapped to employee
+  await query(`
+    UPDATE users u
+    JOIN productivity_employee_settings pes ON pes.user_id = u.id
+    SET u.account_type = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+        u.role = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+        u.role_id = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+        u.client_id = NULL
+    WHERE u.account_type != 'super_admin'
+  `);
+
+  await query("UPDATE users SET account_type='client', role_id='client' WHERE (role='client' OR account_type='client') AND (role_id IS NULL OR role_id='' OR role_id='client') AND email NOT LIKE '%@360degrees.com'");
   await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
 }
 
