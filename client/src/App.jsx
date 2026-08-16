@@ -534,11 +534,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
         {/* BRAND & CONTROLS */}
         <div className="sidebar-header">
           <div className="sidebar-brand">
-            <span className="brand-logo-text">
-              <span className="brand-navy">CI360</span>
-              <span className="brand-gold">degrees</span>
-            </span>
-            <span className="brand-subtitle">Realtime Job Board</span>
+            <img src="/logo.png" alt="360degrees" className="sidebar-brand-logo" />
           </div>
           {/* Desktop Collapse Button */}
           <button
@@ -3011,11 +3007,7 @@ function LoginPage({ onLogin }) {
     <div className="auth-page-wrap">
       <div className="auth-card-container">
         <div className="auth-brand-header">
-          <h1>
-            <span className="brand-navy">CI360</span>
-            <span className="brand-gold">degrees</span>
-          </h1>
-          <p>Realtime Job Board</p>
+          <img src="/logo.png" alt="360degrees" className="auth-brand-logo" />
         </div>
 
         <h2 className="auth-form-title">Job Board Sign In</h2>

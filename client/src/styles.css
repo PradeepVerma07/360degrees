@@ -138,7 +138,15 @@ a {
 
 .sidebar-brand {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+}
+
+.sidebar-brand-logo {
+  height: 40px;
+  width: auto;
+  max-width: 140px;
+  object-fit: contain;
+  display: block;
 }
 
 .brand-logo-text {
@@ -1506,7 +1514,17 @@ a {
 
 .auth-brand-header {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.auth-brand-logo {
+  width: 90px;
+  height: 90px;
+  object-fit: contain;
+  display: block;
 }
 
 .auth-brand-header h1 {
@@ -2855,6 +2873,12 @@ a {
 
 .app-shell.sidebar-collapsed .sidebar-brand .brand-navy {
   font-size: 18px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-brand-logo {
+  height: 34px;
+  width: 34px;
+  max-width: 34px;
 }
 
 .app-shell.sidebar-collapsed .sidebar-cta-btn {
