@@ -1923,6 +1923,20 @@ const publicDir = [
     path.resolve(process.cwd(), 'public')
 ].find(candidate => candidate && fs.existsSync(path.join(candidate, 'index.html')));
 
+app.get('/favicon.ico', (req, res) => {
+    const candidateFiles = [
+        path.join(publicDir || '', 'favicon.ico'),
+        path.join(publicDir || '', 'favicon.png'),
+        path.resolve(process.cwd(), 'client/public/favicon.png'),
+        path.resolve(process.cwd(), 'client/public/favicon.ico')
+    ];
+    const found = candidateFiles.find(f => f && fs.existsSync(f));
+    if (found) {
+        return res.sendFile(found);
+    }
+    res.status(204).end();
+});
+
 if (publicDir) {
     console.log(`[CI360] Serving frontend static build from: ${publicDir}`);
     app.use(express.static(publicDir));
