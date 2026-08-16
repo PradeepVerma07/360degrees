@@ -1,9 +1,4 @@
-import fs from 'node:fs';
+import app, { httpServer } from './server/src/index.js';
 
-const mod = fs.existsSync(new URL('./server/dist/index.js', import.meta.url))
-  ? await import('./server/dist/index.js')
-  : await import('./server/src/index.js');
-
-export const app = mod.app || mod.default;
-export const httpServer = mod.httpServer;
-export default mod.default || mod.app;
+export { app, httpServer };
+export default app;
