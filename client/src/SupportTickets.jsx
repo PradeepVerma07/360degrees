@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { io } from 'socket.io-client';
+import { getSocket } from './socket';
 import { api, API_URL } from './api';
 
 const categories = [
@@ -173,32 +173,38 @@ export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
 
   // Real-Time Socket.IO Synchronization
   useEffect(() => {
-    const socket = io(API_URL || undefined);
+    const socket = getSocket();
     socketRef.current = socket;
 
-    socket.on('support:reply', ({ ticketNumber }) => {
+    const onReply = ({ ticketNumber }) => {
       if (selectedTicket && selectedTicket.ticketNumber === ticketNumber) {
         fetchTicketDetails(ticketNumber, true);
       }
       reload();
-    });
+    };
 
-    socket.on('support:updated', ({ ticketNumber }) => {
+    const onUpdated = ({ ticketNumber }) => {
       if (selectedTicket && selectedTicket.ticketNumber === ticketNumber) {
         fetchTicketDetails(ticketNumber, true);
       }
       reload();
-    });
+    };
 
-    socket.on('support:cleared', ({ ticketNumber }) => {
+    const onCleared = ({ ticketNumber }) => {
       if (selectedTicket && selectedTicket.ticketNumber === ticketNumber) {
         fetchTicketDetails(ticketNumber, true);
       }
       reload();
-    });
+    };
+
+    socket.on('support:reply', onReply);
+    socket.on('support:updated', onUpdated);
+    socket.on('support:cleared', onCleared);
 
     return () => {
-      socket.disconnect();
+      socket.off('support:reply', onReply);
+      socket.off('support:updated', onUpdated);
+      socket.off('support:cleared', onCleared);
     };
   }, [selectedTicket, fetchTicketDetails, reload]);
 

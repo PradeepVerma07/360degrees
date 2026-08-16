@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
-import { io } from 'socket.io-client';
+import { getSocket } from './socket';
 import { api, API_URL, getToken, setToken } from './api';
 import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
@@ -358,14 +358,21 @@ export default function App() {
   useEffect(() => {
     if (!auth) return;
     load();
-    const socket = io(API_URL || undefined);
-    socket.on('connect', () => setSocketConnected(true));
-    socket.on('disconnect', () => setSocketConnected(false));
+    const socket = getSocket();
+    const handleConnect = () => setSocketConnected(true);
+    const handleDisconnect = () => setSocketConnected(false);
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
     socket.on('data:changed', load);
     socket.on('permissions:updated', load);
     socket.on('productivity:changed', load);
+    if (socket.connected) setSocketConnected(true);
     return () => {
-      socket.disconnect();
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      socket.off('data:changed', load);
+      socket.off('permissions:updated', load);
+      socket.off('productivity:changed', load);
     };
   }, [auth, load]);
 

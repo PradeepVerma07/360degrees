@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { io } from 'socket.io-client';
+import { getSocket } from './socket';
 import { api, API_URL } from './api';
 
 const allowedExtensions = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'zip', 'mp3', 'wav', 'mp4']);
@@ -179,10 +179,10 @@ export default function TeamChat({ data, reload }) {
 
   // Setup Real-Time Socket.IO
   useEffect(() => {
-    const socket = io(API_URL || undefined);
+    const socket = getSocket();
     socketRef.current = socket;
 
-    socket.on('chat:message', (newMsg) => {
+    const onMessage = (newMsg) => {
       setChannels(prev => prev.map(c => {
         if (c.id === newMsg.channelId) {
           return {
@@ -201,34 +201,34 @@ export default function TeamChat({ data, reload }) {
         });
         scrollToBottom(true);
       }
-    });
+    };
 
-    socket.on('chat:message_deleted', ({ id, channelId }) => {
+    const onMessageDeleted = ({ id, channelId }) => {
       if (channelId === activeChannelId) {
         setMessages(prev => prev.filter(m => m.id !== id));
       }
-    });
+    };
 
-    socket.on('chat:channel_created', (channel) => {
+    const onChannelCreated = (channel) => {
       setChannels(prev => {
         if (prev.some(c => c.id === channel.id)) return prev;
         return [...prev, channel];
       });
-    });
+    };
 
-    socket.on('chat:cleared', ({ channelId }) => {
+    const onCleared = ({ channelId }) => {
       if (channelId === activeChannelId) {
         setMessages([]);
       }
-    });
+    };
 
-    socket.on('chat:typing', ({ channelId, user }) => {
+    const onTyping = ({ channelId, user }) => {
       if (channelId === activeChannelId && user !== currentUser.name) {
         setTypingUsers(prev => new Set([...prev, user]));
       }
-    });
+    };
 
-    socket.on('chat:stop_typing', ({ channelId, user }) => {
+    const onStopTyping = ({ channelId, user }) => {
       if (channelId === activeChannelId) {
         setTypingUsers(prev => {
           const next = new Set(prev);
@@ -236,10 +236,22 @@ export default function TeamChat({ data, reload }) {
           return next;
         });
       }
-    });
+    };
+
+    socket.on('chat:message', onMessage);
+    socket.on('chat:message_deleted', onMessageDeleted);
+    socket.on('chat:channel_created', onChannelCreated);
+    socket.on('chat:cleared', onCleared);
+    socket.on('chat:typing', onTyping);
+    socket.on('chat:stop_typing', onStopTyping);
 
     return () => {
-      socket.disconnect();
+      socket.off('chat:message', onMessage);
+      socket.off('chat:message_deleted', onMessageDeleted);
+      socket.off('chat:channel_created', onChannelCreated);
+      socket.off('chat:cleared', onCleared);
+      socket.off('chat:typing', onTyping);
+      socket.off('chat:stop_typing', onStopTyping);
     };
   }, [activeChannelId, currentUser.name, scrollToBottom]);
 

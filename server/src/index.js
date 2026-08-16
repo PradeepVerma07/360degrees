@@ -27,8 +27,8 @@ import { calculateHours } from './tat.js';
 import { createProductivityRouter } from './routes/productivity.js';
 const app = express();
 const httpServer = createServer(app);
-httpServer.keepAliveTimeout = 65000;
-httpServer.headersTimeout = 66000;
+httpServer.keepAliveTimeout = 5000;
+httpServer.headersTimeout = 6000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const io = new Server(httpServer, {
@@ -37,10 +37,9 @@ const io = new Server(httpServer, {
         methods: ['GET', 'POST'],
         credentials: true
     },
-    transports: ['polling', 'websocket'],
-    pingTimeout: 60000,
-    pingInterval: 25000,
-    allowEIO3: true
+    transports: ['websocket', 'polling'],
+    pingTimeout: 10000,
+    pingInterval: 10000
 });
 let databaseReady = false;
 let databaseInitError = null;
@@ -469,33 +468,48 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
     const canReadJobs = hasAnyPermission(user, ['jobs.view_all', 'jobs.view_own', 'jobs.view_department']);
     const canReadSupport = hasAnyPermission(user, ['support.view_all', 'support.view_own', 'support.manage']);
     const canReadSettings = hasAnyPermission(user, ['settings.view', 'settings.edit']);
-    const jobRows = canReadJobs ? await loadVisibleJobs(user) : [];
-    const clients = await loadVisibleClients(user);
-    const ticketRows = !canReadSupport
-        ? []
-        : canManageSupport(user)
-            ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
-            : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    const assignees = await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
-        FROM users u
-        LEFT JOIN departments d ON d.id=u.department_id
-        LEFT JOIN designations ds ON ds.id=u.designation_id
-        WHERE u.status='active' AND COALESCE(u.account_type,u.role)<>'client'
-        ORDER BY u.name`);
-    const departments = await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name");
-    const clientOwners = await query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
-        WHERE status='active' AND COALESCE(account_type,role)<>'client' ORDER BY name`);
-    const currentSettings = await settings();
+
+    const [
+        jobRows,
+        clients,
+        ticketRows,
+        assignees,
+        departments,
+        clientOwners,
+        currentSettings,
+        categoryLoadData
+    ] = await Promise.all([
+        canReadJobs ? loadVisibleJobs(user) : Promise.resolve([]),
+        loadVisibleClients(user),
+        !canReadSupport
+            ? Promise.resolve([])
+            : canManageSupport(user)
+                ? query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
+                : query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']),
+        query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
+            FROM users u
+            LEFT JOIN departments d ON d.id=u.department_id
+            LEFT JOIN designations ds ON ds.id=u.designation_id
+            WHERE u.status='active' AND COALESCE(u.account_type,u.role)<>'client'
+            ORDER BY u.name`),
+        query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name"),
+        query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
+            WHERE status='active' AND COALESCE(account_type,role)<>'client' ORDER BY name`),
+        settings(),
+        !canReadJobs || user.accountType === 'client' ? Promise.resolve({}) : categoryLoadForUser(user)
+    ]);
+
     const bootstrapSettings = !canReadSettings
         ? {
-            categories: currentSettings.categories.map(category => ({ name: category.name })),
-            startHour: currentSettings.startHour,
-            endHour: currentSettings.endHour,
-            workDays: currentSettings.workDays,
+            categories: (currentSettings?.categories || []).map(category => ({ name: category.name })),
+            startHour: currentSettings?.startHour || 10.5,
+            endHour: currentSettings?.endHour || 19,
+            workDays: currentSettings?.workDays || [1, 2, 3, 4, 5],
             capacityPerCategory: 1,
             bufferHoursPerExtraJob: 0
         }
         : currentSettings;
+
     res.json({
         user,
         permissions: user.permissions,
@@ -504,7 +518,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         clients: user.accountType === 'client' ? clients.map(client => ({ id: client.id, name: client.name, status: client.status })) : clients,
         supportTickets: ticketRows.map(mapTicket),
         settings: bootstrapSettings,
-        categoryLoad: !canReadJobs || user.accountType === 'client' ? {} : await categoryLoadForUser(user),
+        categoryLoad: categoryLoadData,
         assignees,
         departments,
         clientOwners
