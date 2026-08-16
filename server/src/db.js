@@ -1,12 +1,14 @@
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
+import fs from 'node:fs';
 import { permissions, rolePermissions, roles } from './permissionCatalog.js';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
 const dbHost = configuredDbHost === 'localhost' ? '127.0.0.1' : configuredDbHost;
-const dbSocketPath = (process.env.DB_SOCKET_PATH || (configuredDbHost === 'localhost' ? '/var/lib/mysql/mysql.sock' : '')).trim();
-const dbConnectionTarget = dbSocketPath
-  ? { socketPath: dbSocketPath }
+const rawSocketPath = (process.env.DB_SOCKET_PATH || '').trim();
+const useSocket = Boolean(rawSocketPath && fs.existsSync(rawSocketPath));
+const dbConnectionTarget = useSocket
+  ? { socketPath: rawSocketPath }
   : { host: dbHost, port: Number(process.env.DB_PORT || 3306) };
 
 export const pool = mysql.createPool({
@@ -17,6 +19,7 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
   queueLimit: 0,
+  connectTimeout: 10000,
   charset: 'utf8mb4',
   timezone: 'Z',
   dateStrings: true,

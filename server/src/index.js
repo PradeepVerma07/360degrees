@@ -68,9 +68,19 @@ const databaseHealthDetails = () => {
         hint: hints[code] || 'Check Hostinger runtime logs for the full database error.'
     };
 };
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: false
+}));
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
+app.use((req, res, next) => {
+    req.setTimeout(25000, () => {
+        if (!res.headersSent) {
+            res.status(504).json({ error: 'Request gateway timeout' });
+        }
+    });
+    next();
+});
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
 const loginAttempts = new Map();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
@@ -1649,7 +1659,7 @@ app.use((error, _req, res, _next) => {
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });
 });
 const port = Number(process.env.PORT || 4000);
-httpServer.listen(port, () => console.log(`CI360 API running on port ${port}`));
+httpServer.listen(port, '0.0.0.0', () => console.log(`CI360 API running on port ${port}`));
 for (const signal of ['SIGTERM', 'SIGINT']) {
     process.on(signal, async () => {
         await pool.end();
