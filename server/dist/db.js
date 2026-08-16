@@ -710,6 +710,7 @@ export async function initialiseProductivitySchema() {
   await query(`CREATE TABLE IF NOT EXISTS productivity_employee_settings (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     user_id VARCHAR(100) NOT NULL UNIQUE,
+    custom_duties TEXT NULL,
     weekly_capacity_hours DECIMAL(6,2) NOT NULL DEFAULT 40.00,
     productivity_status ENUM('active','intern','vendor','inactive') NOT NULL DEFAULT 'active',
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -718,6 +719,16 @@ export async function initialiseProductivitySchema() {
     CONSTRAINT fk_prod_emp_user FOREIGN KEY (user_id) REFERENCES users(id)
       ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  // Safe schema migration for existing databases missing custom_duties
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_employee_settings LIKE 'custom_duties'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_employee_settings ADD COLUMN custom_duties TEXT NULL AFTER user_id`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] custom_duties column check/add:', err.message);
+  }
 
   await query(`CREATE TABLE IF NOT EXISTS productivity_external_resources (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
