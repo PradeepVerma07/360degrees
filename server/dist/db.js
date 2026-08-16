@@ -830,6 +830,21 @@ export async function initialiseProductivitySchema() {
       ON UPDATE CASCADE ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+  // Safe schema migrations for existing databases with missing productivity_job_assignments columns
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_job_assignments LIKE 'external_resource_id'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_job_assignments ADD COLUMN external_resource_id BIGINT UNSIGNED NULL AFTER user_id`);
+      try {
+        await query(`ALTER TABLE productivity_job_assignments ADD CONSTRAINT fk_prod_assign_ext FOREIGN KEY (external_resource_id) REFERENCES productivity_external_resources(id) ON UPDATE CASCADE ON DELETE SET NULL`);
+      } catch (fkErr) {
+        console.warn('[DB Migration] fk_prod_assign_ext add:', fkErr.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[DB Migration] external_resource_id column check/add:', err.message);
+  }
+
   await query(`CREATE TABLE IF NOT EXISTS productivity_account_rosters (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     client_id VARCHAR(100) NOT NULL UNIQUE,
@@ -843,6 +858,33 @@ export async function initialiseProductivitySchema() {
     CONSTRAINT fk_prod_roster_client FOREIGN KEY (client_id) REFERENCES clients(id)
       ON UPDATE CASCADE ON DELETE CASCADE
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_account_rosters LIKE 'difficulty'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_account_rosters ADD COLUMN difficulty TINYINT UNSIGNED NOT NULL DEFAULT 5 AFTER nature`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] difficulty column check/add:', err.message);
+  }
+
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_account_rosters LIKE 'comments'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_account_rosters ADD COLUMN comments TEXT NULL AFTER difficulty`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] comments column check/add:', err.message);
+  }
+
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_employee_settings LIKE 'custom_duties'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_employee_settings ADD COLUMN custom_duties TEXT NULL AFTER weekly_capacity_hours`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] custom_duties column check/add:', err.message);
+  }
 
   await query(`CREATE TABLE IF NOT EXISTS productivity_account_roster_assignments (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
