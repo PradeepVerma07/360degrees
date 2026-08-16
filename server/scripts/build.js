@@ -18,4 +18,13 @@ if (!fs.existsSync(path.join(clientDist, 'index.html'))) {
 fs.cpSync(clientDist, path.join(distDir, 'public'), { recursive: true });
 fs.cpSync(clientDist, path.join(serverRoot, 'public'), { recursive: true });
 fs.cpSync(clientDist, path.join(srcDir, 'public'), { recursive: true });
-console.log('Server build created at server/dist and static assets deployed');
+
+// Trigger Phusion Passenger / Hostinger automatic application reload
+const restartDirs = [projectRoot, serverRoot];
+for (const dir of restartDirs) {
+  const tmpDir = path.join(dir, 'tmp');
+  fs.mkdirSync(tmpDir, { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'restart.txt'), new Date().toISOString());
+}
+
+console.log('Server build created at server/dist and static assets deployed (touched tmp/restart.txt)');
