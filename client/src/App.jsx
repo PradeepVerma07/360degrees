@@ -532,28 +532,39 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
       {/* LEFT SIDEBAR */}
       <aside className="app-sidebar">
         {/* BRAND & CONTROLS */}
-        <div className="sidebar-header">
+        <div
+          className="sidebar-header"
+          onClick={() => { if (sidebarCollapsed) setSidebarCollapsed(false); }}
+          title={sidebarCollapsed ? 'Click to expand sidebar' : undefined}
+          style={{ cursor: sidebarCollapsed ? 'pointer' : 'default' }}
+        >
           <div className="sidebar-brand">
             <img src="/logo.png" alt="360degrees" className="sidebar-brand-logo" />
           </div>
-          {/* Desktop Collapse Button */}
+          {/* Desktop 3-Line Collapse/Expand Toggle Button */}
           <button
             type="button"
             className="sidebar-collapse-btn desktop-only"
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-            onClick={() => setSidebarCollapsed(v => !v)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setSidebarCollapsed(v => !v);
+            }}
           >
             <svg
               viewBox="0 0 24 24"
-              width="16"
-              height="16"
+              width="18"
+              height="18"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
-              style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              <polyline points="15 18 9 12 15 6" />
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           </button>
           {/* Mobile Drawer Close Button */}
@@ -561,7 +572,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             type="button"
             className="sidebar-close-btn mobile-only"
             aria-label="Close sidebar menu"
-            onClick={() => setMobileOpen(false)}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMobileOpen(false);
+            }}
           >
             ✕
           </button>
@@ -3019,8 +3033,7 @@ function LoginPage({ onLogin }) {
           <img src="/logo.png" alt="360degrees" className="auth-brand-logo" />
         </div>
 
-        <h2 className="auth-form-title">Job Board Sign In</h2>
-        <p className="auth-form-sub">Sign in to access your workspace.</p>
+        <h2 className="auth-form-title" style={{ textAlign: 'center', marginBottom: '24px' }}>CI360 Workspace</h2>
 
         {error && <div className="alert-banner error">{error}</div>}
 
