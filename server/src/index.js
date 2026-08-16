@@ -1973,14 +1973,30 @@ io.on('connection', socket => {
     });
 });
 app.use((error, _req, res, _next) => {
-    console.error(error);
+    console.error('CI360 Express Error:', error);
     res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });
 });
-const port = Number(process.env.PORT || 4000);
-httpServer.listen(port, '0.0.0.0', () => console.log(`CI360 API running on port ${port}`));
+
+process.on('uncaughtException', (err) => {
+    console.error('CI360 Uncaught Exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('CI360 Unhandled Rejection:', reason);
+});
+
+const rawPort = process.env.PORT;
+const isNumericPort = rawPort && !isNaN(Number(rawPort));
+const port = isNumericPort ? Number(rawPort) : (rawPort || 4000);
+
+if (typeof port === 'number') {
+    httpServer.listen(port, '0.0.0.0', () => console.log(`CI360 API running on port ${port}`));
+} else {
+    httpServer.listen(port, () => console.log(`CI360 API running on socket/port ${port}`));
+}
+
 for (const signal of ['SIGTERM', 'SIGINT']) {
     process.on(signal, async () => {
-        await pool.end();
+        try { await pool.end(); } catch {}
         httpServer.close(() => process.exit(0));
     });
 }
