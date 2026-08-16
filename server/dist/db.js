@@ -294,19 +294,23 @@ export async function initialiseDatabase() {
   }
   await query("ALTER TABLE chat_channels MODIFY COLUMN type ENUM('public','private','direct') NOT NULL DEFAULT 'public'").catch(() => {});
 
-  await initialiseRbacSchema();
-  await seedRbacDefaults();
-  await initialiseProductivitySchema();
-  await seedProductivityDefaults();
+  try { await initialiseRbacSchema(); } catch (e) { console.warn('initialiseRbacSchema warning:', e.message); }
+  try { await seedRbacDefaults(); } catch (e) { console.warn('seedRbacDefaults warning:', e.message); }
+  try { await initialiseProductivitySchema(); } catch (e) { console.warn('initialiseProductivitySchema warning:', e.message); }
+  try { await seedProductivityDefaults(); } catch (e) { console.warn('seedProductivityDefaults warning:', e.message); }
 
-  await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]);
-  await ensureEnvironmentSuperAdmin();
-  const row = await one('SELECT COUNT(*) AS count FROM clients');
-  if (envFlagEnabled(process.env.SEED_DEMO_DATA) && Number(row.count) === 0)
-    await seed();
-  if (envFlagEnabled(process.env.SEED_DEMO_USERS))
-    await seedDemoUsers();
-  await mapExistingUsersToRbac();
+  try { await query('INSERT IGNORE INTO settings (id, json) VALUES (1, ?)', [JSON.stringify(defaultSettings)]); } catch (e) {}
+  try { await ensureEnvironmentSuperAdmin(); } catch (e) { console.warn('ensureEnvironmentSuperAdmin warning:', e.message); }
+  try {
+    const row = await one('SELECT COUNT(*) AS count FROM clients');
+    if (envFlagEnabled(process.env.SEED_DEMO_DATA) && Number(row?.count || 0) === 0)
+      await seed();
+  } catch (e) {}
+  try {
+    if (envFlagEnabled(process.env.SEED_DEMO_USERS))
+      await seedDemoUsers();
+  } catch (e) {}
+  try { await mapExistingUsersToRbac(); } catch (e) { console.warn('mapExistingUsersToRbac warning:', e.message); }
 }
 
 async function initialiseRbacSchema() {

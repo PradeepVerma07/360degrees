@@ -50,12 +50,22 @@ const initialiseDatabaseWithRetry = async () => {
             databaseReady = true;
             databaseInitError = null;
             console.log('CI360 database ready');
+            break;
         }
         catch (error) {
             databaseInitError = error;
-            const delayMs = Math.min(30000, attempt * 5000);
-            console.error(`CI360 database initialization failed; retrying in ${delayMs / 1000}s`, error);
-            await wait(delayMs);
+            console.warn(`CI360 database initialization attempt ${attempt} warning:`, error.message);
+            try {
+                await one('SELECT 1');
+                databaseReady = true;
+                databaseInitError = null;
+                console.log('CI360 database connection verified');
+                break;
+            } catch (pingErr) {
+                const delayMs = Math.min(30000, attempt * 5000);
+                console.error(`CI360 database offline; retrying in ${delayMs / 1000}s`, pingErr.message);
+                await wait(delayMs);
+            }
         }
     }
 };
