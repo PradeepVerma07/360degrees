@@ -1996,20 +1996,13 @@ process.on('unhandledRejection', (reason) => {
     console.error('CI360 Unhandled Rejection:', reason);
 });
 
-try {
-    if (typeof globalThis.PhusionPassenger !== 'undefined') {
-        globalThis.PhusionPassenger.configure({ autoInstall: false });
-    }
-} catch {}
-
 httpServer.on('error', (err) => {
     console.error('CI360 HTTP Server Error:', err);
 });
 
-const isPassenger = typeof globalThis.PhusionPassenger !== 'undefined' || Boolean(process.env.PASSENGER_APP_ENV) || process.env.PORT === 'passenger';
 const rawPort = process.env.PORT;
 const isNumericPort = rawPort && !isNaN(Number(rawPort));
-const port = isPassenger ? 'passenger' : (isNumericPort ? Number(rawPort) : (rawPort || 3000));
+const port = isNumericPort ? Number(rawPort) : (rawPort || 3000);
 
 httpServer.listen(port, () => {
     console.log(`CI360 API running on ${typeof port === 'number' ? `port ${port}` : `socket ${port}`}`);
