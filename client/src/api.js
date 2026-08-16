@@ -82,7 +82,7 @@ export const api = {
     auditLogs: () => request('/api/audit-logs'),
     createSupportTicket: (data) => request('/api/support-tickets', { method: 'POST', body: JSON.stringify(data) }),
     getSupportTicket: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}`),
-    replySupportTicket: (ticketNumber, body) => request(`/api/support-tickets/${ticketNumber}/replies`, { method: 'POST', body: JSON.stringify({ body }) }),
+    replySupportTicket: (ticketNumber, payload) => request(`/api/support-tickets/${ticketNumber}/replies`, { method: 'POST', body: JSON.stringify(typeof payload === 'string' ? { body: payload } : payload) }),
     updateSupportTicket: (ticketNumber, data) => request(`/api/support-tickets/${ticketNumber}`, { method: 'PATCH', body: JSON.stringify(data) }),
     clearSupportTicketMessages: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}/messages`, { method: 'DELETE' }),
     deleteSupportTicket: (ticketNumber) => request(`/api/support-tickets/${ticketNumber}`, { method: 'DELETE' }),

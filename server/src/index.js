@@ -1030,9 +1030,29 @@ app.delete('/api/support-tickets/:ticketNumber/messages', requireAuth, requirePe
     res.json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
 });
 app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermission('support.reply'), async (req, res) => {
-    const parsed = z.object({ body: z.string().trim().min(1).max(5000) }).safeParse(req.body);
+    let rawBody = req.body;
+    if (typeof rawBody === 'object' && rawBody !== null && typeof rawBody.body === 'object' && rawBody.body !== null) {
+        rawBody = { ...rawBody.body, ...rawBody };
+    }
+    const schema = z.object({
+        body: z.string().trim().max(5000).optional().or(z.literal('')),
+        attachment: attachmentSchema.optional()
+    });
+    const parsed = schema.safeParse(rawBody);
     if (!parsed.success)
         return res.status(400).json({ error: parsed.error.issues[0].message });
+    
+    const messageBody = (parsed.data.body || '').trim();
+    if (!messageBody && !parsed.data.attachment)
+        return res.status(400).json({ error: 'Message body or attachment is required' });
+
+    let attachment = null;
+    try {
+        attachment = prepareAttachment(parsed.data.attachment);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
+    }
+
     const ticket = await getTicketRow(req.params.ticketNumber);
     if (!ticket)
         return res.status(404).json({ error: 'Ticket not found' });
@@ -1046,10 +1066,14 @@ app.post('/api/support-tickets/:ticketNumber/replies', requireAuth, requirePermi
         ? (ticket.status === 'Open' ? 'In Progress' : ticket.status)
         : (ticket.status === 'Waiting for User' || ticket.status === 'Resolved' ? 'Open' : ticket.status);
     await transaction(async connection => {
-        await query('INSERT INTO support_ticket_messages (ticket_id,author_id,author_name,author_role,body,created_at) VALUES (?,?,?,?,?,?)',
-            [ticket.id, user.id, user.name, user.accountType, parsed.data.body, now], connection);
+        const messageInfo = await query('INSERT INTO support_ticket_messages (ticket_id,author_id,author_name,author_role,body,created_at) VALUES (?,?,?,?,?,?)',
+            [ticket.id, user.id, user.name, user.accountType, messageBody || (attachment ? `Attachment: ${attachment.fileName}` : ''), now], connection);
+        if (attachment) {
+            await query('INSERT INTO support_ticket_attachments (ticket_id,message_id,file_name,mime_type,size_bytes,data_base64,created_at) VALUES (?,?,?,?,?,?,?)',
+                [ticket.id, Number(messageInfo.insertId), attachment.fileName, attachment.mimeType, attachment.sizeBytes, attachment.dataBase64, now], connection);
+        }
         await query('UPDATE support_tickets SET status=?,updated_at=? WHERE id=?', [nextStatus, now, ticket.id], connection);
-        await audit(user.id, 'reply', 'support_ticket', ticket.ticket_number, { status: nextStatus }, connection);
+        await audit(user.id, 'reply', 'support_ticket', ticket.ticket_number, { status: nextStatus, attachment: attachment?.fileName }, connection);
     });
     emitRefresh();
     res.status(201).json({ ticket: await ticketDetail(await getTicketRow(ticket.ticket_number)) });
