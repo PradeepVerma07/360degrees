@@ -5,18 +5,10 @@ import { permissions, rolePermissions, roles } from './permissionCatalog.js';
 
 const configuredDbHost = (process.env.DB_HOST || '127.0.0.1').trim();
 const dbHost = configuredDbHost === 'localhost' ? '127.0.0.1' : configuredDbHost;
-const candidateSockets = [
-  (process.env.DB_SOCKET_PATH || '').trim(),
-  '/var/run/mysqld/mysqld.sock',
-  '/var/lib/mysql/mysql.sock',
-  '/tmp/mysql.sock'
-].filter(Boolean);
-const foundSocket = candidateSockets.find(s => {
-  try { return fs.existsSync(s); } catch { return false; }
-});
-const useSocket = Boolean(foundSocket && (dbHost === '127.0.0.1' || !process.env.DB_HOST));
+const rawSocketPath = (process.env.DB_SOCKET_PATH || '').trim();
+const useSocket = Boolean(rawSocketPath && fs.existsSync(rawSocketPath));
 const dbConnectionTarget = useSocket
-  ? { socketPath: foundSocket }
+  ? { socketPath: rawSocketPath }
   : { host: dbHost, port: Number(process.env.DB_PORT || 3306) };
 
 export const pool = mysql.createPool({
@@ -27,7 +19,7 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 25),
   queueLimit: 0,
-  connectTimeout: 10000,
+  connectTimeout: 5000,
   maxIdle: 10,
   idleTimeout: 30000,
   charset: 'utf8mb4',

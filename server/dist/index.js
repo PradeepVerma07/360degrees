@@ -1996,3 +1996,6 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
         httpServer.close(() => process.exit(0));
     });
 }
+
+export { app, httpServer };
+export default app;
