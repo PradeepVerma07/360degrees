@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { api } from './api';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { io } from 'socket.io-client';
+import { api, API_URL } from './api';
 
 const categories = [
   'Technical Issue',
@@ -13,17 +14,32 @@ const categories = [
 ];
 const priorities = ['Low', 'Medium', 'High', 'Urgent'];
 const statuses = ['Open', 'In Progress', 'Waiting for User', 'Resolved', 'Closed'];
-const allowedExtensions = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'zip']);
+const allowedExtensions = new Set(['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png', 'zip', 'webp']);
 const maxAttachmentBytes = 10 * 1024 * 1024;
-const fmt = value => new Date(value).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
-const scrollDashboardToTop = () => {
-  window.requestAnimationFrame(() => {
-    document.querySelector('.dashboard-main')?.scrollTo?.({ top: 0, behavior: 'smooth' });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
+
+const fmt = value => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
+
+const fmtRelative = value => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+};
+
+const can = (data, permission) => (data.permissions || data.user?.permissions || []).includes(permission);
 
 function bytesToBase64(bytes) {
   let binary = '';
@@ -38,7 +54,7 @@ async function attachmentPayload(file) {
   if (!file) return null;
   if (file.size > maxAttachmentBytes) throw new Error('Attachment must be 10 MB or smaller.');
   const extension = file.name.split('.').pop()?.toLowerCase() || '';
-  if (!allowedExtensions.has(extension)) throw new Error('Attachment must be PDF, DOC, DOCX, JPG, JPEG, PNG or ZIP.');
+  if (!allowedExtensions.has(extension)) throw new Error('Attachment must be PDF, DOC, DOCX, JPG, JPEG, PNG, WEBP or ZIP.');
   const buffer = await file.arrayBuffer();
   return {
     name: file.name,
@@ -48,492 +64,716 @@ async function attachmentPayload(file) {
   };
 }
 
+const getPriorityBadgeClass = priority => {
+  switch ((priority || '').toLowerCase()) {
+    case 'urgent': return 'badge-priority-urgent';
+    case 'high': return 'badge-priority-urgent';
+    case 'medium': return 'badge-priority-medium';
+    default: return 'badge-priority-low';
+  }
+};
+
+const getStatusBadgeClass = status => {
+  switch ((status || '').toLowerCase()) {
+    case 'open': return 'badge-status-submitted';
+    case 'in progress': return 'badge-status-in-progress';
+    case 'waiting for user': return 'badge-status-waiting-client';
+    case 'resolved': return 'badge-status-completed';
+    case 'closed': return 'badge-status-on-hold';
+    default: return 'badge-status-submitted';
+  }
+};
+
+const quickCannedReplies = [
+  'We have received your request and our team is actively investigating this.',
+  'Could you please provide additional details or screenshots to help us diagnose further?',
+  'This issue has been resolved in the latest update. Please verify on your end.',
+  'Thank you for bringing this to our attention. We are marking this ticket as resolved.'
+];
+
 export default function SupportTickets({ data, reload, openCreateSignal = 0 }) {
+  const currentUser = data?.user || {};
   const isAdmin = can(data, 'support.manage') || can(data, 'support.view_all');
   const canCreateTicket = can(data, 'support.create');
   const canReplyTicket = can(data, 'support.reply');
   const canManageTickets = can(data, 'support.manage');
+
   const tickets = useMemo(() => data.supportTickets || [], [data.supportTickets]);
-  const [showForm, setShowForm] = useState(false);
+
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'open', 'in_progress', 'waiting', 'resolved', 'closed'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [form, setForm] = useState({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
   const [attachment, setAttachment] = useState(null);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState('');
-  const [selected, setSelected] = useState(null);
+  const [selectedTicket, setSelectedTicket] = useState(null);
   const [selectedTicketNumbers, setSelectedTicketNumbers] = useState([]);
-  const [loadingTicket, setLoadingTicket] = useState('');
-  const [reply, setReply] = useState('');
+  const [loadingTicket, setLoadingTicket] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyAttachment, setReplyAttachment] = useState(null);
+  const [sendingReply, setSendingReply] = useState(false);
   const [detailError, setDetailError] = useState('');
+
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const replyFileInputRef = useRef(null);
+  const socketRef = useRef(null);
   const selectedRef = useRef(null);
-  const selectedTicketSet = useMemo(() => new Set(selectedTicketNumbers), [selectedTicketNumbers]);
-  const selectedTicketSummary = useMemo(() => selected ? tickets.find(ticket => ticket.ticketNumber === selected.ticketNumber) : null, [tickets, selected?.ticketNumber]);
-  const allTicketsSelected = tickets.length > 0 && tickets.every(ticket => selectedTicketSet.has(ticket.ticketNumber));
 
   useEffect(() => {
-    if (!toast) return;
-    const timer = window.setTimeout(() => setToast(''), 4500);
-    return () => window.clearTimeout(timer);
-  }, [toast]);
+    selectedRef.current = selectedTicket;
+  }, [selectedTicket]);
 
-  useEffect(() => {
-    selectedRef.current = selected;
-  }, [selected]);
-
-  useEffect(() => {
-    const liveTicketNumbers = new Set(tickets.map(ticket => ticket.ticketNumber));
-    setSelectedTicketNumbers(current => {
-      const next = current.filter(ticketNumber => liveTicketNumbers.has(ticketNumber));
-      return next.length === current.length ? current : next;
-    });
-  }, [tickets]);
-
-  useEffect(() => {
-    if (!openCreateSignal) return;
-    setSelected(null);
-    setShowForm(true);
-    scrollDashboardToTop();
-  }, [openCreateSignal]);
-
-  useEffect(() => {
-    if (!selected || !selectedTicketSummary || selectedTicketSummary.updatedAt === selected.updatedAt) return;
-    let active = true;
-    api.getSupportTicket(selected.ticketNumber)
-      .then(result => {
-        if (!active) return;
-        setSelected(current => current?.ticketNumber === result.ticket.ticketNumber ? result.ticket : current);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, [selected?.ticketNumber, selected?.updatedAt, selectedTicketSummary?.updatedAt]);
-
-  useEffect(() => {
-    if (!selected?.ticketNumber) return;
-    const ticketNumber = selected.ticketNumber;
-    let active = true;
-    let inFlight = false;
-    const refreshTicket = async () => {
-      if (inFlight || document.hidden) return;
-      inFlight = true;
-      try {
-        const result = await api.getSupportTicket(ticketNumber);
-        if (!active) return;
-        const current = selectedRef.current;
-        if (!current || current.ticketNumber !== ticketNumber) return;
-        const currentLastMessage = current.messages?.[current.messages.length - 1]?.id;
-        const nextLastMessage = result.ticket.messages?.[result.ticket.messages.length - 1]?.id;
-        const changed = current.updatedAt !== result.ticket.updatedAt
-          || current.status !== result.ticket.status
-          || currentLastMessage !== nextLastMessage
-          || (current.messages?.length ?? 0) !== (result.ticket.messages?.length ?? 0);
-        if (changed) {
-          setSelected(result.ticket);
-          await reload();
-        }
-      } catch (_error) {
-        // Keep the open conversation usable if a background refresh briefly fails.
-      } finally {
-        inFlight = false;
-      }
-    };
-    const refreshWhenVisible = () => {
-      if (!document.hidden) refreshTicket();
-    };
-    const timer = window.setInterval(refreshTicket, 6000);
-    window.addEventListener('focus', refreshTicket);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-      window.removeEventListener('focus', refreshTicket);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
-  }, [selected?.ticketNumber, reload]);
-
-  const resetForm = () => {
-    setForm({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
-    setAttachment(null);
-    setFormError('');
+  const showNotification = msg => {
+    setToast(msg);
+    setTimeout(() => setToast(''), 4500);
   };
 
-  const submitTicket = async event => {
-    event.preventDefault();
-    setSubmitting(true);
-    setFormError('');
-    try {
-      const file = await attachmentPayload(attachment);
-      const result = await api.createSupportTicket({ ...form, attachment: file });
-      resetForm();
-      setShowForm(false);
-      setToast(`Ticket ${result.ticket.ticketNumber} submitted successfully.`);
+  // Metrics KPI calculations
+  const metrics = useMemo(() => {
+    const total = tickets.length;
+    const open = tickets.filter(t => t.status === 'Open').length;
+    const inProgress = tickets.filter(t => t.status === 'In Progress').length;
+    const waiting = tickets.filter(t => t.status === 'Waiting for User').length;
+    const resolved = tickets.filter(t => ['Resolved', 'Closed'].includes(t.status)).length;
+    const urgent = tickets.filter(t => ['High', 'Urgent'].includes(t.priority) && !['Resolved', 'Closed'].includes(t.status)).length;
+    return { total, open, inProgress, waiting, resolved, urgent };
+  }, [tickets]);
+
+  // Filtered Tickets
+  const filteredTickets = useMemo(() => {
+    return tickets.filter(t => {
+      if (activeFilter === 'open' && t.status !== 'Open') return false;
+      if (activeFilter === 'in_progress' && t.status !== 'In Progress') return false;
+      if (activeFilter === 'waiting' && t.status !== 'Waiting for User') return false;
+      if (activeFilter === 'resolved' && !['Resolved', 'Closed'].includes(t.status)) return false;
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const mNum = (t.ticketNumber || '').toLowerCase().includes(q);
+        const mSub = (t.subject || '').toLowerCase().includes(q);
+        const mCat = (t.category || '').toLowerCase().includes(q);
+        const mUser = (t.userName || '').toLowerCase().includes(q);
+        if (!mNum && !mSub && !mCat && !mUser) return false;
+      }
+      return true;
+    });
+  }, [tickets, activeFilter, searchQuery]);
+
+  // Open first ticket by default if none selected
+  useEffect(() => {
+    if (!selectedTicket && filteredTickets.length > 0) {
+      loadTicketDetails(filteredTickets[0].ticketNumber);
+    }
+  }, [filteredTickets, selectedTicket]);
+
+  // Handle openCreateSignal from header
+  useEffect(() => {
+    if (openCreateSignal) {
+      setShowCreateModal(true);
+    }
+  }, [openCreateSignal]);
+
+  // Real-time Socket.IO Connection for Instant Refresh
+  useEffect(() => {
+    const socket = io(API_URL || undefined);
+    socketRef.current = socket;
+
+    const handleRefresh = async () => {
       await reload();
-    } catch (error) {
-      setFormError(error.message);
+      const current = selectedRef.current;
+      if (current?.ticketNumber) {
+        try {
+          const res = await api.getSupportTicket(current.ticketNumber);
+          setSelectedTicket(res.ticket);
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    socket.on('refresh', handleRefresh);
+    socket.on('support:ticket_updated', handleRefresh);
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [reload]);
+
+  // Scroll to bottom of message thread
+  const scrollToBottom = useCallback((smooth = true) => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedTicket?.messages?.length) {
+      scrollToBottom(false);
+    }
+  }, [selectedTicket?.messages?.length, scrollToBottom]);
+
+  // Load Single Ticket Details
+  const loadTicketDetails = async (ticketNumber) => {
+    if (!ticketNumber) return;
+    try {
+      setLoadingTicket(true);
+      setDetailError('');
+      const res = await api.getSupportTicket(ticketNumber);
+      setSelectedTicket(res.ticket);
+    } catch (err) {
+      setDetailError(err.message || 'Failed to load ticket details');
+    } finally {
+      setLoadingTicket(false);
+    }
+  };
+
+  // Submit New Support Ticket
+  const handleSubmitTicket = async e => {
+    e.preventDefault();
+    try {
+      setSubmitting(true);
+      setFormError('');
+      const file = await attachmentPayload(attachment);
+      const res = await api.createSupportTicket({ ...form, attachment: file });
+      setShowCreateModal(false);
+      setForm({ subject: '', category: 'Technical Issue', priority: 'Medium', description: '' });
+      setAttachment(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      showNotification(`Support Ticket ${res.ticket.ticketNumber} created successfully!`);
+      await reload();
+      setSelectedTicket(res.ticket);
+    } catch (err) {
+      setFormError(err.message || 'Failed to submit ticket');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const openTicket = async ticketNumber => {
-    setLoadingTicket(ticketNumber);
-    setDetailError('');
-    setShowForm(false);
+  // Send Reply in Ticket Thread
+  const handleSendReply = async e => {
+    if (e) e.preventDefault();
+    if (!replyText.trim() || !selectedTicket || sendingReply) return;
+
     try {
-      const result = await api.getSupportTicket(ticketNumber);
-      setSelected(result.ticket);
-      setReply('');
-      scrollDashboardToTop();
-    } catch (error) {
-      setDetailError(error.message);
+      setSendingReply(true);
+      setDetailError('');
+      const res = await api.replySupportTicket(selectedTicket.ticketNumber, replyText.trim());
+      setSelectedTicket(res.ticket);
+      setReplyText('');
+      setReplyAttachment(null);
+      if (replyFileInputRef.current) replyFileInputRef.current.value = '';
+      await reload();
+    } catch (err) {
+      setDetailError(err.message || 'Failed to send reply');
     } finally {
-      setLoadingTicket('');
+      setSendingReply(false);
     }
   };
 
-  const updateTicket = async patch => {
-    if (!selected) return;
-    setDetailError('');
+  // Update Status / Priority
+  const handleUpdateTicket = async patch => {
+    if (!selectedTicket) return;
     try {
-      const result = await api.updateSupportTicket(selected.ticketNumber, patch);
-      setSelected(result.ticket);
-      setToast('Ticket updated.');
+      setDetailError('');
+      const res = await api.updateSupportTicket(selectedTicket.ticketNumber, patch);
+      setSelectedTicket(res.ticket);
+      showNotification(`Ticket updated to ${patch.status || patch.priority}.`);
       await reload();
-    } catch (error) {
-      setDetailError(error.message);
+    } catch (err) {
+      setDetailError(err.message || 'Failed to update ticket');
     }
   };
 
-  const sendReply = async () => {
-    if (!selected || !reply.trim()) return;
-    setDetailError('');
-    try {
-      const result = await api.replySupportTicket(selected.ticketNumber, reply.trim());
-      setSelected(result.ticket);
-      setReply('');
-      setToast('Reply sent.');
-      await reload();
-    } catch (error) {
-      setDetailError(error.message);
-    }
-  };
-
-  const clearChat = async () => {
-    if (!selected) return;
-    if (!window.confirm('Clear all messages and attachments from this ticket?')) return;
-    setDetailError('');
-    try {
-      const result = await api.clearSupportTicketMessages(selected.ticketNumber);
-      setSelected(result.ticket);
-      setReply('');
-      setToast('Chat cleared.');
-      await reload();
-    } catch (error) {
-      setDetailError(error.message);
-    }
-  };
-
-  const deleteTicket = async ticketNumber => {
-    if (!window.confirm('Delete this support ticket permanently?')) return;
-    setDetailError('');
+  // Delete Single Ticket
+  const handleDeleteTicket = async ticketNumber => {
+    if (!window.confirm(`Are you sure you want to delete ticket #${ticketNumber}?`)) return;
     try {
       await api.deleteSupportTicket(ticketNumber);
-      if (selected?.ticketNumber === ticketNumber) setSelected(null);
-      setSelectedTicketNumbers(current => current.filter(value => value !== ticketNumber));
-      setToast('Ticket deleted.');
+      showNotification(`Ticket #${ticketNumber} deleted.`);
+      setSelectedTicket(null);
       await reload();
-    } catch (error) {
-      setDetailError(error.message);
+    } catch (err) {
+      setDetailError(err.message || 'Failed to delete ticket');
     }
   };
 
-  const deleteSelectedTickets = async () => {
-    if (!selectedTicketNumbers.length) return;
-    if (!window.confirm(`Delete ${selectedTicketNumbers.length} selected ticket${selectedTicketNumbers.length === 1 ? '' : 's'} permanently?`)) return;
-    setDetailError('');
+  // Clear Message Thread
+  const handleClearMessages = async ticketNumber => {
+    if (!window.confirm(`Clear all message history for ticket #${ticketNumber}?`)) return;
     try {
-      const result = await api.deleteSupportTickets(selectedTicketNumbers);
-      if (selected && selectedTicketNumbers.includes(selected.ticketNumber)) setSelected(null);
-      setSelectedTicketNumbers([]);
-      setToast(`${result.deleted} ticket${result.deleted === 1 ? '' : 's'} deleted.`);
+      const res = await api.clearSupportTicketMessages(ticketNumber);
+      setSelectedTicket(res.ticket);
+      showNotification('Ticket message thread cleared.');
       await reload();
-    } catch (error) {
-      setDetailError(error.message);
-    }
-  };
-
-  const downloadAttachment = async (ticketNumber, id, fileName) => {
-    try {
-      await api.downloadTicketAttachment(ticketNumber, id, fileName);
-    } catch (error) {
-      setDetailError(error.message);
+    } catch (err) {
+      setDetailError(err.message || 'Failed to clear messages');
     }
   };
 
   return (
-    <section className={`support-page ${selected ? 'ticket-open' : ''}`}>
-      {toast && <div className="toast" role="status">{toast}</div>}
-      <div className="page-title">
-        <div>
-          <h2>{isAdmin ? 'Support Tickets' : 'My Support Tickets'}</h2>
-          <p className="muted">{isAdmin ? 'Review, reply to, and manage every submitted ticket.' : 'Raise a ticket and track every support conversation in one place.'}</p>
+    <div className="support-module-root">
+      {/* 1. TOP EXECUTIVE METRIC CARDS */}
+      <div className="metrics-row" style={{ marginBottom: '20px' }}>
+        <div className="metric-card" style={{ flex: 1 }}>
+          <div className="metric-card-content">
+            <span className="metric-label">TOTAL TICKETS</span>
+            <div className="metric-value">{metrics.total}</div>
+            <div className="metric-footer">
+              <span className="metric-subtext">All submitted tickets</span>
+            </div>
+          </div>
+          <div className="metric-icon-badge" style={{ background: '#FFF4EA', color: 'var(--ci-navy)' }}>
+            🎫
+          </div>
         </div>
-        {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>+ Raise Ticket</button>}
+
+        <div className="metric-card" style={{ flex: 1 }}>
+          <div className="metric-card-content">
+            <span className="metric-label">OPEN QUEUE</span>
+            <div className="metric-value" style={{ color: 'var(--ci-navy)' }}>{metrics.open}</div>
+            <div className="metric-footer">
+              <span className="metric-subtext">Awaiting initial triage</span>
+            </div>
+          </div>
+          <div className="metric-icon-badge" style={{ background: '#E0F2FE', color: '#0284C7' }}>
+            📥
+          </div>
+        </div>
+
+        <div className="metric-card" style={{ flex: 1 }}>
+          <div className="metric-card-content">
+            <span className="metric-label">IN PROGRESS</span>
+            <div className="metric-value" style={{ color: 'var(--ci-info)' }}>{metrics.inProgress}</div>
+            <div className="metric-footer">
+              <span className="metric-subtext">Being handled by staff</span>
+            </div>
+          </div>
+          <div className="metric-icon-badge" style={{ background: 'var(--ci-info-bg)', color: 'var(--ci-info)' }}>
+            ⚡
+          </div>
+        </div>
+
+        <div className="metric-card" style={{ flex: 1 }}>
+          <div className="metric-card-content">
+            <span className="metric-label">URGENT PRIORITY</span>
+            <div className="metric-value" style={{ color: 'var(--ci-danger)' }}>{metrics.urgent}</div>
+            <div className="metric-footer">
+              <span className="metric-subtext">Requires immediate action</span>
+            </div>
+          </div>
+          <div className="metric-icon-badge" style={{ background: 'var(--ci-danger-bg)', color: 'var(--ci-danger)' }}>
+            🔥
+          </div>
+        </div>
+
+        <div className="metric-card" style={{ flex: 1 }}>
+          <div className="metric-card-content">
+            <span className="metric-label">RESOLVED</span>
+            <div className="metric-value" style={{ color: 'var(--ci-success)' }}>{metrics.resolved}</div>
+            <div className="metric-footer">
+              <span className="metric-subtext">Successfully closed</span>
+            </div>
+          </div>
+          <div className="metric-icon-badge" style={{ background: 'var(--ci-success-bg)', color: 'var(--ci-success)' }}>
+            ✓
+          </div>
+        </div>
       </div>
 
-      {detailError && !selected && <div className="alert error">{detailError}</div>}
-      {selected ? (
-        <TicketDetail
-          ticket={selected}
-          isAdmin={isAdmin}
-          reply={reply}
-          detailError={detailError}
-          setReply={setReply}
-          onClose={() => {
-            setSelected(null);
-            setDetailError('');
-            scrollDashboardToTop();
-          }}
-          onReply={sendReply}
-          onUpdate={updateTicket}
-          onDownload={downloadAttachment}
-          onClearChat={clearChat}
-          onDeleteTicket={deleteTicket}
-          canReply={canReplyTicket}
-          canManage={canManageTickets}
-        />
-      ) : tickets.length === 0 ? (
-        <div className="card empty-state">
-          <h3>No support tickets found.</h3>
-          {canCreateTicket && <button type="button" className="primary" onClick={() => setShowForm(true)}>Raise Your First Ticket</button>}
-        </div>
-      ) : (
-        <TicketTable
-          tickets={tickets}
-          isAdmin={isAdmin}
-          loadingTicket={loadingTicket}
-          selectedTicketSet={selectedTicketSet}
-          allTicketsSelected={allTicketsSelected}
-          onToggleTicket={ticketNumber => setSelectedTicketNumbers(current => current.includes(ticketNumber) ? current.filter(value => value !== ticketNumber) : [...current, ticketNumber])}
-          onToggleAll={() => setSelectedTicketNumbers(allTicketsSelected ? [] : tickets.map(ticket => ticket.ticketNumber))}
-          onDeleteSelected={deleteSelectedTickets}
-          onDeleteOne={deleteTicket}
-          onView={openTicket}
-        />
-      )}
+      {toast && <div className="alert-banner success" style={{ marginBottom: '16px' }}>{toast}</div>}
+      {detailError && <div className="alert-banner error" style={{ marginBottom: '16px' }}>{detailError}</div>}
 
-      {showForm && canCreateTicket && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="raise-ticket-title">
-          <form className="modal-panel ticket-form" onSubmit={submitTicket}>
-            <div className="modal-head">
-              <div>
-                <h2 id="raise-ticket-title">Raise Support Ticket</h2>
-                <p className="muted">Share the issue details and the support team will follow up here.</p>
+      {/* 2. MAIN 2-COLUMN SPLIT DESK LAYOUT */}
+      <div className="support-split-layout">
+        {/* LEFT COLUMN: TICKET LIST & FILTERS */}
+        <div className="support-list-panel saas-card">
+          {/* Header & Create CTA */}
+          <div className="support-list-header">
+            <div>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ci-navy)' }}>Support Queue</h3>
+              <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>{filteredTickets.length} tickets found</span>
+            </div>
+            {canCreateTicket && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowCreateModal(true)}
+              >
+                + Raise Ticket
+              </button>
+            )}
+          </div>
+
+          {/* Search Box */}
+          <div style={{ padding: '0 16px 10px' }}>
+            <div className="filter-search-box" style={{ width: '100%' }}>
+              <input
+                type="text"
+                placeholder="Search ticket #, subject, client..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="support-filter-chips">
+            <button
+              type="button"
+              className={`support-chip ${activeFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveFilter('all')}
+            >
+              All ({metrics.total})
+            </button>
+            <button
+              type="button"
+              className={`support-chip ${activeFilter === 'open' ? 'active' : ''}`}
+              onClick={() => setActiveFilter('open')}
+            >
+              Open ({metrics.open})
+            </button>
+            <button
+              type="button"
+              className={`support-chip ${activeFilter === 'in_progress' ? 'active' : ''}`}
+              onClick={() => setActiveFilter('in_progress')}
+            >
+              In Progress ({metrics.inProgress})
+            </button>
+            <button
+              type="button"
+              className={`support-chip ${activeFilter === 'waiting' ? 'active' : ''}`}
+              onClick={() => setActiveFilter('waiting')}
+            >
+              Waiting ({metrics.waiting})
+            </button>
+            <button
+              type="button"
+              className={`support-chip ${activeFilter === 'resolved' ? 'active' : ''}`}
+              onClick={() => setActiveFilter('resolved')}
+            >
+              Resolved ({metrics.resolved})
+            </button>
+          </div>
+
+          {/* Tickets Scroll List */}
+          <div className="support-tickets-stream">
+            {filteredTickets.length === 0 ? (
+              <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--ci-text-secondary)' }}>
+                <span style={{ fontSize: '28px', display: 'block', marginBottom: '8px' }}>📭</span>
+                <strong>No tickets match your filters</strong>
+                <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>Create a ticket or clear your search.</p>
               </div>
-              <button type="button" className="icon-button" aria-label="Close ticket form" onClick={() => { resetForm(); setShowForm(false); }}>x</button>
+            ) : (
+              filteredTickets.map(t => {
+                const isSelected = selectedTicket?.ticketNumber === t.ticketNumber;
+                return (
+                  <div
+                    key={t.ticketNumber}
+                    className={`support-ticket-card-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => loadTicketDetails(t.ticketNumber)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                      <span className="support-ticket-num">#{t.ticketNumber}</span>
+                      <span className="support-ticket-time">{fmtRelative(t.updatedAt || t.createdAt)}</span>
+                    </div>
+
+                    <h4 className="support-ticket-subject">{t.subject}</h4>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', flexWrap: 'wrap', gap: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <span className={`badge ${getPriorityBadgeClass(t.priority)}`} style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                          {t.priority}
+                        </span>
+                        <span className="badge badge-category" style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                          {t.category}
+                        </span>
+                      </div>
+                      <span className={`badge ${getStatusBadgeClass(t.status)}`} style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                        {t.status}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', fontSize: '11.5px', color: 'var(--ci-text-secondary)' }}>
+                      <span>👤 {t.userName || 'Client User'}</span>
+                      {t.messagesCount > 0 && <span>💬 {t.messagesCount}</span>}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: LIVE CONVERSATION & TICKET WORKSPACE */}
+        <div className="support-detail-panel saas-card">
+          {loadingTicket ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '400px' }}>
+              <div className="chat-spinner" />
+              <span style={{ fontSize: '13px', color: 'var(--ci-text-secondary)', marginTop: '8px' }}>Loading ticket details...</span>
             </div>
-            {formError && <div className="alert error">{formError}</div>}
-            <label>Subject
-              <input required value={form.subject} onChange={event => setForm({ ...form, subject: event.target.value })} />
-            </label>
-            <div className="row">
-              <label>Category
-                <select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}>
-                  {categories.map(category => <option key={category}>{category}</option>)}
-                </select>
-              </label>
-              <label>Priority
-                <select value={form.priority} onChange={event => setForm({ ...form, priority: event.target.value })}>
-                  {priorities.map(priority => <option key={priority}>{priority}</option>)}
-                </select>
-              </label>
+          ) : selectedTicket ? (
+            <div className="support-convo-wrapper">
+              {/* Ticket Top Header & Actions */}
+              <div className="support-convo-header">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                    <span className="support-header-badge">#{selectedTicket.ticketNumber}</span>
+                    <span className={`badge ${getPriorityBadgeClass(selectedTicket.priority)}`}>
+                      {selectedTicket.priority}
+                    </span>
+                    <span className="badge badge-category">{selectedTicket.category}</span>
+                  </div>
+                  <h2 style={{ fontSize: '17px', fontWeight: 700, margin: '2px 0', color: 'var(--ci-navy)' }}>
+                    {selectedTicket.subject}
+                  </h2>
+                  <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>
+                    Raised by <strong>{selectedTicket.userName}</strong> on {fmt(selectedTicket.createdAt)}
+                  </span>
+                </div>
+
+                {/* Header Action Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Status Dropdown */}
+                  {canManageTickets ? (
+                    <select
+                      className="form-select"
+                      style={{ height: '34px', fontSize: '12.5px', fontWeight: 600, padding: '0 10px', width: 'auto' }}
+                      value={selectedTicket.status}
+                      onChange={e => handleUpdateTicket({ status: e.target.value })}
+                    >
+                      {statuses.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className={`badge ${getStatusBadgeClass(selectedTicket.status)}`}>
+                      {selectedTicket.status}
+                    </span>
+                  )}
+
+                  {/* Clear / Delete Controls */}
+                  {canManageTickets && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        title="Clear conversation messages"
+                        onClick={() => handleClearMessages(selectedTicket.ticketNumber)}
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: 'var(--ci-danger)' }}
+                        title="Delete ticket"
+                        onClick={() => handleDeleteTicket(selectedTicket.ticketNumber)}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Messages Thread Stream */}
+              <div className="support-messages-stream">
+                {selectedTicket.messages?.map((msg, idx) => {
+                  const isStaff = ['admin', 'super_admin', 'employee'].includes(msg.authorRole);
+                  const isOwn = msg.authorId === currentUser.id;
+
+                  return (
+                    <div key={msg.id || idx} className={`support-message-bubble-row ${isStaff ? 'staff' : 'user'} ${isOwn ? 'is-me' : ''}`}>
+                      <div className="support-avatar-circle" style={{ background: isStaff ? 'var(--ci-navy)' : '#E0F2FE', color: isStaff ? '#FFFFFF' : '#0369A1' }}>
+                        {(msg.authorName || 'U').charAt(0).toUpperCase()}
+                      </div>
+
+                      <div className="support-msg-card">
+                        <div className="support-msg-header">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <strong className="support-msg-author">{msg.authorName}</strong>
+                            <span className={`chat-role-pill ${isStaff ? 'role-admin' : 'role-client'}`} style={{ fontSize: '10px' }}>
+                              {msg.authorRole === 'super_admin' ? 'Super Admin' : (msg.authorRole === 'admin' ? 'Support Lead' : (msg.authorRole === 'employee' ? 'Staff' : 'Client'))}
+                            </span>
+                          </div>
+                          <span className="support-msg-time">{fmt(msg.createdAt)}</span>
+                        </div>
+
+                        <div className="support-msg-body">{msg.body}</div>
+
+                        {/* Attachments if any */}
+                        {msg.attachments?.map(att => (
+                          <div key={att.id} className="support-attachment-item">
+                            <span>📎 {att.fileName} ({(att.sizeBytes / 1024).toFixed(0)} KB)</span>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ fontSize: '11px', padding: '2px 8px' }}
+                              onClick={() => api.downloadTicketAttachment(selectedTicket.ticketNumber, att.id, att.fileName)}
+                            >
+                              Download
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Live Real-Time Reply Form */}
+              {selectedTicket.status === 'Closed' ? (
+                <div style={{ padding: '14px 20px', background: 'var(--ci-surface)', borderTop: '1px solid var(--ci-border)', textAlign: 'center', fontSize: '13px', color: 'var(--ci-text-secondary)' }}>
+                  🔒 This support ticket has been closed. Change status to Open to continue discussion.
+                </div>
+              ) : canReplyTicket ? (
+                <div className="support-reply-footer">
+                  {/* Quick canned replies */}
+                  <div className="support-canned-chips">
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--ci-text-secondary)' }}>Quick:</span>
+                    {quickCannedReplies.slice(0, 3).map((replyTextOption, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="support-canned-btn"
+                        onClick={() => setReplyText(replyTextOption)}
+                      >
+                        {replyTextOption.slice(0, 32)}...
+                      </button>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleSendReply} style={{ marginTop: '8px' }}>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
+                      <textarea
+                        rows={2}
+                        className="form-textarea"
+                        style={{ flex: 1, resize: 'none', fontSize: '13.5px' }}
+                        placeholder={`Reply to ticket #${selectedTicket.ticketNumber}... (Enter to send, Shift+Enter for newline)`}
+                        value={replyText}
+                        onChange={e => setReplyText(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendReply();
+                          }
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        style={{ height: '48px', padding: '0 20px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                        disabled={sendingReply || !replyText.trim()}
+                      >
+                        {sendingReply ? 'Sending...' : 'Send Reply ➔'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              ) : null}
             </div>
-            <label>Description
-              <textarea required value={form.description} onChange={event => setForm({ ...form, description: event.target.value })} />
-            </label>
-            <label>Attachment
-              <input type="file" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.zip" onChange={event => setAttachment(event.target.files?.[0] || null)} />
-            </label>
-            <p className="field-note">Allowed: PDF, DOC, DOCX, JPG, JPEG, PNG, ZIP. Maximum size: 10 MB.</p>
-            <div className="modal-actions">
-              <button type="button" onClick={() => { resetForm(); setShowForm(false); }}>Cancel</button>
-              <button type="submit" className="primary" disabled={submitting}>{submitting ? 'Submitting...' : 'Submit Ticket'}</button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: '400px', color: 'var(--ci-text-secondary)' }}>
+              <span style={{ fontSize: '36px', marginBottom: '8px' }}>🎫</span>
+              <strong>No ticket selected</strong>
+              <p style={{ fontSize: '13px', margin: '4px 0 0 0' }}>Select a ticket from the queue or create a new one.</p>
             </div>
-          </form>
+          )}
+        </div>
+      </div>
+
+      {/* CREATE NEW TICKET MODAL */}
+      {showCreateModal && (
+        <div className="modal-backdrop" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-dialog" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Raise New Support Ticket</h3>
+              <button type="button" className="modal-close-btn" onClick={() => setShowCreateModal(false)}>✕</button>
+            </div>
+            <form onSubmit={handleSubmitTicket}>
+              <div className="modal-body">
+                {formError && <div className="alert-banner error" style={{ marginBottom: '12px' }}>{formError}</div>}
+
+                <div className="form-group">
+                  <label className="form-label">Subject / Issue Summary</label>
+                  <input
+                    type="text"
+                    required
+                    className="form-control"
+                    placeholder="e.g. Turnaround calculation discrepancy on Job #128"
+                    value={form.subject}
+                    onChange={e => setForm({ ...form, subject: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Category</label>
+                    <select
+                      className="form-select"
+                      value={form.category}
+                      onChange={e => setForm({ ...form, category: e.target.value })}
+                    >
+                      {categories.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">Priority</label>
+                    <select
+                      className="form-select"
+                      value={form.priority}
+                      onChange={e => setForm({ ...form, priority: e.target.value })}
+                    >
+                      {priorities.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Detailed Description</label>
+                  <textarea
+                    rows={4}
+                    required
+                    className="form-textarea"
+                    placeholder="Describe the issue, steps to reproduce, and any expected outcomes..."
+                    value={form.description}
+                    onChange={e => setForm({ ...form, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Attach File or Screenshot (Optional)</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="form-control"
+                    onChange={e => setAttachment(e.target.files?.[0] || null)}
+                  />
+                  <small style={{ fontSize: '11px', color: 'var(--ci-text-secondary)', marginTop: '2px', display: 'block' }}>
+                    Allowed: PDF, DOC, DOCX, JPG, PNG, WEBP, ZIP (Max 10 MB)
+                  </small>
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={submitting}>
+                  {submitting ? 'Submitting Ticket...' : 'Submit Ticket'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
-    </section>
-  );
-}
-
-function TicketTable({ tickets, isAdmin, loadingTicket, selectedTicketSet, allTicketsSelected, onToggleTicket, onToggleAll, onDeleteSelected, onDeleteOne, onView }) {
-  return (
-    <div className="card table-card ticket-list-card">
-      <div className="ticket-toolbar">
-        <div>
-          <b>{selectedTicketSet.size ? `${selectedTicketSet.size} selected` : `${tickets.length} ticket${tickets.length === 1 ? '' : 's'}`}</b>
-          <span>Select tickets to delete multiple chats at once.</span>
-        </div>
-        <button type="button" className="danger small" onClick={onDeleteSelected} disabled={!selectedTicketSet.size}>Delete Selected</button>
-      </div>
-      <div className="responsive-table">
-        <table className="ticket-table">
-          <thead>
-            <tr>
-              <th className="select-col">
-                <input className="ticket-check" type="checkbox" checked={allTicketsSelected} onChange={onToggleAll} aria-label="Select all tickets" />
-              </th>
-              <th>Ticket ID</th>
-              {isAdmin && <th>User</th>}
-              <th>Subject</th>
-              <th>Category</th>
-              <th>Priority</th>
-              <th>Status</th>
-              <th>Created Date</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map(ticket => (
-              <tr key={ticket.ticketNumber}>
-                <td className="select-col" data-label="Select">
-                  <input
-                    className="ticket-check"
-                    type="checkbox"
-                    checked={selectedTicketSet.has(ticket.ticketNumber)}
-                    onChange={() => onToggleTicket(ticket.ticketNumber)}
-                    aria-label={`Select ticket ${ticket.ticketNumber}`}
-                  />
-                </td>
-                <td data-label="Ticket ID"><b>{ticket.ticketNumber}</b></td>
-                {isAdmin && <td data-label="User">{ticket.userName}</td>}
-                <td data-label="Subject">{ticket.subject}</td>
-                <td data-label="Category">{ticket.category}</td>
-                <td data-label="Priority"><span className={`priority-badge priority-${slug(ticket.priority)}`}>{ticket.priority}</span></td>
-                <td data-label="Status"><StatusBadge status={ticket.status} /></td>
-                <td data-label="Created Date">{fmt(ticket.createdAt)}</td>
-                <td data-label="Action">
-                  <div className="ticket-row-actions">
-                    <button type="button" className="small" onClick={() => onView(ticket.ticketNumber)}>{loadingTicket === ticket.ticketNumber ? 'Opening...' : 'View'}</button>
-                    <button type="button" className="danger small" onClick={() => onDeleteOne(ticket.ticketNumber)}>Delete</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
     </div>
   );
-}
-
-function TicketDetail({ ticket, isAdmin, reply, detailError, setReply, onClose, onReply, onUpdate, onDownload, onClearChat, onDeleteTicket, canReply, canManage }) {
-  const closed = ticket.status === 'Closed';
-  const messages = ticket.messages || [];
-  const attachments = ticket.attachments || [];
-  return (
-    <section className="card ticket-detail ticket-detail-page" role="region" aria-labelledby="ticket-detail-title">
-      <div className="modal-head ticket-detail-head">
-        <div>
-          <button type="button" className="small ticket-back" onClick={onClose}>&lt; Back to Tickets</button>
-          <h2 id="ticket-detail-title">{ticket.ticketNumber}</h2>
-          <p className="muted">{ticket.subject}</p>
-        </div>
-        <div className="ticket-detail-actions">
-          {canManage && <button type="button" className="small" onClick={onClearChat}>Clear Chat</button>}
-          <button type="button" className="danger small" onClick={() => onDeleteTicket(ticket.ticketNumber)}>Delete</button>
-          <button type="button" className="icon-button" aria-label="Close ticket detail" onClick={onClose}>x</button>
-        </div>
-      </div>
-      {detailError && <div className="alert error">{detailError}</div>}
-      <div className="ticket-meta">
-        <div><span>Category</span><b>{ticket.category}</b></div>
-        <div><span>Priority</span><b>{ticket.priority}</b></div>
-        <div><span>Status</span><StatusBadge status={ticket.status} /></div>
-        <div><span>Created date</span><b>{fmt(ticket.createdAt)}</b></div>
-        {isAdmin && <div><span>User</span><b>{ticket.userName}</b></div>}
-      </div>
-      {canManage && (
-        <div className="admin-ticket-controls">
-          <label>Status
-            <select value={ticket.status} onChange={event => onUpdate({ status: event.target.value })}>
-              {statuses.map(status => <option key={status}>{status}</option>)}
-            </select>
-          </label>
-          <label>Priority
-            <select value={ticket.priority} onChange={event => onUpdate({ priority: event.target.value })}>
-              {priorities.map(priority => <option key={priority}>{priority}</option>)}
-            </select>
-          </label>
-          <button type="button" className="danger" onClick={() => onUpdate({ status: 'Closed' })} disabled={closed}>Close Ticket</button>
-        </div>
-      )}
-      <h3>Complete conversation</h3>
-      {messages.length === 0 ? (
-        <div className="empty-conversation">
-          <b>No chat messages.</b>
-          <p>This ticket chat has been cleared. New replies will appear here.</p>
-        </div>
-      ) : (
-        <div className="conversation">
-          {messages.map(message => (
-            <article className={`message ${message.authorRole === 'client' ? 'client' : 'admin'}`} key={message.id}>
-              <div className="message-head">
-                <b>{message.authorName}</b>
-                <span>{message.authorRole === 'client' ? 'User reply' : 'Team reply'} - {fmt(message.createdAt)}</span>
-              </div>
-              <p>{message.body}</p>
-              {message.attachments?.length > 0 && (
-                <div className="attachment-list">
-                  {message.attachments.map(attachment => (
-                    <button type="button" className="attachment-chip" onClick={() => onDownload(ticket.ticketNumber, attachment.id, attachment.fileName)} key={attachment.id}>{attachment.fileName}</button>
-                  ))}
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-      )}
-      {attachments.length > 0 && (
-        <>
-          <h3>Attachments</h3>
-          <div className="attachment-list">
-            {attachments.map(attachment => (
-              <button type="button" className="attachment-chip" onClick={() => onDownload(ticket.ticketNumber, attachment.id, attachment.fileName)} key={attachment.id}>{attachment.fileName}</button>
-            ))}
-          </div>
-        </>
-      )}
-      <div className="reply-box">
-        {closed ? (
-          <div className="alert">This ticket has been closed.</div>
-        ) : !canReply ? (
-          <div className="alert">You can view this conversation but do not have permission to reply.</div>
-        ) : (
-          <div className="reply-composer">
-            <div className="reply-composer-head">
-              <div>
-                <h3>Send a reply</h3>
-                <p className="muted">Keep the conversation moving with a clear update.</p>
-              </div>
-              <span>{reply.trim().length} characters</span>
-            </div>
-            <label className="reply-field">
-              <span>Message</span>
-              <textarea value={reply} onChange={event => setReply(event.target.value)} placeholder="Write your reply here..." rows={6} />
-            </label>
-            <div className="reply-actions">
-              <span>Replies are added to this ticket conversation.</span>
-              <button type="button" className="primary" onClick={onReply} disabled={!reply.trim()}>Send Reply</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function StatusBadge({ status }) {
-  return <span className={`status-badge status-${slug(status)}`}>{status}</span>;
 }

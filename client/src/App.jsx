@@ -417,7 +417,13 @@ export default function App() {
 
 function DashboardShell({ data, tab, setTab, logout, socketConnected, openSupportModal, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+
+  const notifRef = useRef(null);
+  const userMenuRef = useRef(null);
+
   const user = data.user || {};
   const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
   const hasProductivityAccess = can(data, 'productivity.view');
@@ -426,6 +432,20 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const hasSettingsAccess = can(data, 'settings.view') || can(data, 'settings.edit') || isSuperOrAdmin;
   const hasClientsAccess = can(data, 'clients.view') || can(data, 'clients.view_all') || isSuperOrAdmin;
   const hasSupportAccess = can(data, 'support.view_all') || can(data, 'support.view_own') || can(data, 'support.create');
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotificationOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   // Dynamic navigation items based on assigned user permissions
   const navItems = [
@@ -484,13 +504,17 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const handleNavClick = id => {
     setTab(id);
     setMobileOpen(false);
+    setNotificationOpen(false);
+    setUserMenuOpen(false);
   };
 
   // Real open support tickets count for notification badge
-  const openTicketCount = (data.supportTickets || []).filter(t => !['Resolved', 'Closed'].includes(t.status)).length;
+  const openTickets = (data.supportTickets || []).filter(t => !['Resolved', 'Closed'].includes(t.status));
+  const openTicketCount = openTickets.length;
+  const recentJobs = (data.jobs || []).slice(0, 3);
 
   return (
-    <div className={`app-shell ${mobileOpen ? 'sidebar-open' : ''}`}>
+    <div className={`app-shell ${mobileOpen ? 'sidebar-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />
 
       {/* LEFT SIDEBAR */}
@@ -504,8 +528,22 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             </span>
             <span className="brand-subtitle">Realtime Job Board</span>
           </div>
-          <button type="button" className="sidebar-collapse-btn" aria-label="Collapse navigation">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+          <button
+            type="button"
+            className="sidebar-collapse-btn"
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+            onClick={() => setSidebarCollapsed(v => !v)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease' }}
+            >
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
@@ -515,6 +553,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
         <button
           type="button"
           className="sidebar-cta-btn"
+          title="Submit a Job"
           onClick={() => handleNavClick('submit')}
         >
           <DashboardIcon name="submit" />
@@ -530,6 +569,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
                 key={item.id}
                 type="button"
                 className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
+                title={item.label}
                 onClick={() => handleNavClick(item.id)}
               >
                 <DashboardIcon name={item.icon} />
@@ -544,7 +584,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
 
         {/* SIDEBAR FOOTER (USER & LOGOUT) */}
         <div className="sidebar-footer">
-          <div className="sidebar-user-card">
+          <div className="sidebar-user-card" onClick={() => setUserMenuOpen(v => !v)} title="User Profile">
             <div className="user-avatar-circle">
               {initialsFor(user.name)}
             </div>
@@ -559,7 +599,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             </svg>
           </div>
 
-          <button type="button" className="sidebar-logout-btn" onClick={logout}>
+          <button type="button" className="sidebar-logout-btn" title="Logout" onClick={logout}>
             <DashboardIcon name="logout" />
             <span>Logout</span>
           </button>
@@ -601,22 +641,206 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
               </span>
             </div>
 
-            {/* Notification Bell */}
-            <button
-              type="button"
-              className="notification-bell-btn"
-              title="Notifications"
-              onClick={() => setNotificationOpen(v => !v)}
-            >
-              <DashboardIcon name="bell" />
-              {openTicketCount > 0 && (
-                <span className="notification-badge-count">{openTicketCount}</span>
-              )}
-            </button>
+            {/* Notification Bell with Interactive Dropdown */}
+            <div className="header-dropdown-container" ref={notifRef}>
+              <button
+                type="button"
+                className="notification-bell-btn"
+                title="Notifications"
+                onClick={() => {
+                  setNotificationOpen(v => !v);
+                  setUserMenuOpen(false);
+                }}
+              >
+                <DashboardIcon name="bell" />
+                {openTicketCount > 0 && (
+                  <span className="notification-badge-count">{openTicketCount}</span>
+                )}
+              </button>
 
-            {/* User Avatar */}
-            <div className="header-user-avatar" title={user.name}>
-              {initialsFor(user.name)}
+              {notificationOpen && (
+                <div className="header-dropdown-menu notification-menu">
+                  <div className="dropdown-menu-header">
+                    <div>
+                      <strong>Notifications</strong>
+                      <span className="badge badge-category" style={{ marginLeft: '6px' }}>
+                        {openTicketCount} Open
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-link-subtle"
+                      onClick={() => setNotificationOpen(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="dropdown-menu-list">
+                    {openTickets.length === 0 && recentJobs.length === 0 ? (
+                      <div className="dropdown-empty-state">
+                        <span>🔔</span>
+                        <p>No new notifications</p>
+                      </div>
+                    ) : (
+                      <>
+                        {openTickets.map(t => (
+                          <div
+                            key={t.ticketNumber}
+                            className="dropdown-notification-item"
+                            onClick={() => handleNavClick('support')}
+                          >
+                            <div className="notif-icon-circle ticket">🎫</div>
+                            <div className="notif-item-body">
+                              <div className="notif-item-title">
+                                <strong>Ticket #{t.ticketNumber}</strong>
+                                <span className={`badge ${t.priority === 'Urgent' ? 'badge-priority-urgent' : 'badge-priority-medium'}`}>
+                                  {t.priority}
+                                </span>
+                              </div>
+                              <p className="notif-item-desc">{t.subject}</p>
+                              <span className="notif-item-meta">{t.userName} • {t.status}</span>
+                            </div>
+                          </div>
+                        ))}
+
+                        {recentJobs.map(j => (
+                          <div
+                            key={j.jobId}
+                            className="dropdown-notification-item"
+                            onClick={() => handleNavClick('jobs')}
+                          >
+                            <div className="notif-icon-circle job">💼</div>
+                            <div className="notif-item-body">
+                              <div className="notif-item-title">
+                                <strong>Job #{j.jobId}</strong>
+                                <span className="badge badge-status-in-progress">{j.status}</span>
+                              </div>
+                              <p className="notif-item-desc">{j.title || j.category}</p>
+                              <span className="notif-item-meta">Client: {j.clientId}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="dropdown-menu-footer">
+                    <button
+                      type="button"
+                      className="btn-link-action"
+                      onClick={() => handleNavClick('support')}
+                    >
+                      View all support tickets →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* User Profile Avatar with Interactive Dropdown */}
+            <div className="header-dropdown-container" ref={userMenuRef}>
+              <div
+                className="header-user-avatar"
+                title={`${user.name} (${user.accountType || user.role})`}
+                onClick={() => {
+                  setUserMenuOpen(v => !v);
+                  setNotificationOpen(false);
+                }}
+              >
+                {initialsFor(user.name)}
+              </div>
+
+              {userMenuOpen && (
+                <div className="header-dropdown-menu user-profile-menu">
+                  {/* User Profile Info Header */}
+                  <div className="dropdown-user-header">
+                    <div className="user-avatar-circle large">
+                      {initialsFor(user.name)}
+                    </div>
+                    <div className="dropdown-user-details">
+                      <strong className="dropdown-user-fullname">{user.name || 'Workspace User'}</strong>
+                      <span className="dropdown-user-email">{user.email || user.id}</span>
+                      <div style={{ marginTop: '4px' }}>
+                        <span className="badge badge-category" style={{ textTransform: 'capitalize' }}>
+                          {user.accountType || user.role || 'Member'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="dropdown-divider" />
+
+                  {/* Navigation Shortcuts */}
+                  <div className="dropdown-menu-items">
+                    <button
+                      type="button"
+                      className="dropdown-menu-btn"
+                      onClick={() => handleNavClick('overview')}
+                    >
+                      <DashboardIcon name="overview" />
+                      <span>Overview Dashboard</span>
+                    </button>
+
+                    {hasProductivityAccess && (
+                      <button
+                        type="button"
+                        className="dropdown-menu-btn"
+                        onClick={() => handleNavClick('productivity')}
+                      >
+                        <DashboardIcon name="productivity" />
+                        <span>Productivity Intelligence</span>
+                      </button>
+                    )}
+
+                    {hasUsersAccess && (
+                      <button
+                        type="button"
+                        className="dropdown-menu-btn"
+                        onClick={() => handleNavClick('users')}
+                      >
+                        <DashboardIcon name="shield" />
+                        <span>Users & Access Control</span>
+                      </button>
+                    )}
+
+                    {hasSettingsAccess && (
+                      <button
+                        type="button"
+                        className="dropdown-menu-btn"
+                        onClick={() => handleNavClick('settings')}
+                      >
+                        <DashboardIcon name="clock" />
+                        <span>TAT Standards & Settings</span>
+                      </button>
+                    )}
+
+                    {hasSupportAccess && (
+                      <button
+                        type="button"
+                        className="dropdown-menu-btn"
+                        onClick={() => handleNavClick('support')}
+                      >
+                        <DashboardIcon name="support" />
+                        <span>Support Tickets</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="dropdown-divider" />
+
+                  <div style={{ padding: '6px' }}>
+                    <button
+                      type="button"
+                      className="dropdown-logout-btn"
+                      onClick={logout}
+                    >
+                      <DashboardIcon name="logout" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>
