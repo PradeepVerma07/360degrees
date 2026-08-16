@@ -1969,7 +1969,7 @@ io.on('connection', socket => {
 });
 app.use((error, _req, res, _next) => {
     console.error('CI360 Express Error:', error);
-    res.status(500).json({ error: process.env.NODE_ENV === 'production' ? 'Internal server error' : error.message });
+    res.status(500).json({ error: error?.message || 'Internal server error' });
 });
 
 process.on('uncaughtException', (err) => {
