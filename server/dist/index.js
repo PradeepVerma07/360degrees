@@ -74,7 +74,7 @@ app.use(helmet({
 app.use(cors({ origin }));
 app.use(express.json({ limit: '20mb' }));
 app.use((req, res, next) => {
-    req.setTimeout(25000, () => {
+    req.setTimeout(120000, () => {
         if (!res.headersSent) {
             res.status(504).json({ error: 'Request gateway timeout' });
         }

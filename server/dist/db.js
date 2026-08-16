@@ -984,15 +984,23 @@ export async function seedProductivityDefaults() {
 
   const defaultHash = '$2a$10$wO/4y6qg6wB/2G5gM1s9l.yPjK6gQp7.J5sC4n6kR8vP9m1q2w3e4'; // demo password hash
 
+  // 1. Query existing users once to avoid 50+ round trips
+  const existingUsers = await query('SELECT id, name, email FROM users');
+  const userByEmail = new Map(existingUsers.map(u => [String(u.email || '').toLowerCase(), u]));
+  const userByName = new Map(existingUsers.map(u => [String(u.name || '').toLowerCase(), u]));
+
   for (const p of defaultPersonnel) {
-    const existingUser = await one('SELECT id FROM users WHERE email=? OR name=?', [p.email, p.name]);
-    let userId = existingUser ? existingUser.id : null;
+    let user = userByEmail.get(p.email.toLowerCase()) || userByName.get(p.name.toLowerCase());
+    let userId = user ? user.id : null;
     if (!userId) {
       userId = p.name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + Math.random().toString(36).slice(2, 7);
       await query(
         'INSERT INTO users (id, name, email, password_hash, role, account_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [userId, p.name, p.email, defaultHash, p.role, p.role === 'admin' ? 'admin' : 'employee', p.status !== 'inactive' ? 1 : 0]
       );
+      user = { id: userId, name: p.name, email: p.email };
+      userByEmail.set(p.email.toLowerCase(), user);
+      userByName.set(p.name.toLowerCase(), user);
     }
     // Update or insert employee settings
     await query(
@@ -1044,15 +1052,18 @@ export async function seedProductivityDefaults() {
 
   const existingRosters = await query('SELECT COUNT(*) as count FROM productivity_account_rosters');
   if (Number(existingRosters[0]?.count || 0) === 0) {
+    const existingClients = await query('SELECT id, name FROM clients');
+    const clientByName = new Map(existingClients.map(c => [String(c.name || '').toLowerCase(), c.id]));
+
     for (const r of defaultRoster) {
-      let client = await one('SELECT id FROM clients WHERE name=?', [r.clientName]);
-      let clientId = client ? client.id : null;
+      let clientId = clientByName.get(r.clientName.toLowerCase());
       if (!clientId) {
         clientId = r.clientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'c_' + Math.random().toString(36).slice(2, 6);
         await query(
           'INSERT INTO clients (id, name, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE name=VALUES(name)',
           [clientId, r.clientName, 'active']
         );
+        clientByName.set(r.clientName.toLowerCase(), clientId);
       }
 
       const res = await query(
@@ -1078,7 +1089,7 @@ export async function seedProductivityDefaults() {
                 assigneeType = 'tbd';
                 externalName = 'TBD';
               } else {
-                const userMatch = await one('SELECT id FROM users WHERE name LIKE ? LIMIT 1', [`%${nameItem}%`]);
+                const userMatch = userByName.get(nameItem.toLowerCase());
                 if (userMatch) {
                   targetUserId = userMatch.id;
                   assigneeType = 'employee';
