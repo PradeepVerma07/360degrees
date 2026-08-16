@@ -1986,11 +1986,9 @@ const rawPort = process.env.PORT;
 const isNumericPort = rawPort && !isNaN(Number(rawPort));
 const port = isNumericPort ? Number(rawPort) : (rawPort || 4000);
 
-if (typeof port === 'number') {
-    httpServer.listen(port, '0.0.0.0', () => console.log(`CI360 API running on port ${port}`));
-} else {
-    httpServer.listen(port, () => console.log(`CI360 API running on socket/port ${port}`));
-}
+httpServer.listen(port, () => {
+    console.log(`CI360 API running on ${typeof port === 'number' ? `port ${port}` : `socket ${port}`}`);
+});
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
     process.on(signal, async () => {
