@@ -491,55 +491,59 @@ async function seedRbacDefaults() {
 }
 
 async function mapExistingUsersToRbac() {
-  await query("UPDATE users SET account_type='super_admin', role_id='super_admin' WHERE role='super_admin' OR account_type='super_admin'");
-  await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' OR name IN ('Pramit', 'Aashit', 'Urna')");
+  try {
+    await query("UPDATE users SET account_type='super_admin', role_id='super_admin' WHERE role='super_admin' OR account_type='super_admin'").catch(() => {});
+    await query("UPDATE users SET account_type='admin', role_id='admin' WHERE role='admin' OR name IN ('Pramit', 'Aashit', 'Urna')").catch(() => {});
 
-  // Ensure internal company employees (e.g. Meshwa Kadia, Mansi, John, etc.) have employee role
-  const teamMemberNames = [
-    'Meshwa', 'Meshwa Kadia', 'Mansi', 'Chitra', 'Arushi', 'Manan', 'Mary', 'Ajay',
-    'Aarya', 'Aadya', 'John', 'Dhawal', 'Ekta', 'Khushi', 'Reehan', 'Pradeep',
-    'Harshada', 'Arjun', 'Shalini', 'External'
-  ];
-  for (const name of teamMemberNames) {
+    // Ensure internal company employees (e.g. Meshwa Kadia, Mansi, John, etc.) have employee role
+    const teamMemberNames = [
+      'Meshwa', 'Meshwa Kadia', 'Mansi', 'Chitra', 'Arushi', 'Manan', 'Mary', 'Ajay',
+      'Aarya', 'Aadya', 'John', 'Dhawal', 'Ekta', 'Khushi', 'Reehan', 'Pradeep',
+      'Harshada', 'Arjun', 'Shalini', 'External'
+    ];
+    for (const name of teamMemberNames) {
+      await query(
+        "UPDATE users SET account_type='employee', role='employee', role_id='employee', client_id=NULL WHERE (name LIKE ? OR email LIKE ?) AND account_type!='super_admin' AND name NOT IN ('Pramit', 'Aashit', 'Urna')",
+        [`%${name}%`, `%${name.toLowerCase().replace(/[^a-z]/g, '')}%@360degrees.com`]
+      ).catch(() => {});
+    }
+
+    // Ensure anyone with employee settings is mapped to employee
+    await query(`
+      UPDATE users u
+      JOIN productivity_employee_settings pes ON pes.user_id = u.id
+      SET u.account_type = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+          u.role = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+          u.role_id = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
+          u.client_id = NULL
+      WHERE u.account_type != 'super_admin'
+    `).catch(() => {});
+
+    // Ensure every active client in clients has a login row in users safely
+    const activeClients = await query("SELECT id, name, contact_name, email, phone, password_hash FROM clients WHERE status='active' AND password_hash IS NOT NULL AND password_hash != ''").catch(() => []);
+    for (const c of (activeClients || [])) {
+      const existingUser = await one("SELECT id, account_type, role FROM users WHERE id=?", [c.id]).catch(() => null);
+      if (!existingUser) {
+        await query(
+          "INSERT INTO users (id, name, email, phone, password_hash, role, account_type, role_id, client_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'client', 'client', 'client', ?, 'active', NOW(), NOW())",
+          [c.id, c.contact_name || c.name, c.email || null, c.phone || null, c.password_hash, c.id]
+        ).catch(() => {});
+      } else if (existingUser.account_type === 'client' || existingUser.role === 'client') {
+        await query("UPDATE users SET client_id=? WHERE id=?", [c.id, c.id]).catch(() => {});
+      }
+    }
+
+    const defaultPasswordHash = await bcrypt.hash('CI360Demo#2026', 12);
     await query(
-      "UPDATE users SET account_type='employee', role='employee', role_id='employee', client_id=NULL WHERE (name LIKE ? OR email LIKE ?) AND account_type!='super_admin' AND name NOT IN ('Pramit', 'Aashit', 'Urna')",
-      [`%${name}%`, `%${name.toLowerCase().replace(/[^a-z]/g, '')}%@360degrees.com`]
-    );
+      "UPDATE users SET password_hash = ? WHERE password_hash IS NULL OR password_hash = '' OR password_hash LIKE '$2a$10$wO/4y6qg%' OR LENGTH(password_hash) < 50",
+      [defaultPasswordHash]
+    ).catch(() => {});
+
+    await query("UPDATE users SET account_type='client', role_id='client' WHERE (role='client' OR account_type='client') AND (role_id IS NULL OR role_id='' OR role_id='client') AND email NOT LIKE '%@360degrees.com'").catch(() => {});
+    await query("UPDATE users SET account_type=role WHERE account_type IS NULL").catch(() => {});
+  } catch (err) {
+    console.error('mapExistingUsersToRbac warning:', err.message);
   }
-
-  // Ensure anyone with employee settings is mapped to employee
-  await query(`
-    UPDATE users u
-    JOIN productivity_employee_settings pes ON pes.user_id = u.id
-    SET u.account_type = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
-        u.role = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
-        u.role_id = CASE WHEN u.name IN ('Pramit', 'Aashit', 'Urna') THEN 'admin' ELSE 'employee' END,
-        u.client_id = NULL
-    WHERE u.account_type != 'super_admin'
-  `);
-
-  // Ensure every active client in clients has a login row in users
-  await query(`
-    INSERT INTO users (id, name, email, phone, password_hash, role, account_type, role_id, client_id, status, created_at, updated_at)
-    SELECT c.id, COALESCE(c.contact_name, c.name), c.email, c.phone, c.password_hash, 'client', 'client', 'client', c.id, 'active', NOW(), NOW()
-    FROM clients c
-    WHERE c.status='active' AND c.password_hash IS NOT NULL AND c.password_hash != ''
-    ON DUPLICATE KEY UPDATE
-      client_id = VALUES(client_id),
-      password_hash = CASE WHEN users.password_hash IS NULL OR users.password_hash='' THEN VALUES(password_hash) ELSE users.password_hash END,
-      role = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.role ELSE 'client' END,
-      account_type = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.account_type ELSE 'client' END,
-      role_id = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.role_id ELSE 'client' END
-  `);
-
-  const defaultPasswordHash = await bcrypt.hash('CI360Demo#2026', 12);
-  await query(
-    "UPDATE users SET password_hash = ? WHERE password_hash IS NULL OR password_hash = '' OR password_hash LIKE '$2a$10$wO/4y6qg%' OR LENGTH(password_hash) < 50",
-    [defaultPasswordHash]
-  );
-
-  await query("UPDATE users SET account_type='client', role_id='client' WHERE (role='client' OR account_type='client') AND (role_id IS NULL OR role_id='' OR role_id='client') AND email NOT LIKE '%@360degrees.com'");
-  await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
 }
 
 export async function ensureEnvironmentSuperAdmin() {
