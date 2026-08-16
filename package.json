@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "build": "npm run build -w client && npm run build -w server",
-    "start": "npm run start -w server",
+    "start": "node index.js",
     "hostinger-build": "npm install && npm run build",
     "test": "node --test tests/*.test.mjs"
   },
