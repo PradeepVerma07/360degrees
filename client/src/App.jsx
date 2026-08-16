@@ -1428,9 +1428,8 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
 function SubmitJobPage({ data, reload, setTab }) {
   const categories = data.settings?.categories || [];
   const firstCat = categories[0]?.name || 'Website Changes';
-  const defaultClient = data.clients?.find(c => c.status === 'active')?.id || '';
-  const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
-  const employees = (data?.clientOwners || []).filter(u => u.accountType !== 'client' && u.role !== 'client');
+  const defaultClient = data.user?.clientId || data.clients?.find(c => c.status === 'active')?.id || data.clients?.[0]?.id || '';
+  const employees = (data?.clientOwners || data?.assignees || []).filter(u => u.accountType !== 'client' && u.role !== 'client');
   const leadUser = employees.find(u => u.name === 'Urna') || employees.find(u => u.name === 'Mansi') || employees[0];
 
   const [servicesList, setServicesList] = useState([]);
@@ -1453,6 +1452,12 @@ function SubmitJobPage({ data, reload, setTab }) {
     valueAmount: '',
     assignedToUserId: leadUser?.id || ''
   });
+
+  useEffect(() => {
+    if (!form.clientId && defaultClient) {
+      setForm(prev => ({ ...prev, clientId: defaultClient }));
+    }
+  }, [defaultClient]);
 
   const [assignments, setAssignments] = useState([
     { userId: leadUser?.id || employees[0]?.id || data.user?.id || '', revenuePercent: 100, hoursSpent: '' }
@@ -1484,7 +1489,8 @@ function SubmitJobPage({ data, reload, setTab }) {
   const handleSubmit = async e => {
     e.preventDefault();
     if (!form.title.trim()) return setError('Please enter a job title');
-    if (isSuperOrAdmin && assignments.length > 0 && totalRevPercent !== 100) {
+    const validAssignments = assignments.filter(a => a.userId);
+    if (validAssignments.length > 0 && totalRevPercent !== 100 && assignments.some(a => Number(a.revenuePercent) > 0)) {
       return setError(`Revenue allocation total must equal 100% (currently ${totalRevPercent}%)`);
     }
 
@@ -1494,25 +1500,23 @@ function SubmitJobPage({ data, reload, setTab }) {
       // 1. Create standard Job
       await api.createJob(form);
 
-      // 2. Also log in Productivity Intelligence if user is internal
-      if (isSuperOrAdmin) {
-        try {
-          await api.createProductivityJob({
-            clientId: form.clientId,
-            startDate: form.startDate,
-            completionDate: form.completionDate || null,
-            valueAmount: Number(form.valueAmount || 0),
-            description: form.title + (form.description ? ' — ' + form.description : ''),
-            serviceIds: selectedServiceIds,
-            assignments: assignments.filter(a => a.userId).map(a => ({
-              userId: a.userId,
-              revenuePercent: Number(a.revenuePercent || 0),
-              hoursSpent: Number(a.hoursSpent || 0)
-            }))
-          });
-        } catch (_) {
-          // Non-blocking if productivity already tracked
-        }
+      // 2. Also log in Productivity Intelligence
+      try {
+        await api.createProductivityJob({
+          clientId: form.clientId || defaultClient,
+          startDate: form.startDate,
+          completionDate: form.completionDate || null,
+          valueAmount: Number(form.valueAmount || 0),
+          description: form.title + (form.description ? ' — ' + form.description : ''),
+          serviceIds: selectedServiceIds,
+          assignments: validAssignments.map(a => ({
+            userId: a.userId,
+            revenuePercent: Number(a.revenuePercent || 0),
+            hoursSpent: Number(a.hoursSpent || 0)
+          }))
+        });
+      } catch (_) {
+        // Non-blocking if productivity already tracked or permission scoped
       }
 
       setSuccess('Job submitted and assigned successfully!');
@@ -1545,23 +1549,27 @@ function SubmitJobPage({ data, reload, setTab }) {
         <form onSubmit={handleSubmit}>
           {/* Client & Title */}
           <div className="form-row">
-            {isSuperOrAdmin ? (
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Client / Account</label>
-                <select
-                  className="form-select"
-                  value={form.clientId}
-                  onChange={e => setForm({ ...form, clientId: e.target.value })}
-                  required
-                >
-                  {data.clients?.map(c => (
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Client / Account</label>
+              <select
+                className="form-select"
+                value={form.clientId}
+                onChange={e => setForm({ ...form, clientId: e.target.value })}
+                required
+              >
+                {data.clients && data.clients.length > 0 ? (
+                  data.clients.map(c => (
                     <option key={c.id} value={c.id}>
                       {c.name} ({c.id})
                     </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
+                  ))
+                ) : (
+                  <option value={data.user?.clientId || 'default'}>
+                    {data.user?.name || 'My Account'}
+                  </option>
+                )}
+              </select>
+            </div>
 
             <div className="form-group" style={{ flex: 1.5 }}>
               <label className="form-label">Job Title / Deliverable</label>
@@ -1602,19 +1610,17 @@ function SubmitJobPage({ data, reload, setTab }) {
 
           {/* Job Value & Team Member Assignment Row */}
           <div className="form-row">
-            {isSuperOrAdmin && (
-              <div className="form-group">
-                <label className="form-label">Job Value (₹)</label>
-                <input
-                  type="number"
-                  min="0"
-                  className="form-control"
-                  placeholder="e.g. 25000"
-                  value={form.valueAmount}
-                  onChange={e => setForm({ ...form, valueAmount: e.target.value })}
-                />
-              </div>
-            )}
+            <div className="form-group">
+              <label className="form-label">Job Value (₹)</label>
+              <input
+                type="number"
+                min="0"
+                className="form-control"
+                placeholder="e.g. 25000"
+                value={form.valueAmount}
+                onChange={e => setForm({ ...form, valueAmount: e.target.value })}
+              />
+            </div>
 
             <div className="form-group" style={{ flex: 1 }}>
               <label className="form-label">Assign Team Member (Lead / Owner)</label>
@@ -1750,7 +1756,7 @@ function SubmitJobPage({ data, reload, setTab }) {
           </div>
 
           {/* Team Assigned & Revenue / Hours Allocation */}
-          {isSuperOrAdmin && employees.length > 0 && (
+          {employees.length > 0 && (
             <div className="form-group" style={{ background: 'var(--ci-surface)', padding: '14px', borderRadius: '10px', border: '1px solid var(--ci-border-light)' }}>
               <label className="form-label" style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>People Assigned — % Revenue Credit & Hours Spent</span>
