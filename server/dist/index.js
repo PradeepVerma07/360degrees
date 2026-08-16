@@ -233,12 +233,13 @@ const canAccessJob = (user, job) => canViewAllJobs(user)
     || (user.clientId && job.client_id === user.clientId)
     || job.created_by_user_id === user.id
     || job.assigned_to_user_id === user.id
+    || job.delegated_to_user_id === user.id
     || (canViewDepartmentJobs(user) && user.departmentId && job.department_id === user.departmentId);
 const loadVisibleJobs = user => {
     if (canViewAllJobs(user))
         return query(`${jobSelect} ORDER BY j.date_posted DESC`);
-    const clauses = ['j.client_id=?', 'j.created_by_user_id=?', 'j.assigned_to_user_id=?'];
-    const params = [user.clientId || '', user.id, user.id];
+    const clauses = ['j.client_id=?', 'j.created_by_user_id=?', 'j.assigned_to_user_id=?', 'j.delegated_to_user_id=?'];
+    const params = [user.clientId || '', user.id, user.id, user.id];
     if (canViewDepartmentJobs(user) && user.departmentId) {
         clauses.push('j.department_id=?');
         params.push(user.departmentId);
@@ -248,8 +249,8 @@ const loadVisibleJobs = user => {
 const categoryLoadForUser = async user => {
     if (canViewAllJobs(user))
         return categoryLoad();
-    const clauses = ['client_id=?', 'created_by_user_id=?', 'assigned_to_user_id=?'];
-    const params = [user.clientId || '', user.id, user.id];
+    const clauses = ['client_id=?', 'created_by_user_id=?', 'assigned_to_user_id=?', 'delegated_to_user_id=?'];
+    const params = [user.clientId || '', user.id, user.id, user.id];
     if (canViewDepartmentJobs(user) && user.departmentId) {
         clauses.push('department_id=?');
         params.push(user.departmentId);
@@ -386,21 +387,21 @@ app.get('/api/bootstrap', requireAuth, async (req, res) => {
         : canManageSupport(user)
             ? await query('SELECT * FROM support_tickets ORDER BY updated_at DESC,id DESC')
             : await query('SELECT * FROM support_tickets WHERE user_id=? OR client_id=? ORDER BY updated_at DESC,id DESC', [user.id, user.clientId || '']);
-    const assignees = canAssignJobs(user)
-        ? await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
+    const assignees = user.accountType === 'client' && !canAssignJobs(user)
+        ? []
+        : await query(`SELECT u.id,u.name,u.department_id departmentId,u.designation_id designationId,d.name departmentName,ds.name designationName
             FROM users u
             LEFT JOIN departments d ON d.id=u.department_id
             LEFT JOIN designations ds ON ds.id=u.designation_id
             WHERE u.status='active' AND COALESCE(u.account_type,u.role)<>'client'
-            ORDER BY u.name`)
-        : [];
-    const departments = canAssignJobs(user) || canViewDepartmentJobs(user)
-        ? await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name")
-        : [];
-    const clientOwners = hasPermission(user, 'clients.assign_owner')
-        ? await query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
-            WHERE status='active' AND COALESCE(account_type,role)<>'client' ORDER BY name`)
-        : [];
+            ORDER BY u.name`);
+    const departments = user.accountType === 'client' && !canViewDepartmentJobs(user)
+        ? []
+        : await query("SELECT id,name,code FROM departments WHERE status='active' ORDER BY name");
+    const clientOwners = user.accountType === 'client' && !hasPermission(user, 'clients.assign_owner')
+        ? []
+        : await query(`SELECT id,name,COALESCE(account_type,role) accountType,department_id departmentId FROM users
+            WHERE status='active' AND COALESCE(account_type,role)<>'client' ORDER BY name`);
     const currentSettings = await settings();
     const bootstrapSettings = !canReadSettings
         ? {

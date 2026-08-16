@@ -121,7 +121,6 @@ export const rolePermissions = {
   employee: [
     'dashboard.view',
     'jobs.view_own',
-    'jobs.create',
     'clients.view',
     'support.view_own',
     'support.create',
@@ -132,9 +131,9 @@ export const rolePermissions = {
     'productivity.dashboard.view',
     'productivity.targets.view',
     'productivity.jobs.view',
-    'productivity.jobs.create',
     'productivity.daily_log.view',
-    'productivity.by_person.view'
+    'productivity.by_person.view',
+    'productivity.by_client.view'
   ],
   client: [
     'dashboard.view',
