@@ -458,45 +458,7 @@ export default function TeamChat({ data, reload }) {
 
   return (
     <div className={`wa-app-layout ${mobileChatOpen ? 'mobile-chat-active' : 'mobile-list-active'}`}>
-      {/* 1. LEFT UTILITY ICON RAIL (Desktop) */}
-      <aside className="wa-utility-rail">
-        <div className="wa-rail-top">
-          <div className="wa-rail-icon-btn wa-brand-icon active" title="Chats">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-              <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.27-2.42 5.82a8.18 8.18 0 0 1-5.82 2.42c-1.47 0-2.91-.39-4.18-1.15l-.3-.18-3.11.82.83-3.04-.2-.31a8.17 8.17 0 0 1-1.25-4.38c0-4.54 3.7-8.24 8.24-8.24z" />
-            </svg>
-            <span className="wa-rail-badge">19</span>
-          </div>
-
-          <div className="wa-rail-icon-btn" title="Calls">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
-            <span className="wa-rail-badge-mini">1</span>
-          </div>
-
-          <div className="wa-rail-icon-btn" title="Channels">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-          </div>
-
-          <div className="wa-rail-icon-btn wa-sparkle-btn" title="Meta AI">
-            <span style={{ fontSize: '18px', background: 'linear-gradient(135deg, #a855f7, #6366f1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', fontWeight: 900 }}>✦</span>
-          </div>
-        </div>
-
-        <div className="wa-rail-bottom">
-          <div className="wa-rail-avatar" title={currentUser.name}>
-            {initialsFor(currentUser.name)}
-          </div>
-        </div>
-      </aside>
-
-      {/* 2. CHATS & TEAM MEMBERS LIST COLUMN (STARTING SCREEN ON MOBILE) */}
+      {/* 1. CHATS & TEAM MEMBERS LIST COLUMN (STARTING SCREEN ON MOBILE) */}
       <aside className="wa-chats-sidebar">
         {/* Header */}
         <div className="wa-chats-header">

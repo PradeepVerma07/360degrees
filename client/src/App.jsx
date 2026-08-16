@@ -569,17 +569,6 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
           </button>
         </div>
 
-        {/* MAIN CTA */}
-        <button
-          type="button"
-          className="sidebar-cta-btn"
-          title="Submit a Job"
-          onClick={() => handleNavClick('submit')}
-        >
-          <DashboardIcon name="submit" />
-          <span>+ Submit a Job</span>
-        </button>
-
         {/* NAVIGATION ITEMS */}
         <nav className="sidebar-nav">
           {navItems.map(item => {
