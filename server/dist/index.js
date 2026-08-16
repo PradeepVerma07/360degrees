@@ -341,8 +341,11 @@ const ticketDetail = async ticket => {
     }
     return { ...mapTicket(ticket), messages, attachments };
 };
-app.get('/api/health', async (_req, res) => res.status(databaseReady ? 200 : 503).json({
-    ok: databaseReady,
+app.get(['/health', '/ping'], (_req, res) => res.status(200).send('OK'));
+
+app.get('/api/health', async (_req, res) => res.status(200).json({
+    ok: true,
+    server: 'running',
     database: databaseReady ? 'ready' : (databaseInitError ? 'error' : 'starting'),
     ...databaseHealthDetails(),
     error: databaseReady || process.env.NODE_ENV === 'production' ? undefined : databaseInitError?.message
