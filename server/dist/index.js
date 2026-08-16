@@ -26,6 +26,7 @@ import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, require
 import { calculateHours } from './tat.js';
 import { createProductivityRouter } from './routes/productivity.js';
 const app = express();
+const httpServer = createServer(app);
 httpServer.keepAliveTimeout = 65000;
 httpServer.headersTimeout = 66000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
