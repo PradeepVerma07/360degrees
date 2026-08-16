@@ -2048,6 +2048,21 @@ a {
     gap: 12px !important;
   }
 
+  .form-control, .form-select, .form-textarea, .filter-select, .filter-search-box input {
+    font-size: 16px !important;
+    min-height: 44px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .btn {
+    min-height: 44px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
   .recent-job-item {
     flex-direction: column !important;
     align-items: flex-start !important;

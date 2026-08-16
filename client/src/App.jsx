@@ -440,7 +440,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const hasClientsAccess = can(data, 'clients.view') || can(data, 'clients.view_all') || isSuperOrAdmin;
   const hasSupportAccess = can(data, 'support.view_all') || can(data, 'support.view_own') || can(data, 'support.create');
 
-  // Close dropdowns on outside click
+  // Close dropdowns and drawer on outside click / escape key
   useEffect(() => {
     const handleOutsideClick = (e) => {
       if (notifRef.current && !notifRef.current.contains(e.target)) {
@@ -450,9 +450,31 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
         setUserMenuOpen(false);
       }
     };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setMobileOpen(false);
+        setNotificationOpen(false);
+        setUserMenuOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
+
+  useEffect(() => {
+    if (mobileOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileOpen]);
 
   // Dynamic navigation items based on assigned user permissions
   const navItems = [
