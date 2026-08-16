@@ -519,7 +519,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
 
       {/* LEFT SIDEBAR */}
       <aside className="app-sidebar">
-        {/* BRAND */}
+        {/* BRAND & CONTROLS */}
         <div className="sidebar-header">
           <div className="sidebar-brand">
             <span className="brand-logo-text">
@@ -528,9 +528,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             </span>
             <span className="brand-subtitle">Realtime Job Board</span>
           </div>
+          {/* Desktop Collapse Button */}
           <button
             type="button"
-            className="sidebar-collapse-btn"
+            className="sidebar-collapse-btn desktop-only"
             aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             title={sidebarCollapsed ? 'Expand sidebar' : 'Minimize sidebar'}
             onClick={() => setSidebarCollapsed(v => !v)}
@@ -546,6 +547,15 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             >
               <polyline points="15 18 9 12 15 6" />
             </svg>
+          </button>
+          {/* Mobile Drawer Close Button */}
+          <button
+            type="button"
+            className="sidebar-close-btn mobile-only"
+            aria-label="Close sidebar menu"
+            onClick={() => setMobileOpen(false)}
+          >
+            ✕
           </button>
         </div>
 
@@ -621,7 +631,6 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             </button>
             <div className="header-title-block">
               <h1 className="header-page-title">{currentHeader.title}</h1>
-              <p className="header-page-subtitle">{currentHeader.subtitle}</p>
             </div>
           </div>
 
@@ -630,15 +639,6 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
             <div className={`realtime-status-pill ${socketConnected ? 'connected' : 'disconnected'}`}>
               <span className="status-dot" />
               <span>{socketConnected ? 'Realtime Connected' : 'Connecting...'}</span>
-            </div>
-
-            {/* Workspace Dropdown Tag */}
-            <div className="workspace-badge">
-              <span className="workspace-label">Workspace</span>
-              <span className="workspace-value">
-                CI360 Job Board
-                <DashboardIcon name="chevron-down" />
-              </span>
             </div>
 
             {/* Notification Bell with Interactive Dropdown */}
