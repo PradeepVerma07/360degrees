@@ -29,7 +29,15 @@ const app = express();
 const httpServer = createServer(app);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-const io = new Server(httpServer, { cors: { origin } });
+const io = new Server(httpServer, {
+    cors: {
+        origin: (requestOrigin, callback) => callback(null, true),
+        methods: ['GET', 'POST'],
+        credentials: true
+    },
+    transports: ['polling', 'websocket'],
+    allowEIO3: true
+});
 let databaseReady = false;
 let databaseInitError = null;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -71,7 +79,10 @@ const databaseHealthDetails = () => {
 app.use(helmet({
     contentSecurityPolicy: false
 }));
-app.use(cors({ origin }));
+app.use(cors({
+    origin: (requestOrigin, callback) => callback(null, true),
+    credentials: true
+}));
 app.use(express.json({ limit: '20mb' }));
 app.use((req, res, next) => {
     req.setTimeout(120000, () => {

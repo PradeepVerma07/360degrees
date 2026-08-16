@@ -113,7 +113,7 @@ export async function loadUserContext(userId) {
     legacyRole: row.role,
     accountType,
     roleId,
-    roleName: row.role_name || (accountType === 'client' ? 'Client' : 'Admin'),
+    roleName: row.role_name || (accountType === 'client' ? 'Client' : accountType === 'employee' ? 'Employee' : 'Admin'),
     roleSlug: row.role_slug || roleId,
     roleLevel: Number(row.role_level || 0),
     roleType: row.role_type || (accountType === 'client' ? 'client' : 'internal'),
