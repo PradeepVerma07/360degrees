@@ -969,11 +969,14 @@ export async function seedProductivityDefaults() {
     ['Photography / Filming (per shoot day)', 8.00]
   ];
 
-  for (const [name, refHours] of defaultServices) {
-    await query(
-      'INSERT INTO productivity_services (name, reference_hours, is_active) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE reference_hours = VALUES(reference_hours)',
-      [name, refHours]
-    );
+  const serviceCount = await query('SELECT COUNT(*) as count FROM productivity_services');
+  if (Number(serviceCount[0]?.count || 0) < 14) {
+    for (const [name, refHours] of defaultServices) {
+      await query(
+        'INSERT INTO productivity_services (name, reference_hours, is_active) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE reference_hours = VALUES(reference_hours)',
+        [name, refHours]
+      );
+    }
   }
 
   // Seed default salary grades for system owner / super_admin
@@ -999,58 +1002,61 @@ export async function seedProductivityDefaults() {
   }
 
   // 22 Default Personnel
-  const defaultPersonnel = [
-    { name: 'Pramit', email: 'pramit@360degrees.com', duties: 'Founder, Strategy, Business Development, Content Management', capacity: 48, status: 'active', role: 'admin' },
-    { name: 'Aashit', email: 'aashit@360degrees.com', duties: 'Founder, Business Development, Finance', capacity: 48, status: 'active', role: 'admin' },
-    { name: 'Urna', email: 'urna@360degrees.com', duties: 'COO, CS, Content, Operations, Billing, Overall Supervision', capacity: 48, status: 'active', role: 'admin' },
-    { name: 'Mansi', email: 'mansi@360degrees.com', duties: 'Strategy, BD, Content, Backup to Pramit, CS', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Chitra', email: 'chitra@360degrees.com', duties: 'CS, SMO', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Arushi', email: 'arushi@360degrees.com', duties: 'SMO', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Manan', email: 'manan@360degrees.com', duties: 'CS, Creative Lead', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Mary', email: 'mary@360degrees.com', duties: 'Creatives, Animations, AI, Editing of Reels etc, Storytelling', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Ajay', email: 'ajay@360degrees.com', duties: 'Editing', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Aarya', email: 'aarya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Aadya', email: 'aadya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'John', email: 'john@360degrees.com', duties: 'Websites — All of them, Quality Control', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Meshwa', email: 'meshwa@360degrees.com', duties: 'Website Support', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Dhawal', email: 'dhawal@360degrees.com', duties: 'Not currently functioning — part of the team', capacity: 48, status: 'inactive', role: 'employee' },
-    { name: 'Ekta', email: 'ekta@360degrees.com', duties: 'Accounts', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Khushi', email: 'khushi@360degrees.com', duties: 'Operations (intern, just joined)', capacity: 48, status: 'intern', role: 'employee' },
-    { name: 'Reehan', email: 'reehan@360degrees.com', duties: 'Websites — part of (intern)', capacity: 48, status: 'intern', role: 'employee' },
-    { name: 'Pradeep', email: 'pradeep@360degrees.com', duties: 'Websites', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Harshada', email: 'harshada@360degrees.com', duties: 'SEO', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Arjun', email: 'arjun@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'Shalini', email: 'shalini@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
-    { name: 'External', email: 'external@360degrees.com', duties: 'SEO and other requirements, as needed', capacity: 48, status: 'vendor', role: 'employee' }
-  ];
+  const personnelCount = await query('SELECT COUNT(*) as count FROM productivity_employee_settings');
+  if (Number(personnelCount[0]?.count || 0) < 20) {
+    const defaultPersonnel = [
+      { name: 'Pramit', email: 'pramit@360degrees.com', duties: 'Founder, Strategy, Business Development, Content Management', capacity: 48, status: 'active', role: 'admin' },
+      { name: 'Aashit', email: 'aashit@360degrees.com', duties: 'Founder, Business Development, Finance', capacity: 48, status: 'active', role: 'admin' },
+      { name: 'Urna', email: 'urna@360degrees.com', duties: 'COO, CS, Content, Operations, Billing, Overall Supervision', capacity: 48, status: 'active', role: 'admin' },
+      { name: 'Mansi', email: 'mansi@360degrees.com', duties: 'Strategy, BD, Content, Backup to Pramit, CS', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Chitra', email: 'chitra@360degrees.com', duties: 'CS, SMO', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Arushi', email: 'arushi@360degrees.com', duties: 'SMO', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Manan', email: 'manan@360degrees.com', duties: 'CS, Creative Lead', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Mary', email: 'mary@360degrees.com', duties: 'Creatives, Animations, AI, Editing of Reels etc, Storytelling', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Ajay', email: 'ajay@360degrees.com', duties: 'Editing', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Aarya', email: 'aarya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Aadya', email: 'aadya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'John', email: 'john@360degrees.com', duties: 'Websites — All of them, Quality Control', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Meshwa', email: 'meshwa@360degrees.com', duties: 'Website Support', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Dhawal', email: 'dhawal@360degrees.com', duties: 'Not currently functioning — part of the team', capacity: 48, status: 'inactive', role: 'employee' },
+      { name: 'Ekta', email: 'ekta@360degrees.com', duties: 'Accounts', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Khushi', email: 'khushi@360degrees.com', duties: 'Operations (intern, just joined)', capacity: 48, status: 'intern', role: 'employee' },
+      { name: 'Reehan', email: 'reehan@360degrees.com', duties: 'Websites — part of (intern)', capacity: 48, status: 'intern', role: 'employee' },
+      { name: 'Pradeep', email: 'pradeep@360degrees.com', duties: 'Websites', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Harshada', email: 'harshada@360degrees.com', duties: 'SEO', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Arjun', email: 'arjun@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'Shalini', email: 'shalini@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
+      { name: 'External', email: 'external@360degrees.com', duties: 'SEO and other requirements, as needed', capacity: 48, status: 'vendor', role: 'employee' }
+    ];
 
-  const defaultHash = '$2a$10$wO/4y6qg6wB/2G5gM1s9l.yPjK6gQp7.J5sC4n6kR8vP9m1q2w3e4'; // demo password hash
+    const defaultHash = '$2a$10$wO/4y6qg6wB/2G5gM1s9l.yPjK6gQp7.J5sC4n6kR8vP9m1q2w3e4'; // demo password hash
 
-  // 1. Query existing users once to avoid 50+ round trips
-  const existingUsers = await query('SELECT id, name, email FROM users');
-  const userByEmail = new Map(existingUsers.map(u => [String(u.email || '').toLowerCase(), u]));
-  const userByName = new Map(existingUsers.map(u => [String(u.name || '').toLowerCase(), u]));
+    // 1. Query existing users once to avoid 50+ round trips
+    const existingUsers = await query('SELECT id, name, email FROM users');
+    const userByEmail = new Map(existingUsers.map(u => [String(u.email || '').toLowerCase(), u]));
+    const userByName = new Map(existingUsers.map(u => [String(u.name || '').toLowerCase(), u]));
 
-  for (const p of defaultPersonnel) {
-    let user = userByEmail.get(p.email.toLowerCase()) || userByName.get(p.name.toLowerCase());
-    let userId = user ? user.id : null;
-    if (!userId) {
-      userId = p.name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + Math.random().toString(36).slice(2, 7);
+    for (const p of defaultPersonnel) {
+      let user = userByEmail.get(p.email.toLowerCase()) || userByName.get(p.name.toLowerCase());
+      let userId = user ? user.id : null;
+      if (!userId) {
+        userId = p.name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + Math.random().toString(36).slice(2, 7);
+        await query(
+          'INSERT INTO users (id, name, email, password_hash, role, account_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [userId, p.name, p.email, defaultHash, p.role, p.role === 'admin' ? 'admin' : 'employee', p.status !== 'inactive' ? 1 : 0]
+        );
+        user = { id: userId, name: p.name, email: p.email };
+        userByEmail.set(p.email.toLowerCase(), user);
+        userByName.set(p.name.toLowerCase(), user);
+      }
+      // Update or insert employee settings
       await query(
-        'INSERT INTO users (id, name, email, password_hash, role, account_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [userId, p.name, p.email, defaultHash, p.role, p.role === 'admin' ? 'admin' : 'employee', p.status !== 'inactive' ? 1 : 0]
+        `INSERT INTO productivity_employee_settings (user_id, custom_duties, weekly_capacity_hours, productivity_status)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE custom_duties=VALUES(custom_duties), weekly_capacity_hours=VALUES(weekly_capacity_hours), productivity_status=VALUES(productivity_status)`,
+        [userId, p.duties, p.capacity, p.status]
       );
-      user = { id: userId, name: p.name, email: p.email };
-      userByEmail.set(p.email.toLowerCase(), user);
-      userByName.set(p.name.toLowerCase(), user);
     }
-    // Update or insert employee settings
-    await query(
-      `INSERT INTO productivity_employee_settings (user_id, custom_duties, weekly_capacity_hours, productivity_status)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE custom_duties=VALUES(custom_duties), weekly_capacity_hours=VALUES(weekly_capacity_hours), productivity_status=VALUES(productivity_status)`,
-      [userId, p.duties, p.capacity, p.status]
-    );
   }
 
   // 35 Default Roster Clients
