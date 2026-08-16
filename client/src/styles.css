@@ -2355,6 +2355,7 @@ a {
   color: #111B21;
   line-height: 1.45;
   word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .wa-mention-tag {
@@ -2629,14 +2630,19 @@ a {
 
 .wa-message-input {
   flex: 1;
-  height: 42px;
+  min-height: 40px;
+  max-height: 120px;
   border-radius: 8px;
   border: none;
   background: #FFFFFF;
-  padding: 0 16px;
+  padding: 10px 16px;
   font-size: 14px;
   color: #111B21;
   outline: none;
+  font-family: inherit;
+  resize: none;
+  line-height: 1.4;
+  box-sizing: border-box;
 }
 
 .wa-message-input::placeholder {

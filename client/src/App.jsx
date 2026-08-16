@@ -1447,7 +1447,7 @@ function SubmitJobPage({ data, reload, setTab }) {
             </div>
           </div>
 
-          {/* Dates & Job Value */}
+          {/* Dates */}
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Start Date</label>
@@ -1469,7 +1469,10 @@ function SubmitJobPage({ data, reload, setTab }) {
                 onChange={e => setForm({ ...form, completionDate: e.target.value })}
               />
             </div>
+          </div>
 
+          {/* Job Value & Team Member Assignment Row */}
+          <div className="form-row">
             {isSuperOrAdmin && (
               <div className="form-group">
                 <label className="form-label">Job Value (₹)</label>
@@ -1483,32 +1486,28 @@ function SubmitJobPage({ data, reload, setTab }) {
                 />
               </div>
             )}
-          </div>
 
-          {/* Team Member Assignment (Client / Admin selectable, default Urna/Mansi) */}
-          <div className="form-group">
-            <label className="form-label">Assign Team Member (Lead / Owner)</label>
-            <select
-              className="form-select"
-              value={form.assignedToUserId}
-              onChange={e => {
-                const uid = e.target.value;
-                setForm({ ...form, assignedToUserId: uid });
-                if (uid) {
-                  setAssignments([{ userId: uid, revenuePercent: 100, hoursSpent: '' }]);
-                }
-              }}
-            >
-              <option value="">Auto-Assign (Urna / Mansi — Operations Leads)</option>
-              {employees.map(emp => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name} {emp.name === 'Urna' || emp.name === 'Mansi' ? '★ (Operations Lead)' : `(${emp.departmentName || emp.role || 'Staff'})`}
-                </option>
-              ))}
-            </select>
-            <span className="form-hint" style={{ marginTop: '3px' }}>
-              Jobs are automatically assigned to Urna & Mansi for triage, and can be delegated or shared with other team members.
-            </span>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label className="form-label">Assign Team Member (Lead / Owner)</label>
+              <select
+                className="form-select"
+                value={form.assignedToUserId}
+                onChange={e => {
+                  const uid = e.target.value;
+                  setForm({ ...form, assignedToUserId: uid });
+                  if (uid) {
+                    setAssignments([{ userId: uid, revenuePercent: 100, hoursSpent: '' }]);
+                  }
+                }}
+              >
+                <option value="">Auto-Assign (Urna / Mansi)</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} {emp.name === 'Urna' || emp.name === 'Mansi' ? '★ (Operations Lead)' : `(${emp.departmentName || emp.role || 'Staff'})`}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Services Multi-Select Dropdown */}

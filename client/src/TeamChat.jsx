@@ -991,9 +991,9 @@ export default function TeamChat({ data, reload }) {
               </svg>
             </button>
 
-            {/* Text Input */}
-            <input
-              type="text"
+            {/* Text Input (Enter sends, Shift+Enter new line) */}
+            <textarea
+              rows={1}
               className="wa-message-input"
               placeholder={`Message ${currentChatInfo.title}...`}
               value={inputText}
