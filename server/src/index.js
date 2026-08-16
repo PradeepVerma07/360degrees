@@ -1044,13 +1044,18 @@ app.get('/api/users', requireAuth, requirePermission('users.view', 'employees.vi
         u.department_id departmentId,u.designation_id designationId,u.manager_user_id managerUserId,
         u.status,u.created_at createdAt,u.created_by createdBy,u.last_login lastLogin,
         r.name roleName,r.level roleLevel,d.name departmentName,ds.name designationName,m.name managerName,
-        ep.employee_id employeeId,ep.joining_date joiningDate
+        ep.employee_id employeeId,ep.joining_date joiningDate,
+        pes.custom_duties customDuties,
+        COALESCE(pes.weekly_capacity_hours, 48.00) weeklyCapacityHours,
+        COALESCE(pes.productivity_status, 'active') productivityStatus,
+        (SELECT COUNT(*) FROM jobs j WHERE j.assigned_to_user_id = u.id AND j.status != 'completed' AND j.status != 'cancelled') activeJobsCount
       FROM users u
       LEFT JOIN roles r ON r.id=u.role_id
       LEFT JOIN departments d ON d.id=u.department_id
       LEFT JOIN designations ds ON ds.id=u.designation_id
       LEFT JOIN users m ON m.id=u.manager_user_id
       LEFT JOIN employee_profiles ep ON ep.user_id=u.id
+      LEFT JOIN productivity_employee_settings pes ON pes.user_id=u.id
       ${where}
       ORDER BY FIELD(u.account_type,'super_admin','admin','employee','client'),u.name`, params);
     res.json({ users: rows });

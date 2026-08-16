@@ -6,6 +6,7 @@ import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
 import ProductivityIntelligence from './ProductivityIntelligence';
 import ManageUsersAndRoles from './ManageUsersAndRoles';
+import ManageEmployees from './ManageEmployees';
 import './styles.css';
 
 const statusLabels = {
@@ -156,6 +157,8 @@ function DashboardIcon({ name }) {
         </svg>
       );
     case 'users':
+    case 'team':
+    case 'employees':
       return (
         <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -405,6 +408,7 @@ export default function App() {
       {tab === 'chat' && <TeamChat data={data} reload={load} />}
       {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
       {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
+      {tab === 'employees' && <ManageEmployees data={data} reload={load} setTab={setTab} />}
       {tab === 'users' && <ManageUsersAndRoles data={data} reload={load} />}
       {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
     </DashboardShell>
@@ -427,6 +431,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const user = data.user || {};
   const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
   const hasProductivityAccess = can(data, 'productivity.view');
+  const hasEmployeesAccess = can(data, 'employees.view') || can(data, 'users.view') || isSuperOrAdmin || (data.user?.accountType === 'employee');
   const hasUsersAccess = can(data, 'users.view') || can(data, 'roles.view') || can(data, 'departments.manage') || isSuperOrAdmin;
   const hasChatAccess = can(data, 'chat.view') || can(data, 'chat.send');
   const hasSettingsAccess = can(data, 'settings.view') || can(data, 'settings.edit') || isSuperOrAdmin;
@@ -453,6 +458,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
     { id: 'submit', label: 'Submit a Job', icon: 'submit' },
     { id: 'jobs', label: isSuperOrAdmin ? 'All Jobs' : 'My Jobs', icon: 'jobs' },
     ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
+    ...(hasEmployeesAccess ? [{ id: 'employees', label: 'Employees', icon: 'team' }] : []),
     ...(hasChatAccess ? [{ id: 'chat', label: 'Team Chat', icon: 'chat' }] : []),
     ...(hasSettingsAccess ? [{ id: 'settings', label: 'TAT Standards', icon: 'clock' }] : []),
     ...(hasClientsAccess ? [{ id: 'clients', label: 'Manage Clients', icon: 'users' }] : []),
@@ -476,6 +482,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
     productivity: {
       title: 'Productivity Intelligence',
       subtitle: 'Workforce capacity, revenue attribution, throughput targets, and account roster analytics.'
+    },
+    employees: {
+      title: 'Employee Directory & Workforce',
+      subtitle: 'Directory of all team members, custom duties, weekly capacities, departments, and active work assignments.'
     },
     chat: {
       title: 'Team Chat',
