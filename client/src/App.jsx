@@ -401,7 +401,7 @@ export default function App() {
       socketConnected={socketConnected}
       openSupportModal={openSupportModal}
     >
-      {tab === 'overview' && <OverviewPage data={data} setTab={setTab} openSupportModal={openSupportModal} />}
+      {tab === 'overview' && <OverviewPage data={data} reload={load} setTab={setTab} openSupportModal={openSupportModal} />}
       {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
       {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
       {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
@@ -430,6 +430,8 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
 
   const user = data.user || {};
   const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
+  const isClient = user.role === 'client' || user.accountType === 'client';
+  const hasSubmitAccess = isSuperOrAdmin || isClient;
   const hasProductivityAccess = can(data, 'productivity.view');
   const hasEmployeesAccess = can(data, 'employees.view') || can(data, 'users.view') || isSuperOrAdmin || (data.user?.accountType === 'employee');
   const hasUsersAccess = can(data, 'users.view') || can(data, 'roles.view') || can(data, 'departments.manage') || isSuperOrAdmin;
@@ -455,7 +457,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   // Dynamic navigation items based on assigned user permissions
   const navItems = [
     { id: 'overview', label: 'Overview', icon: 'overview' },
-    { id: 'submit', label: 'Submit a Job', icon: 'submit' },
+    ...(hasSubmitAccess ? [{ id: 'submit', label: 'Submit a Job', icon: 'submit' }] : []),
     { id: 'jobs', label: isSuperOrAdmin ? 'All Jobs' : 'My Jobs', icon: 'jobs' },
     ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
     ...(hasEmployeesAccess ? [{ id: 'employees', label: 'Employees', icon: 'team' }] : []),
@@ -857,7 +859,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
 // 2. OVERVIEW DASHBOARD COMPONENT (EXACT MATCH TO DESIGN SPEC)
 // ==========================================================================
 
-function OverviewPage({ data, setTab, openSupportModal }) {
+function OverviewPage({ data, reload, setTab, openSupportModal }) {
   const jobs = data.jobs || [];
   const settings = data.settings || { categories: [], capacityPerCategory: 2, bufferHoursPerExtraJob: 8, startHour: 10.5, endHour: 19, workDays: [1, 2, 3, 4, 5] };
   const categories = settings.categories || [];
@@ -865,8 +867,47 @@ function OverviewPage({ data, setTab, openSupportModal }) {
   const completedJobs = useMemo(() => jobs.filter(isCompletedJob), [jobs]);
   const urgentJobs = useMemo(() => activeJobs.filter(j => j.priority === 'Urgent'), [activeJobs]);
 
+  const currentUserId = data.user?.id;
   const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
   const activeClientsCount = (data.clients || []).filter(c => c.status === 'active').length;
+
+  // Rejection Modal State
+  const [rejectingJob, setRejectingJob] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [submittingReject, setSubmittingReject] = useState(false);
+
+  // Incoming jobs awaiting employee acceptance
+  const awaitingAcceptanceJobs = useMemo(() => {
+    return jobs.filter(j => {
+      const isAssignedToMe = j.delegatedToUserId === currentUserId || j.assignedToUserId === currentUserId || j.assignedToName === data.user?.name;
+      const isPendingStatus = (j.status === 'submitted' || j.status === 'under_review' || j.delegationStatus === 'pending') && j.delegationStatus !== 'accepted' && j.delegationStatus !== 'auto_accepted';
+      return isAssignedToMe && isPendingStatus;
+    });
+  }, [jobs, currentUserId, data.user]);
+
+  const handleAcceptJob = async jobId => {
+    try {
+      await api.acceptDelegation(jobId);
+      if (reload) await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to accept job');
+    }
+  };
+
+  const handleRejectSubmit = async e => {
+    e.preventDefault();
+    if (!rejectingJob) return;
+    try {
+      setSubmittingReject(true);
+      await api.rejectDelegation(rejectingJob.id, rejectReason);
+      setRejectingJob(null);
+      if (reload) await reload();
+    } catch (err) {
+      alert(err.message || 'Failed to reject job');
+    } finally {
+      setSubmittingReject(false);
+    }
+  };
 
   // Active jobs by category count
   const activeByCategory = useMemo(() => {
@@ -900,8 +941,100 @@ function OverviewPage({ data, setTab, openSupportModal }) {
 
   return (
     <div className="overview-grid">
+      {/* REJECTION MODAL */}
+      {rejectingJob && (
+        <div className="modal-backdrop" onClick={() => setRejectingJob(null)}>
+          <div className="modal-dialog" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: 'var(--ci-danger)' }}>Reject / Decline Deliverable</h3>
+              <button type="button" className="modal-close" onClick={() => setRejectingJob(null)}>✕</button>
+            </div>
+            <form onSubmit={handleRejectSubmit}>
+              <div className="modal-body">
+                <p style={{ fontSize: '13px', color: 'var(--ci-text-secondary)', marginBottom: '12px' }}>
+                  Please state why you are unable to accept <strong>"{rejectingJob.title}"</strong>. The task will be routed back to operations leads (Urna / Mansi) for reassignment.
+                </p>
+                <div className="form-group">
+                  <label className="form-label">Reason for Rejection *</label>
+                  <textarea
+                    className="form-textarea"
+                    rows={3}
+                    required
+                    placeholder="e.g. Current workload over capacity, require different specialization..."
+                    value={rejectReason}
+                    onChange={e => setRejectReason(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setRejectingJob(null)}>Cancel</button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ background: 'var(--ci-danger)', borderColor: 'var(--ci-danger)' }}
+                  disabled={submittingReject}
+                >
+                  {submittingReject ? 'Rejecting...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* LEFT / CENTER MAJOR COLUMN */}
       <div className="overview-left-col">
+        {/* AWAITING ACCEPTANCE BANNER FOR EMPLOYEE */}
+        {awaitingAcceptanceJobs.length > 0 && (
+          <section className="saas-card" style={{ borderLeft: '4px solid var(--ci-gold)', background: 'rgba(242, 169, 0, 0.05)', marginBottom: '16px', padding: '16px 20px' }}>
+            <div className="card-header" style={{ paddingBottom: '8px' }}>
+              <div className="card-title-group">
+                <DashboardIcon name="clock" />
+                <h2 className="card-title" style={{ color: 'var(--ci-gold-darker, #996B00)', fontSize: '15px' }}>
+                  ⚡ Deliverables Awaiting Your Acceptance ({awaitingAcceptanceJobs.length})
+                </h2>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '6px' }}>
+              {awaitingAcceptanceJobs.map(job => (
+                <div key={job.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', background: '#FFFFFF', padding: '12px 14px', borderRadius: '8px', border: '1px solid var(--ci-border)' }}>
+                  <div style={{ flex: 1, minWidth: '220px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <strong style={{ fontSize: '13.5px', color: 'var(--ci-text)' }}>{job.title}</strong>
+                      <span className="badge badge-category">{job.category}</span>
+                      <span className={`badge ${priorityBadgeClasses[job.priority] || 'badge-priority-medium'}`}>{job.priority}</span>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--ci-text-secondary)', marginTop: '3px' }}>
+                      Client: <strong>{data.clients?.find(c => c.id === job.clientId)?.name || job.clientId}</strong> • Posted by {job.postedBy} • TAT: {job.calculatedHours || 4} hrs
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      style={{ background: 'var(--ci-success)', borderColor: 'var(--ci-success)', fontSize: '12px', padding: '5px 12px', fontWeight: 600 }}
+                      onClick={() => handleAcceptJob(job.id)}
+                    >
+                      ✓ Accept Job
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      style={{ color: 'var(--ci-danger)', fontSize: '12px', padding: '5px 10px', fontWeight: 600 }}
+                      onClick={() => {
+                        setRejectingJob(job);
+                        setRejectReason('');
+                      }}
+                    >
+                      ✕ Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* CARD 1: CURRENT WORKLOAD */}
         <section className="saas-card">
           <div className="card-header">
@@ -2031,38 +2164,40 @@ function JobsListPage({ data, reload }) {
 
                         {/* Delegation Badges & Response Windows */}
                         {isDelegationPending && deadlineMs > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                            <span className="badge badge-priority-urgent" style={{ fontSize: '10.5px', padding: '2px 6px' }}>
-                              ⏳ Pending Accept ({hoursLeft}h {minsLeft}m left → Auto-confirms)
-                            </span>
-                            {job.delegatedToName && (
-                              <span style={{ fontSize: '11px', color: 'var(--ci-text-secondary)' }}>
-                                To: <strong>{job.delegatedToName}</strong> ({job.delegationSharePercent}% split)
-                              </span>
-                            )}
-                            {(isAssignedToMe || isSuperOrAdmin) && (
-                              <div style={{ display: 'flex', gap: '4px', marginTop: '3px' }}>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-primary"
-                                  style={{ fontSize: '11px', padding: '2px 8px', background: 'var(--ci-success)', borderColor: 'var(--ci-success)' }}
-                                  onClick={() => handleAccept(job.id)}
-                                >
-                                  ✓ Accept
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-sm btn-secondary"
-                                  style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--ci-danger)' }}
-                                  onClick={() => {
-                                    setRejectingJob(job);
-                                    setRejectReason('');
-                                  }}
-                                >
-                                  ✕ Reject
-                                </button>
-                              </div>
-                            )}
+                          <span className="badge badge-priority-urgent" style={{ fontSize: '10.5px', padding: '2px 6px' }}>
+                            ⏳ Pending Accept ({hoursLeft}h {minsLeft}m left → Auto-confirms)
+                          </span>
+                        )}
+                        {job.delegatedToName && isDelegationPending && (
+                          <span style={{ fontSize: '11px', color: 'var(--ci-text-secondary)' }}>
+                            To: <strong>{job.delegatedToName}</strong> ({job.delegationSharePercent}% split)
+                          </span>
+                        )}
+
+                        {/* Direct Accept / Reject Actions for Assigned Employee */}
+                        {isAssignedToMe && (job.status === 'submitted' || job.status === 'under_review' || isDelegationPending) && job.delegationStatus !== 'accepted' && (
+                          <div style={{ display: 'flex', gap: '4px', marginTop: '3px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-primary"
+                              style={{ fontSize: '11px', padding: '2px 8px', background: 'var(--ci-success)', borderColor: 'var(--ci-success)', fontWeight: 600 }}
+                              onClick={() => handleAccept(job.id)}
+                              title="Accept deliverable"
+                            >
+                              ✓ Accept
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              style={{ fontSize: '11px', padding: '2px 8px', color: 'var(--ci-danger)', fontWeight: 600 }}
+                              onClick={() => {
+                                setRejectingJob(job);
+                                setRejectReason('');
+                              }}
+                              title="Reject deliverable"
+                            >
+                              ✕ Reject
+                            </button>
                           </div>
                         )}
 

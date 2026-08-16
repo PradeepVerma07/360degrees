@@ -128,7 +128,7 @@ export default function ProductivityIntelligence({ data, reload }) {
   }, [loadTabData]);
 
   // Sub-navigation tabs with permissions
-  const tabs = [
+  const tabs = useMemo(() => [
     { id: 'dashboard', label: 'Dashboard', perm: 'productivity.dashboard.view' },
     { id: 'analysis', label: 'Analysis', perm: 'productivity.analysis.view' },
     { id: 'accounts', label: 'Accounts', perm: 'productivity.accounts.view' },
@@ -141,7 +141,13 @@ export default function ProductivityIntelligence({ data, reload }) {
     { id: 'all_jobs', label: 'All Jobs', perm: 'productivity.jobs.view' },
     { id: 'salaries', label: 'Salaries 🔒', perm: 'productivity.salaries.view' },
     { id: 'manage', label: 'Manage', perm: 'productivity.settings.manage' }
-  ].filter(t => can(data, t.perm));
+  ].filter(t => can(data, t.perm)), [data]);
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some(t => t.id === activeTab)) {
+      setActiveTab(tabs[0].id);
+    }
+  }, [tabs, activeTab]);
 
   const employees = useMemo(() => {
     return (data?.clientOwners || []).filter(u => u.accountType !== 'client' || u.role !== 'client');

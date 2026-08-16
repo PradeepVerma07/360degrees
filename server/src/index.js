@@ -600,23 +600,30 @@ app.post('/api/jobs/:id/reject-delegation', requireAuth, async (req, res) => {
     if (!job) return res.status(404).json({ error: 'Job not found' });
     const now = new Date().toISOString();
 
+    let targetLeadId = job.delegated_by_user_id;
+    if (!targetLeadId || targetLeadId === req.user.id) {
+        const leadUsers = await query("SELECT id FROM users WHERE name IN ('Urna', 'Mansi') AND is_active=1 ORDER BY (name='Urna') DESC");
+        targetLeadId = leadUsers[0]?.id || (await one("SELECT id FROM users WHERE account_type='super_admin' LIMIT 1"))?.id || req.user.id;
+    }
+
     await transaction(async connection => {
         await query(
             `UPDATE jobs 
              SET delegation_status='rejected', rejection_reason=?,
-                 assigned_to_user_id=COALESCE(delegated_by_user_id, assigned_to_user_id),
+                 assigned_to_user_id=?,
+                 status=CASE WHEN status='in_progress' THEN 'submitted' ELSE status END,
                  updated_at=?
              WHERE id=?`,
-            [reason, now, req.params.id],
+            [reason, targetLeadId, now, req.params.id],
             connection
         );
         await query(
             `INSERT INTO job_assignments (job_id, previous_assignee_user_id, assigned_to_user_id, assigned_by_user_id, note)
              VALUES (?, ?, ?, ?, ?)`,
-            [req.params.id, job.delegated_to_user_id, job.delegated_by_user_id, req.user.id, `Delegation Rejected: ${reason}`],
+            [req.params.id, req.user.id, targetLeadId, req.user.id, `Job Rejected: ${reason}`],
             connection
         );
-        await audit(req.user.id, 'reject_delegation', 'job', req.params.id, { reason }, connection);
+        await audit(req.user.id, 'reject_delegation', 'job', req.params.id, { reason, reassignedToLead: targetLeadId }, connection);
     });
 
     emitRefresh();
