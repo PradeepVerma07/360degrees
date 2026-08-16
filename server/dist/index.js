@@ -363,15 +363,46 @@ app.post('/api/auth/login', async (req, res) => {
     if (shouldRepairDemoLogin(loginId, parsed.data.password)) {
         await seedDemoUsers();
     }
-    const user = await one("SELECT * FROM users WHERE (id=? OR email=?) AND status='active' ORDER BY id=? DESC LIMIT 1", [loginId, loginId, loginId]);
-    if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash))) {
+    let user = await one("SELECT * FROM users WHERE (id=? OR email=? OR client_id=?) AND (status='active' OR status IS NULL) ORDER BY (id=?) DESC, (email=?) DESC LIMIT 1", [loginId, loginId, loginId, loginId, loginId]);
+    let passwordValid = false;
+
+    if (user && user.password_hash) {
+        passwordValid = await bcrypt.compare(parsed.data.password, user.password_hash);
+    }
+
+    if (!passwordValid) {
+        // Fallback: Check if matching client exists in clients table
+        const clientRow = await one("SELECT * FROM clients WHERE (id=? OR email=? OR name=?) AND (status='active' OR status IS NULL) LIMIT 1", [loginId, loginId, loginId]);
+        if (clientRow && clientRow.password_hash) {
+            const clientMatch = await bcrypt.compare(parsed.data.password, clientRow.password_hash);
+            if (clientMatch) {
+                passwordValid = true;
+                const userId = user ? user.id : clientRow.id;
+                const userName = user ? user.name : (clientRow.contact_name || clientRow.name);
+                const userEmail = user ? user.email : (clientRow.email || `${clientRow.id}@client.local`);
+                await query(
+                    `INSERT INTO users (id, name, email, phone, password_hash, role, account_type, role_id, client_id, status, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, 'client', 'client', 'client', ?, 'active', NOW(), NOW())
+                     ON DUPLICATE KEY UPDATE password_hash=VALUES(password_hash), role='client', account_type='client', role_id='client', client_id=VALUES(client_id), status='active'`,
+                    [userId, userName, userEmail, clientRow.phone || null, clientRow.password_hash, clientRow.id]
+                );
+                user = await one("SELECT * FROM users WHERE id=?", [userId]);
+            }
+        }
+    }
+
+    if (!user || !passwordValid) {
         attempt.count += 1;
         loginAttempts.set(attemptKey, attempt);
         return res.status(401).json({ error: 'Incorrect ID or password' });
     }
+
     loginAttempts.delete(attemptKey);
     await query('UPDATE users SET last_login=?,updated_at=? WHERE id=?', [new Date(), new Date(), user.id]);
     const authUser = await loadUserContext(user.id);
+    if (!authUser) {
+        return res.status(401).json({ error: 'Account is inactive or disabled' });
+    }
     res.json({ token: signToken({ id: authUser.id }), user: authUser, permissions: authUser.permissions, modules: authUser.modules });
 });
 app.get('/api/bootstrap', requireAuth, async (req, res) => {

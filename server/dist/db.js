@@ -509,6 +509,20 @@ async function mapExistingUsersToRbac() {
     WHERE u.account_type != 'super_admin'
   `);
 
+  // Ensure every active client in clients has a login row in users
+  await query(`
+    INSERT INTO users (id, name, email, phone, password_hash, role, account_type, role_id, client_id, status, created_at, updated_at)
+    SELECT c.id, COALESCE(c.contact_name, c.name), c.email, c.phone, c.password_hash, 'client', 'client', 'client', c.id, 'active', NOW(), NOW()
+    FROM clients c
+    WHERE c.status='active' AND c.password_hash IS NOT NULL AND c.password_hash != ''
+    ON DUPLICATE KEY UPDATE
+      client_id = VALUES(client_id),
+      password_hash = CASE WHEN users.password_hash IS NULL OR users.password_hash='' THEN VALUES(password_hash) ELSE users.password_hash END,
+      role = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.role ELSE 'client' END,
+      account_type = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.account_type ELSE 'client' END,
+      role_id = CASE WHEN users.account_type IN ('admin', 'super_admin', 'employee') THEN users.role_id ELSE 'client' END
+  `);
+
   await query("UPDATE users SET account_type='client', role_id='client' WHERE (role='client' OR account_type='client') AND (role_id IS NULL OR role_id='' OR role_id='client') AND email NOT LIKE '%@360degrees.com'");
   await query("UPDATE users SET account_type=role WHERE account_type IS NULL");
 }
