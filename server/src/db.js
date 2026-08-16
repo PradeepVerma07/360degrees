@@ -769,6 +769,35 @@ export async function initialiseProductivitySchema() {
       ON UPDATE CASCADE ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
 
+  // Safe schema migrations for existing databases with missing productivity_jobs columns
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_jobs LIKE 'deleted_at'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_jobs ADD COLUMN deleted_at DATETIME(3) NULL AFTER created_by_user_id`);
+      await query(`ALTER TABLE productivity_jobs ADD INDEX idx_prod_jobs_deleted (deleted_at)`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] deleted_at column check/add:', err.message);
+  }
+
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_jobs LIKE 'deleted_by_user_id'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_jobs ADD COLUMN deleted_by_user_id VARCHAR(100) NULL AFTER deleted_at`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] deleted_by_user_id column check/add:', err.message);
+  }
+
+  try {
+    const cols = await query(`SHOW COLUMNS FROM productivity_jobs LIKE 'core_job_id'`);
+    if (cols.length === 0) {
+      await query(`ALTER TABLE productivity_jobs ADD COLUMN core_job_id VARCHAR(100) NULL AFTER id`);
+    }
+  } catch (err) {
+    console.warn('[DB Migration] core_job_id column check/add:', err.message);
+  }
+
   await query(`CREATE TABLE IF NOT EXISTS productivity_job_services (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     productivity_job_id BIGINT UNSIGNED NOT NULL,
@@ -1027,7 +1056,7 @@ export async function seedProductivityDefaults() {
       }
 
       const res = await query(
-        'INSERT INTO productivity_account_rosters (client_id, nature, difficulty_score, comments) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nature=VALUES(nature), difficulty_score=VALUES(difficulty_score), comments=VALUES(comments)',
+        'INSERT INTO productivity_account_rosters (client_id, nature, difficulty, comments) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nature=VALUES(nature), difficulty=VALUES(difficulty), comments=VALUES(comments)',
         [clientId, r.nature, r.difficulty, r.comments]
       );
       const rosterId = res.insertId || (await one('SELECT id FROM productivity_account_rosters WHERE client_id=?', [clientId]))?.id;
@@ -1036,12 +1065,202 @@ export async function seedProductivityDefaults() {
         await query('DELETE FROM productivity_account_roster_assignments WHERE roster_id=?', [rosterId]);
         for (const [funcKey, names] of Object.entries(r.roles)) {
           if (names && names.trim()) {
-            await query(
-              'INSERT INTO productivity_account_roster_assignments (roster_id, function_key, assignee_name) VALUES (?, ?, ?)',
-              [rosterId, funcKey, names.trim()]
-            );
+            const rawNames = names.split(',').map(s => s.trim()).filter(Boolean);
+            for (const nameItem of rawNames) {
+              let assigneeType = 'employee';
+              let targetUserId = null;
+              let externalName = null;
+
+              if (nameItem.toLowerCase() === 'external') {
+                assigneeType = 'external';
+                externalName = 'External';
+              } else if (nameItem.toLowerCase() === 'tbd') {
+                assigneeType = 'tbd';
+                externalName = 'TBD';
+              } else {
+                const userMatch = await one('SELECT id FROM users WHERE name LIKE ? LIMIT 1', [`%${nameItem}%`]);
+                if (userMatch) {
+                  targetUserId = userMatch.id;
+                  assigneeType = 'employee';
+                } else {
+                  assigneeType = 'external';
+                  externalName = nameItem;
+                }
+              }
+
+              await query(
+                `INSERT INTO productivity_account_roster_assignments (roster_id, responsibility_key, assignee_type, user_id, external_name)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [rosterId, funcKey, assigneeType, targetUserId, externalName]
+              );
+            }
           }
         }
+      }
+    }
+  }
+
+  // Seed Demo Productivity Jobs if fewer than 3 exist
+  const existingProdJobs = await query('SELECT COUNT(*) as count FROM productivity_jobs WHERE deleted_at IS NULL');
+  if (Number(existingProdJobs[0]?.count || 0) < 3) {
+    const demoJobsData = [
+      {
+        clientName: 'VNA',
+        startDate: '2026-08-02',
+        completionDate: '2026-08-14',
+        valueAmount: 85000,
+        description: 'Website Rebuild, Brand Content & Reels Campaign',
+        services: ['Website (full build)', 'Reels & Shorts'],
+        assignments: [
+          { name: 'John', percent: 50, hours: 28 },
+          { name: 'Ajay', percent: 25, hours: 14 },
+          { name: 'Mansi', percent: 25, hours: 8 }
+        ]
+      },
+      {
+        clientName: 'Vardan',
+        startDate: '2026-08-04',
+        completionDate: '2026-08-15',
+        valueAmount: 45000,
+        description: 'Website Optimization & Maintenance Sprint',
+        services: ['Website (full build)', 'Connector Apps / Small Web Additions'],
+        assignments: [
+          { name: 'John', percent: 60, hours: 20 },
+          { name: 'Urna', percent: 40, hours: 10 }
+        ]
+      },
+      {
+        clientName: 'Shatayu',
+        startDate: '2026-08-05',
+        completionDate: null,
+        valueAmount: 35000,
+        description: 'Monthly Social Media Optimization & Design Creatives',
+        services: ['Social Media Optimisation', 'Design — Brochures / Emailers'],
+        assignments: [
+          { name: 'Chitra', percent: 60, hours: 18 },
+          { name: 'Mary', percent: 40, hours: 12 }
+        ]
+      },
+      {
+        clientName: 'PIV',
+        startDate: '2026-08-06',
+        completionDate: null,
+        valueAmount: 120000,
+        description: 'High-Pressure Event Strategy, Video Shoots & Multi-Asset Content',
+        services: ['Strategy & Presentations', 'Films & Edits', 'AI-enabled Animation / Motion Graphics'],
+        assignments: [
+          { name: 'Pramit', percent: 40, hours: 22 },
+          { name: 'Ajay', percent: 30, hours: 18 },
+          { name: 'Aarya', percent: 30, hours: 16 }
+        ]
+      },
+      {
+        clientName: 'Shree Sawa',
+        startDate: '2026-08-08',
+        completionDate: null,
+        valueAmount: 60000,
+        description: '3-Week Website Launch Deliverable & Creatives',
+        services: ['Website (full build)', 'Design — Brochures / Emailers'],
+        assignments: [
+          { name: 'John', percent: 65, hours: 26 },
+          { name: 'Aadya', percent: 35, hours: 14 }
+        ]
+      },
+      {
+        clientName: 'Station Satcom',
+        startDate: '2026-08-10',
+        completionDate: null,
+        valueAmount: 95000,
+        description: 'New Website Platform & E-Retail Strategy',
+        services: ['Website (full build)', 'Strategy & Presentations'],
+        assignments: [
+          { name: 'John', percent: 50, hours: 24 },
+          { name: 'Mansi', percent: 30, hours: 12 },
+          { name: 'Manan', percent: 20, hours: 8 }
+        ]
+      },
+      {
+        clientName: 'Gaudiya',
+        startDate: '2026-08-11',
+        completionDate: null,
+        valueAmount: 110000,
+        description: '3 Multilingual Web Portals (Bengali & English)',
+        services: ['Website (full build)', 'Films & Edits'],
+        assignments: [
+          { name: 'John', percent: 50, hours: 32 },
+          { name: 'Urna', percent: 25, hours: 12 },
+          { name: 'Ajay', percent: 25, hours: 12 }
+        ]
+      },
+      {
+        clientName: 'Media Buzz',
+        startDate: '2026-08-12',
+        completionDate: '2026-08-16',
+        valueAmount: 30000,
+        description: 'Sister Company SMO & Reel Campaigns',
+        services: ['Social Media Optimisation', 'Reels & Shorts'],
+        assignments: [
+          { name: 'Chitra', percent: 50, hours: 14 },
+          { name: 'Mary', percent: 50, hours: 14 }
+        ]
+      }
+    ];
+
+    for (const d of demoJobsData) {
+      let client = await one('SELECT id FROM clients WHERE name=?', [d.clientName]);
+      if (!client) {
+        const cId = d.clientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'c_demo';
+        await query('INSERT INTO clients (id, name, status, created_at, updated_at) VALUES (?, ?, "active", NOW(), NOW())', [cId, d.clientName]);
+        client = { id: cId };
+      }
+
+      const res = await query(
+        `INSERT INTO productivity_jobs (client_id, start_date, completion_date, value_amount, description, created_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [client.id, d.startDate, d.completionDate, d.valueAmount, d.description, ownerId]
+      );
+      const prodJobId = res.insertId;
+
+      for (const sName of d.services) {
+        const sRow = await one('SELECT id FROM productivity_services WHERE name=?', [sName]);
+        if (sRow) {
+          await query('INSERT IGNORE INTO productivity_job_services (productivity_job_id, service_id) VALUES (?, ?)', [prodJobId, sRow.id]);
+        }
+      }
+
+      for (const asgn of d.assignments) {
+        const uRow = await one('SELECT id FROM users WHERE name LIKE ? LIMIT 1', [`%${asgn.name}%`]);
+        if (uRow) {
+          await query(
+            `INSERT INTO productivity_job_assignments (productivity_job_id, user_id, revenue_percent, hours_spent)
+             VALUES (?, ?, ?, ?)`,
+            [prodJobId, uRow.id, asgn.percent, asgn.hours]
+          );
+        }
+      }
+    }
+  }
+
+  // Seed Demo Throughput Targets if none exist
+  const existingTargets = await query('SELECT COUNT(*) as count FROM productivity_targets');
+  if (Number(existingTargets[0]?.count || 0) === 0) {
+    const demoTargets = [
+      { userName: 'Mary', serviceName: 'AI-enabled Animation / Motion Graphics', quantity: 5, unit: 'count', period: 'day' },
+      { userName: 'Arushi', serviceName: 'Social Media Optimisation', quantity: 10, unit: 'count', period: 'week' },
+      { userName: 'John', serviceName: 'Website (full build)', quantity: 1, unit: 'count', period: 'month' },
+      { userName: 'Ajay', serviceName: 'Films & Edits', quantity: 4, unit: 'count', period: 'week' },
+      { userName: 'Chitra', serviceName: 'Social Media Optimisation', quantity: 8, unit: 'count', period: 'week' }
+    ];
+
+    for (const dt of demoTargets) {
+      const uRow = await one('SELECT id FROM users WHERE name LIKE ? LIMIT 1', [`%${dt.userName}%`]);
+      const sRow = await one('SELECT id FROM productivity_services WHERE name=?', [dt.serviceName]);
+      if (uRow && sRow) {
+        await query(
+          `INSERT INTO productivity_targets (user_id, service_id, quantity, unit, period, is_active, created_by_user_id)
+           VALUES (?, ?, ?, ?, ?, 1, ?)`,
+          [uRow.id, sRow.id, dt.quantity, dt.unit, dt.period, ownerId]
+        );
       }
     }
   }
