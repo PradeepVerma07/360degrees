@@ -16,4 +16,6 @@ if (!fs.existsSync(path.join(clientDist, 'index.html'))) {
   throw new Error('Client build not found. Run the root build command so the client builds first.');
 }
 fs.cpSync(clientDist, path.join(distDir, 'public'), { recursive: true });
-console.log('Server build created at server/dist');
+fs.cpSync(clientDist, path.join(serverRoot, 'public'), { recursive: true });
+fs.cpSync(clientDist, path.join(srcDir, 'public'), { recursive: true });
+console.log('Server build created at server/dist and static assets deployed');

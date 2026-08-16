@@ -1635,14 +1635,52 @@ app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (
 app.use('/api/productivity', requireAuth, createProductivityRouter(io));
 const publicDir = [
     path.resolve(__dirname, 'public'),
-    path.resolve(process.cwd(), 'client/dist')
-].find(candidate => fs.existsSync(path.join(candidate, 'index.html')));
+    path.resolve(__dirname, '../public'),
+    path.resolve(__dirname, '../dist/public'),
+    path.resolve(__dirname, '../../client/dist'),
+    path.resolve(__dirname, '../client/dist'),
+    path.resolve(process.cwd(), 'client/dist'),
+    path.resolve(process.cwd(), 'server/dist/public'),
+    path.resolve(process.cwd(), 'dist/public'),
+    path.resolve(process.cwd(), 'public')
+].find(candidate => candidate && fs.existsSync(path.join(candidate, 'index.html')));
+
 if (publicDir) {
+    console.log(`[CI360] Serving frontend static build from: ${publicDir}`);
     app.use(express.static(publicDir));
-    app.use((req, res, next) => {
-        if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
+    app.get('*', (req, res, next) => {
+        if (req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
             return next();
         res.sendFile(path.join(publicDir, 'index.html'));
+    });
+} else {
+    console.warn('[CI360] Warning: No frontend build directory with index.html found. Checked candidates around:', process.cwd());
+    app.get('*', (req, res, next) => {
+        if (req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
+            return next();
+        res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CI360degrees — Realtime Job Board</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #071F5C; color: #FFFFFF; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+    .card { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 36px 32px; max-width: 480px; backdrop-filter: blur(10px); }
+    h1 { margin: 0 0 8px; font-size: 24px; }
+    .brand-gold { color: #F2A900; }
+    p { color: #E9EDEF; font-size: 14px; line-height: 1.5; margin: 12px 0 20px; }
+    .btn { display: inline-block; background: #F2A900; color: #071F5C; font-weight: 700; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>CI360<span class="brand-gold">degrees</span></h1>
+    <p>API Server is running successfully. The frontend client bundle is building or deploying. If this screen persists, run <code>npm run build</code>.</p>
+    <a href="/api/health" class="btn">Check System Health</a>
+  </div>
+</body>
+</html>`);
     });
 }
 io.on('connection', socket => {
