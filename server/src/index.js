@@ -1908,6 +1908,9 @@ app.get('/api/audit-logs', requireAuth, requirePermission('audit.view'), async (
 });
 
 app.use('/api/productivity', requireAuth, createProductivityRouter(io));
+app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+});
 const publicDir = [
     path.resolve(__dirname, 'public'),
     path.resolve(__dirname, '../public'),
