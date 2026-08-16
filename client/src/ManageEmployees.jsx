@@ -38,11 +38,14 @@ export default function ManageEmployees({ data, reload, setTab }) {
   const [showModal, setShowModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
 
-  const canManage = (data.permissions || []).includes('employees.create') ||
+  const currentUser = data?.user || {};
+  const isSuperOrAdmin = currentUser.role === 'admin' || currentUser.accountType === 'admin' ||
+                        currentUser.accountType === 'super_admin' || currentUser.role === 'super_admin';
+  const canManage = isSuperOrAdmin ||
+                    (data.permissions || []).includes('employees.create') ||
                     (data.permissions || []).includes('employees.edit') ||
                     (data.permissions || []).includes('users.create') ||
-                    (data.permissions || []).includes('users.edit') ||
-                    ['super_admin', 'admin'].includes(data.user?.accountType || data.user?.role);
+                    (data.permissions || []).includes('users.edit');
 
   const loadData = useCallback(async () => {
     try {
@@ -254,6 +257,19 @@ export default function ManageEmployees({ data, reload, setTab }) {
           <div className="empty-state-box">
             <p className="empty-state-title">No employees matched your filters</p>
             <p className="empty-state-desc">Try clearing the search query or adjusting the department and status filters.</p>
+            {canManage && (
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ marginTop: '12px' }}
+                onClick={() => {
+                  setEditingEmployee(null);
+                  setShowModal(true);
+                }}
+              >
+                + Add First Employee
+              </button>
+            )}
           </div>
         </div>
       ) : viewMode === 'cards' ? (
@@ -369,9 +385,21 @@ export default function ManageEmployees({ data, reload, setTab }) {
                   fontSize: '12px',
                   color: 'var(--ci-text-secondary)'
                 }}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }}>
-                    ✉️ {emp.email || 'No email set'}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden' }}>
+                    {emp.email && (
+                      <a href={`mailto:${emp.email}`} style={{ textDecoration: 'none', color: 'var(--ci-navy)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>
+                        ✉️ {emp.email}
+                      </a>
+                    )}
+                    {emp.phone && (
+                      <a href={`tel:${emp.phone}`} style={{ textDecoration: 'none', color: 'var(--ci-text-secondary)', fontSize: '11.5px' }}>
+                        📞 {emp.phone}
+                      </a>
+                    )}
+                    {!emp.email && !emp.phone && (
+                      <span>ID: @{emp.id}</span>
+                    )}
+                  </div>
 
                   {canManage && (
                     <button
@@ -420,7 +448,7 @@ export default function ManageEmployees({ data, reload, setTab }) {
                           </div>
                           <div>
                             <strong style={{ display: 'block', color: 'var(--ci-text)' }}>{emp.name}</strong>
-                            <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>{emp.email}</span>
+                            <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>{emp.email || `@${emp.id}`}</span>
                           </div>
                         </div>
                       </td>
@@ -528,12 +556,17 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
       setError('Employee name is required');
       return;
     }
-    if (!isEditing && !id.trim()) {
+    const resolvedId = (id.trim() || name.trim().toLowerCase().replace(/[^a-z0-9._-]/g, ''));
+    if (!isEditing && !resolvedId) {
       setError('User ID / Login ID is required');
       return;
     }
     if (!isEditing && !password.trim()) {
       setError('A password of at least 8 characters is required');
+      return;
+    }
+    if (!isEditing && password.trim().length < 8) {
+      setError('Password must be at least 8 characters long');
       return;
     }
 
@@ -544,9 +577,9 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
       if (isEditing) {
         // 1. Update user record
         await api.updateUser(employee.id, {
-          name,
-          email: email || undefined,
-          phone: phone || undefined,
+          name: name.trim(),
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
           roleId: roleId || undefined,
           departmentId: departmentId ? Number(departmentId) : null,
           designationId: designationId ? Number(designationId) : null,
@@ -556,19 +589,19 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
         // 2. Update employee productivity settings (capacity & duties)
         await api.updateProductivitySetting(employee.id, {
           weeklyCapacityHours: Number(weeklyCapacityHours) || 48,
-          customDuties,
+          customDuties: customDuties.trim(),
           productivityStatus
         });
 
         onSaved(`Employee ${name} updated successfully`);
       } else {
         // Create new user
-        const newUserId = id.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
+        const newUserId = resolvedId.toLowerCase();
         await api.createUser({
           id: newUserId,
-          name,
-          email: email || undefined,
-          phone: phone || undefined,
+          name: name.trim(),
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
           password,
           accountType: roleId === 'admin' ? 'admin' : 'employee',
           roleId: roleId || 'employee',
@@ -579,7 +612,7 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
         // Set employee productivity settings
         await api.updateProductivitySetting(newUserId, {
           weeklyCapacityHours: Number(weeklyCapacityHours) || 48,
-          customDuties,
+          customDuties: customDuties.trim(),
           productivityStatus
         });
 
@@ -612,7 +645,12 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
                 className="form-control"
                 placeholder="e.g. Urna, Mansi, John"
                 value={name}
-                onChange={e => setName(e.target.value)}
+                onChange={e => {
+                  setName(e.target.value);
+                  if (!isEditing && !id) {
+                    setId(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''));
+                  }
+                }}
                 required
               />
             </div>
@@ -749,7 +787,7 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
 
           {/* Password (Optional on edit) */}
           <div className="form-group">
-            <label className="form-label">{isEditing ? 'Change Password (leave blank to keep current)' : 'Password *'}</label>
+            <label className="form-label">{isEditing ? 'Change Password (leave blank to keep current)' : 'Password * (min 8 characters)'}</label>
             <input
               type="password"
               className="form-control"

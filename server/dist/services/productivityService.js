@@ -1384,12 +1384,16 @@ export class ProductivityService {
   }
 
   static async updateEmployeeSetting({ userContext, userId, payload }) {
-    const { weeklyCapacityHours = 40.00, productivityStatus = 'active' } = payload;
+    const { weeklyCapacityHours = 48.00, productivityStatus = 'active', customDuties = null } = payload;
     await query(
-      `INSERT INTO productivity_employee_settings (user_id, weekly_capacity_hours, productivity_status)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE weekly_capacity_hours=VALUES(weekly_capacity_hours), productivity_status=VALUES(productivity_status), updated_at=NOW(3)`,
-      [userId, weeklyCapacityHours, productivityStatus]
+      `INSERT INTO productivity_employee_settings (user_id, weekly_capacity_hours, productivity_status, custom_duties)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         weekly_capacity_hours=VALUES(weekly_capacity_hours),
+         productivity_status=VALUES(productivity_status),
+         custom_duties=COALESCE(VALUES(custom_duties), custom_duties),
+         updated_at=NOW(3)`,
+      [userId, weeklyCapacityHours, productivityStatus, customDuties]
     );
     await audit(userContext.id, 'productivity_employee_setting_updated', 'productivity_employee_settings', userId, payload);
     return { success: true };

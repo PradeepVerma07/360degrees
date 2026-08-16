@@ -294,7 +294,7 @@ export function createProductivityRouter(io) {
     }
   });
 
-  router.put('/settings/:userId', requirePermission('productivity.settings.manage'), async (req, res) => {
+  router.put('/settings/:userId', requirePermission('productivity.settings.manage', 'employees.edit', 'employees.create', 'users.edit', 'users.create'), async (req, res) => {
     try {
       const result = await ProductivityService.updateEmployeeSetting({
         userContext: req.user,
