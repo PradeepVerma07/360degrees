@@ -352,6 +352,7 @@ app.use('/api', (_req, res, next) => {
     if (databaseReady)
         return next();
     const health = databaseHealthDetails();
+    res.setHeader('Retry-After', '2');
     res.status(503).json({
         error: databaseInitError ? `Database connecting: ${databaseInitError.message || databaseInitError.code}` : 'Database is initializing...',
         code: databaseInitError?.code || 'DB_STARTING',
