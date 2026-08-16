@@ -1018,7 +1018,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
       <div className="overview-left-col">
         {/* AWAITING ACCEPTANCE BANNER FOR EMPLOYEE */}
         {awaitingAcceptanceJobs.length > 0 && (
-          <section className="saas-card" style={{ borderLeft: '4px solid var(--ci-gold)', background: 'rgba(242, 169, 0, 0.05)', marginBottom: '16px', padding: '16px 20px' }}>
+          <section className="saas-card card-awaiting-acceptance" style={{ borderLeft: '4px solid var(--ci-gold)', background: 'rgba(242, 169, 0, 0.05)', marginBottom: '16px', padding: '16px 20px' }}>
             <div className="card-header" style={{ paddingBottom: '8px' }}>
               <div className="card-title-group">
                 <DashboardIcon name="clock" />
@@ -1068,7 +1068,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
         )}
 
         {/* CARD 1: CURRENT WORKLOAD */}
-        <section className="saas-card">
+        <section className="saas-card card-workload-table">
           <div className="card-header">
             <div className="card-title-group">
               <DashboardIcon name="bar-chart" />
@@ -1127,7 +1127,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
         </section>
 
         {/* CARD 2: RECENTLY UPDATED JOBS */}
-        <section className="saas-card">
+        <section className="saas-card card-recent-jobs">
           <div className="card-header">
             <div className="card-title-group">
               <h2 className="card-title">Recently Updated Jobs</h2>
@@ -1194,7 +1194,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
       {/* RIGHT RAIL INFORMATION COLUMN */}
       <div className="overview-right-col">
         {/* PANEL 1: JOB OVERVIEW 2x2 METRICS */}
-        <section className="saas-card">
+        <section className="saas-card card-job-overview">
           <div className="card-header">
             <h2 className="card-title">Job Overview</h2>
             <span className="card-badge-pill">
@@ -1255,7 +1255,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
         </section>
 
         {/* PANEL 2: WORKLOAD OVERVIEW */}
-        <section className="saas-card">
+        <section className="saas-card card-workload-bars">
           <div className="card-header">
             <h2 className="card-title">Workload Overview</h2>
             <span className="card-badge-pill">
@@ -1306,7 +1306,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
         </section>
 
         {/* PANEL 3: SUMMARY SPLIT CARDS */}
-        <div className="summary-split-grid">
+        <div className="summary-split-grid card-summary-split">
           {/* Support Tickets Summary */}
           <div className="summary-compact-card">
             <div>
@@ -1393,7 +1393,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
         </div>
 
         {/* PANEL 4: QUICK ACTIONS */}
-        <section className="saas-card">
+        <section className="saas-card card-quick-actions">
           <div className="card-header" style={{ marginBottom: '14px' }}>
             <div className="card-title-group" style={{ color: 'var(--ci-gold)' }}>
               <DashboardIcon name="zap" />
