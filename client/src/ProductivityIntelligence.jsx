@@ -431,7 +431,7 @@ function ProductivityDashboardTab({ data, onNavigateTab }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* TOP 4 KPI CARDS */}
-      <div className="metrics-2x2-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      <div className="metrics-2x2-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
         {/* KPI 1: Revenue Tracked */}
         <div className="metric-box">
           <span className="metric-title">Revenue Tracked</span>
@@ -1476,16 +1476,37 @@ function ProductivityLogJobTab({ clients, services, employees, onJobLogged }) {
 // TAB 7: DAILY LOG
 // ==========================================================================
 function ProductivityDailyLogTab({ log }) {
+  const totalPeriodHours = useMemo(() => {
+    return (log || []).reduce((sum, item) => sum + Number(item.totalHours || 0), 0).toFixed(1);
+  }, [log]);
+  const totalPeriodJobs = useMemo(() => {
+    return (log || []).reduce((sum, item) => sum + Number(item.jobsCount || 0), 0);
+  }, [log]);
+
   return (
     <div className="saas-card">
-      <div className="card-header">
-        <h2 className="card-title">Daily Effort Log</h2>
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h2 className="card-title">Daily Effort Log</h2>
+          <p className="card-subtitle">Day-by-day effort tracking and team member allocations</p>
+        </div>
+        {log && log.length > 0 && (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span className="badge badge-category" style={{ padding: '6px 12px', fontSize: '13px' }}>
+              Total Effort: {totalPeriodHours} hrs
+            </span>
+            <span className="badge badge-subtle" style={{ padding: '6px 12px', fontSize: '13px' }}>
+              Deliverables: {totalPeriodJobs}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="data-table-container">
-        {log.length === 0 ? (
+        {!log || log.length === 0 ? (
           <div className="empty-state-box">
             <p className="empty-state-title">No daily logs recorded in this period</p>
+            <p className="empty-state-desc">Select a different period above (such as "All Time" or "This Month") or log a deliverable.</p>
           </div>
         ) : (
           <table className="data-table">
@@ -1501,7 +1522,9 @@ function ProductivityDailyLogTab({ log }) {
               {log.map(item => (
                 <tr key={item.date}>
                   <td style={{ fontWeight: 600 }}>{item.date}</td>
-                  <td>{item.jobsCount} deliverables</td>
+                  <td>
+                    <span className="badge badge-subtle">{item.jobsCount} deliverables</span>
+                  </td>
                   <td style={{ fontWeight: 700, color: 'var(--ci-navy)' }}>{item.totalHours} hrs</td>
                   <td>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -1649,7 +1672,7 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
   const [search, setSearch] = useState('');
 
   const filteredJobs = useMemo(() => {
-    return jobs.filter(j => {
+    return (jobs || []).filter(j => {
       if (filterStatus === 'completed' && j.status !== 'Completed') return false;
       if (filterStatus === 'in_progress' && j.status !== 'In Progress') return false;
       if (search.trim()) {
@@ -1662,27 +1685,48 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
     });
   }, [jobs, filterStatus, search]);
 
+  const totalValue = useMemo(() => {
+    return filteredJobs.reduce((sum, j) => sum + Number(j.valueAmount || 0), 0);
+  }, [filteredJobs]);
+
+  const totalHours = useMemo(() => {
+    return filteredJobs.reduce((sum, j) => sum + Number(j.totalHours || 0), 0).toFixed(1);
+  }, [filteredJobs]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="filter-toolbar">
-        <div className="filter-search-box">
-          <input
-            type="text"
-            placeholder="Search deliverables by client or description..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+      <div className="filter-toolbar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '10px', flex: 1, minWidth: '260px' }}>
+          <div className="filter-search-box" style={{ flex: 1 }}>
+            <input
+              type="text"
+              placeholder="Search deliverables by client or description..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+
+          <select
+            className="filter-select"
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+          >
+            <option value="all">All Deliverables ({jobs?.length || 0})</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+          </select>
         </div>
 
-        <select
-          className="filter-select"
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-        >
-          <option value="all">All Deliverables</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-        </select>
+        {filteredJobs.length > 0 && (
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <span className="badge badge-category" style={{ padding: '6px 12px', fontSize: '13px' }}>
+              Value: ₹{totalValue.toLocaleString('en-IN')}
+            </span>
+            <span className="badge badge-subtle" style={{ padding: '6px 12px', fontSize: '13px' }}>
+              Total Hours: {totalHours}h
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="saas-card">
@@ -1690,6 +1734,7 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
           {filteredJobs.length === 0 ? (
             <div className="empty-state-box">
               <p className="empty-state-title">No deliverables found</p>
+              <p className="empty-state-desc">Try changing the search query, status filter, or period picker above.</p>
             </div>
           ) : (
             <table className="data-table">
@@ -1716,7 +1761,13 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
                         {j.status}
                       </span>
                     </td>
-                    <td style={{ fontWeight: 600 }}>{j.tatDays}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {j.tatDays != null ? (
+                        <span className="badge badge-subtle">{j.tatDays} days</span>
+                      ) : (
+                        <span style={{ color: 'var(--ci-text-secondary)', fontSize: '12px' }}>Active</span>
+                      )}
+                    </td>
                     <td style={{ fontWeight: 600 }}>{j.clientName}</td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
@@ -1731,10 +1782,11 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
                       {j.description || '—'}
                     </td>
                     <td>
-                      <div style={{ fontSize: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                         {j.assignments.map(a => (
-                          <div key={a.id}>
-                            {a.user_name || a.external_name}: {a.revenue_percent}% ({a.hours_spent}h)
+                          <div key={a.id} style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <strong>{a.user_name || a.external_name}</strong>
+                            <span style={{ color: 'var(--ci-text-secondary)', fontSize: '11px' }}>({a.revenue_percent}%, {a.hours_spent}h)</span>
                           </div>
                         ))}
                       </div>
@@ -1742,7 +1794,7 @@ function ProductivityJobsTab({ jobs, canEdit, canDelete, onEditJob, onDeleteJob 
                     <td style={{ fontWeight: 600, color: 'var(--ci-navy)' }}>
                       ₹{Number(j.valueAmount).toLocaleString('en-IN')}
                     </td>
-                    <td>{j.totalHours} hrs</td>
+                    <td style={{ fontWeight: 600 }}>{j.totalHours} hrs</td>
                     {(canEdit || canDelete) && (
                       <td>
                         <div style={{ display: 'flex', gap: '6px' }}>
