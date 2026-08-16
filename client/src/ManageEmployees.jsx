@@ -561,12 +561,8 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
       setError('User ID / Login ID is required');
       return;
     }
-    if (!isEditing && !password.trim()) {
+    if (!isEditing && (!password.trim() || password.trim().length < 8)) {
       setError('A password of at least 8 characters is required');
-      return;
-    }
-    if (!isEditing && password.trim().length < 8) {
-      setError('Password must be at least 8 characters long');
       return;
     }
 
@@ -626,179 +622,181 @@ function EmployeeModal({ employee, departments, designations, roles, onClose, on
   };
 
   return (
-    <div className="modal-backdrop">
-      <div className="modal-content" style={{ maxWidth: '640px' }}>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-dialog" style={{ maxWidth: '640px' }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3 className="modal-title">{isEditing ? `Edit Employee: ${employee.name}` : 'Add New Employee'}</h3>
           <button type="button" className="modal-close-btn" onClick={onClose}>✕</button>
         </div>
 
-        {error && <div className="alert-banner error" style={{ margin: '12px 20px 0' }}>{error}</div>}
+        {error && <div className="alert-banner error" style={{ margin: '16px 24px 0' }}>{error}</div>}
 
-        <form onSubmit={handleSave} className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '14px' }}>
-            {/* Full Name */}
+        <form onSubmit={handleSave}>
+          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              {/* Full Name */}
+              <div className="form-group">
+                <label className="form-label">Full Name *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. Urna, Mansi, John"
+                  value={name}
+                  onChange={e => {
+                    setName(e.target.value);
+                    if (!isEditing && !id) {
+                      setId(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''));
+                    }
+                  }}
+                  required
+                />
+              </div>
+
+              {/* Login / User ID */}
+              <div className="form-group">
+                <label className="form-label">User ID / Username *</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. urna, mansi"
+                  value={id}
+                  onChange={e => setId(e.target.value)}
+                  disabled={isEditing}
+                  required
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              {/* Email */}
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-control"
+                  placeholder="e.g. urna@360degrees.com"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                />
+              </div>
+
+              {/* Phone */}
+              <div className="form-group">
+                <label className="form-label">Phone Number</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="e.g. +91 98765 43210"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              {/* Department */}
+              <div className="form-group">
+                <label className="form-label">Department</label>
+                <select
+                  className="form-select"
+                  value={departmentId}
+                  onChange={e => setDepartmentId(e.target.value)}
+                >
+                  <option value="">Select Department</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Designation */}
+              <div className="form-group">
+                <label className="form-label">Designation / Role Title</label>
+                <select
+                  className="form-select"
+                  value={designationId}
+                  onChange={e => setDesignationId(e.target.value)}
+                >
+                  <option value="">Select Designation</option>
+                  {designations.map(ds => (
+                    <option key={ds.id} value={ds.id}>{ds.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
+              {/* Status */}
+              <div className="form-group">
+                <label className="form-label">Productivity Status</label>
+                <select
+                  className="form-select"
+                  value={productivityStatus}
+                  onChange={e => setProductivityStatus(e.target.value)}
+                >
+                  <option value="active">Active</option>
+                  <option value="intern">Intern</option>
+                  <option value="vendor">Vendor / External</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+
+              {/* Weekly Capacity Hours */}
+              <div className="form-group">
+                <label className="form-label">Weekly Capacity (Hours)</label>
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  max="100"
+                  className="form-control"
+                  value={weeklyCapacityHours}
+                  onChange={e => setWeeklyCapacityHours(e.target.value)}
+                />
+              </div>
+
+              {/* RBAC Role */}
+              <div className="form-group">
+                <label className="form-label">Access Role</label>
+                <select
+                  className="form-select"
+                  value={roleId}
+                  onChange={e => setRoleId(e.target.value)}
+                >
+                  {roles.filter(r => r.role_type !== 'client').map(r => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Custom Duties & Responsibilities */}
             <div className="form-group">
-              <label className="form-label">Full Name *</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g. Urna, Mansi, John"
-                value={name}
-                onChange={e => {
-                  setName(e.target.value);
-                  if (!isEditing && !id) {
-                    setId(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''));
-                  }
-                }}
-                required
+              <label className="form-label">Duties & Functional Responsibilities</label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                placeholder="e.g. Operations lead, client communications, quality control, campaign delivery..."
+                value={customDuties}
+                onChange={e => setCustomDuties(e.target.value)}
               />
             </div>
 
-            {/* Login / User ID */}
+            {/* Password (Optional on edit) */}
             <div className="form-group">
-              <label className="form-label">User ID / Username *</label>
+              <label className="form-label">{isEditing ? 'Change Password (leave blank to keep current)' : 'Password * (min 8 characters)'}</label>
               <input
-                type="text"
+                type="password"
                 className="form-control"
-                placeholder="e.g. urna, mansi"
-                value={id}
-                onChange={e => setId(e.target.value)}
-                disabled={isEditing}
-                required
+                placeholder={isEditing ? 'Enter new password if updating' : 'Min 8 characters'}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required={!isEditing}
               />
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '14px' }}>
-            {/* Email */}
-            <div className="form-group">
-              <label className="form-label">Email Address</label>
-              <input
-                type="email"
-                className="form-control"
-                placeholder="e.g. urna@360degrees.com"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-
-            {/* Phone */}
-            <div className="form-group">
-              <label className="form-label">Phone Number</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="e.g. +91 98765 43210"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '14px' }}>
-            {/* Department */}
-            <div className="form-group">
-              <label className="form-label">Department</label>
-              <select
-                className="form-control"
-                value={departmentId}
-                onChange={e => setDepartmentId(e.target.value)}
-              >
-                <option value="">Select Department</option>
-                {departments.map(d => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Designation */}
-            <div className="form-group">
-              <label className="form-label">Designation / Role Title</label>
-              <select
-                className="form-control"
-                value={designationId}
-                onChange={e => setDesignationId(e.target.value)}
-              >
-                <option value="">Select Designation</option>
-                {designations.map(ds => (
-                  <option key={ds.id} value={ds.id}>{ds.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px' }}>
-            {/* Status */}
-            <div className="form-group">
-              <label className="form-label">Productivity Status</label>
-              <select
-                className="form-control"
-                value={productivityStatus}
-                onChange={e => setProductivityStatus(e.target.value)}
-              >
-                <option value="active">Active</option>
-                <option value="intern">Intern</option>
-                <option value="vendor">Vendor / External</option>
-                <option value="inactive">Inactive</option>
-              </select>
-            </div>
-
-            {/* Weekly Capacity Hours */}
-            <div className="form-group">
-              <label className="form-label">Weekly Capacity (Hours)</label>
-              <input
-                type="number"
-                step="0.5"
-                min="0"
-                max="100"
-                className="form-control"
-                value={weeklyCapacityHours}
-                onChange={e => setWeeklyCapacityHours(e.target.value)}
-              />
-            </div>
-
-            {/* RBAC Role */}
-            <div className="form-group">
-              <label className="form-label">Access Role</label>
-              <select
-                className="form-control"
-                value={roleId}
-                onChange={e => setRoleId(e.target.value)}
-              >
-                {roles.filter(r => r.role_type !== 'client').map(r => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Custom Duties & Responsibilities */}
-          <div className="form-group">
-            <label className="form-label">Duties & Functional Responsibilities</label>
-            <textarea
-              className="form-control"
-              rows={3}
-              placeholder="e.g. Founder, Strategy, BD, Content Management, Quality Control, Website Support..."
-              value={customDuties}
-              onChange={e => setCustomDuties(e.target.value)}
-            />
-          </div>
-
-          {/* Password (Optional on edit) */}
-          <div className="form-group">
-            <label className="form-label">{isEditing ? 'Change Password (leave blank to keep current)' : 'Password * (min 8 characters)'}</label>
-            <input
-              type="password"
-              className="form-control"
-              placeholder={isEditing ? 'Enter new password if updating' : 'Min 8 characters'}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required={!isEditing}
-            />
-          </div>
-
-          <div className="modal-footer" style={{ padding: 0, marginTop: '8px' }}>
+          <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>
               Cancel
             </button>
