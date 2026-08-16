@@ -17,14 +17,16 @@ export const pool = mysql.createPool({
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'ci360_realtime',
   waitForConnections: true,
-  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 10),
+  connectionLimit: Number(process.env.DB_CONNECTION_LIMIT || 25),
   queueLimit: 0,
   connectTimeout: 10000,
+  maxIdle: 10,
+  idleTimeout: 30000,
   charset: 'utf8mb4',
   timezone: 'Z',
   dateStrings: true,
   enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+  keepAliveInitialDelay: 10000
 });
 
 export const defaultSettings = {
@@ -45,9 +47,22 @@ export const defaultSettings = {
   workDays: [1, 2, 3, 4, 5]
 };
 
+const QUERY_TIMEOUT_MS = 15000;
+
 export async function query(sql, params = [], connection = pool) {
-  const [rows] = await connection.execute(sql, params);
-  return rows;
+  let timer;
+  try {
+    const queryPromise = connection.execute(sql, params);
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Database query exceeded timeout (${QUERY_TIMEOUT_MS}ms)`));
+      }, QUERY_TIMEOUT_MS);
+    });
+    const [rows] = await Promise.race([queryPromise, timeoutPromise]);
+    return rows;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function one(sql, params = [], connection = pool) {
