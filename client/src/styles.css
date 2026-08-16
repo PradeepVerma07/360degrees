@@ -2129,6 +2129,44 @@ a {
     font-size: 12px !important;
   }
 
+  /* Workload Bars Mobile Adaptations */
+  .workload-bar-row {
+    gap: 8px !important;
+  }
+
+  .workload-bar-label {
+    width: 105px !important;
+    min-width: 105px !important;
+    font-size: 12px !important;
+  }
+
+  /* Quick Actions Grid Mobile */
+  .quick-actions-list {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .quick-action-pill-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    padding: 10px 8px !important;
+    font-size: 12px !important;
+  }
+
+  /* Filter Toolbar Stack */
+  .filter-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    width: 100% !important;
+  }
+
+  .filter-search-box, .filter-select {
+    width: 100% !important;
+    min-width: 100% !important;
+  }
+
   .data-table-container {
     margin: 0 -6px !important;
     border-radius: 6px !important;
@@ -2197,6 +2235,10 @@ a {
 
 @media (max-width: 480px) {
   .stats-grid, .saas-stats-grid, .overview-kpi-grid, .kpi-row {
+    grid-template-columns: 1fr !important;
+  }
+
+  .quick-actions-list {
     grid-template-columns: 1fr !important;
   }
 
