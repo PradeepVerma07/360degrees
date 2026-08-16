@@ -26,7 +26,8 @@ import { hasPermission, hasAnyPermission, isSuperAdmin, loadUserContext, require
 import { calculateHours } from './tat.js';
 import { createProductivityRouter } from './routes/productivity.js';
 const app = express();
-const httpServer = createServer(app);
+httpServer.keepAliveTimeout = 65000;
+httpServer.headersTimeout = 66000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const origin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 const io = new Server(httpServer, {
@@ -36,6 +37,8 @@ const io = new Server(httpServer, {
         credentials: true
     },
     transports: ['polling', 'websocket'],
+    pingTimeout: 60000,
+    pingInterval: 25000,
     allowEIO3: true
 });
 let databaseReady = false;
@@ -94,14 +97,6 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json({ limit: '20mb' }));
-app.use((req, res, next) => {
-    req.setTimeout(120000, () => {
-        if (!res.headersSent) {
-            res.status(504).json({ error: 'Request gateway timeout' });
-        }
-    });
-    next();
-});
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
 const loginAttempts = new Map();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
