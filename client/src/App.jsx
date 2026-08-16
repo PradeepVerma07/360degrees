@@ -5,6 +5,7 @@ import { addWorkingHours } from './tat';
 import SupportTickets from './SupportTickets';
 import TeamChat from './TeamChat';
 import ProductivityIntelligence from './ProductivityIntelligence';
+import ManageUsersAndRoles from './ManageUsersAndRoles';
 import './styles.css';
 
 const statusLabels = {
@@ -187,6 +188,13 @@ function DashboardIcon({ name }) {
         <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
           <polyline points="17 6 23 6 23 12" />
+        </svg>
+      );
+    case 'shield':
+    case 'roles':
+      return (
+        <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         </svg>
       );
     case 'bell':
@@ -394,10 +402,11 @@ export default function App() {
       {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
       {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
       {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
+      {tab === 'chat' && <TeamChat data={data} reload={load} />}
       {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
       {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
+      {tab === 'users' && <ManageUsersAndRoles data={data} reload={load} />}
       {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
-      {tab === 'chat' && <TeamChat data={data} reload={load} />}
     </DashboardShell>
   );
 }
@@ -412,25 +421,24 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
   const user = data.user || {};
   const isSuperOrAdmin = user.role === 'admin' || user.accountType === 'admin' || user.accountType === 'super_admin';
   const hasProductivityAccess = can(data, 'productivity.view');
+  const hasUsersAccess = can(data, 'users.view') || can(data, 'roles.view') || can(data, 'departments.manage') || isSuperOrAdmin;
+  const hasChatAccess = can(data, 'chat.view') || can(data, 'chat.send');
+  const hasSettingsAccess = can(data, 'settings.view') || can(data, 'settings.edit') || isSuperOrAdmin;
+  const hasClientsAccess = can(data, 'clients.view') || can(data, 'clients.view_all') || isSuperOrAdmin;
+  const hasSupportAccess = can(data, 'support.view_all') || can(data, 'support.view_own') || can(data, 'support.create');
 
-  // Navigation Items according to strict spec + dynamic productivity permission
-  const navItems = isSuperOrAdmin
-    ? [
-        { id: 'overview', label: 'Overview', icon: 'overview' },
-        { id: 'submit', label: 'Submit a Job', icon: 'submit' },
-        { id: 'jobs', label: 'All Jobs', icon: 'jobs' },
-        ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
-        { id: 'settings', label: 'TAT Standards', icon: 'clock' },
-        { id: 'clients', label: 'Manage Clients', icon: 'users' },
-        { id: 'support', label: 'Support Tickets', icon: 'support' }
-      ]
-    : [
-        { id: 'overview', label: 'Overview', icon: 'overview' },
-        { id: 'submit', label: 'Submit a Job', icon: 'submit' },
-        { id: 'jobs', label: 'My Jobs', icon: 'jobs' },
-        ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
-        { id: 'support', label: 'Support Tickets', icon: 'support' }
-      ];
+  // Dynamic navigation items based on assigned user permissions
+  const navItems = [
+    { id: 'overview', label: 'Overview', icon: 'overview' },
+    { id: 'submit', label: 'Submit a Job', icon: 'submit' },
+    { id: 'jobs', label: isSuperOrAdmin ? 'All Jobs' : 'My Jobs', icon: 'jobs' },
+    ...(hasProductivityAccess ? [{ id: 'productivity', label: 'Productivity Intelligence', icon: 'productivity' }] : []),
+    ...(hasChatAccess ? [{ id: 'chat', label: 'Team Chat', icon: 'chat' }] : []),
+    ...(hasSettingsAccess ? [{ id: 'settings', label: 'TAT Standards', icon: 'clock' }] : []),
+    ...(hasClientsAccess ? [{ id: 'clients', label: 'Manage Clients', icon: 'users' }] : []),
+    ...(hasUsersAccess ? [{ id: 'users', label: 'Users & Roles', icon: 'shield' }] : []),
+    ...(hasSupportAccess ? [{ id: 'support', label: 'Support Tickets', icon: 'support' }] : [])
+  ];
 
   const pageHeaders = {
     overview: {
@@ -449,6 +457,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
       title: 'Productivity Intelligence',
       subtitle: 'Workforce capacity, revenue attribution, throughput targets, and account roster analytics.'
     },
+    chat: {
+      title: 'Team Chat',
+      subtitle: 'Real-time team communication, channels and collaboration.'
+    },
     settings: {
       title: 'TAT Standards',
       subtitle: 'Configure category turnaround times, capacities and working hours.'
@@ -457,13 +469,13 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
       title: 'Manage Clients',
       subtitle: 'Each client logs in with their own ID and password and only sees their own jobs.'
     },
+    users: {
+      title: 'Users & Access Control',
+      subtitle: 'Manage user accounts, RBAC permission policies, departments and organizational hierarchy.'
+    },
     support: {
       title: isSuperOrAdmin ? 'Support Tickets' : 'My Support Tickets',
       subtitle: isSuperOrAdmin ? 'Review, reply to and manage submitted tickets.' : 'Raise a ticket and track your support conversations.'
-    },
-    chat: {
-      title: 'Team Chat',
-      subtitle: 'Real-time team communication, channels and collaboration.'
     }
   };
 
@@ -1729,6 +1741,39 @@ function TatStandardsPage({ data, reload }) {
                 onChange={e => setSettings({ ...settings, endHour: Number(e.target.value) })}
                 required
               />
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label className="form-label">Operating Working Days</label>
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+              {[
+                { day: 1, label: 'Mon' },
+                { day: 2, label: 'Tue' },
+                { day: 3, label: 'Wed' },
+                { day: 4, label: 'Thu' },
+                { day: 5, label: 'Fri' },
+                { day: 6, label: 'Sat' },
+                { day: 0, label: 'Sun' }
+              ].map(d => {
+                const isSelected = (settings.workDays || []).includes(d.day);
+                return (
+                  <button
+                    key={d.day}
+                    type="button"
+                    className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ minWidth: '54px' }}
+                    onClick={() => {
+                      const newDays = isSelected
+                        ? (settings.workDays || []).filter(x => x !== d.day)
+                        : [...(settings.workDays || []), d.day];
+                      setSettings({ ...settings, workDays: newDays });
+                    }}
+                  >
+                    {isSelected ? '✓ ' : ''}{d.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
