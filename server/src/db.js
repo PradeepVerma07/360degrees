@@ -129,36 +129,20 @@ export const shouldRepairDemoLogin = (loginId, password) => {
   return password === demo.password && (demo.loginIds.has(normalized) || normalized.includes('admin') || normalized.includes('demo') || normalized.includes('360'));
 };
 
-async function columnExists(tableName, columnName) {
-  const row = await one(
-    `SELECT COUNT(*) AS count
-      FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?`,
-    [tableName, columnName]
-  );
-  return Number(row?.count || 0) > 0;
-}
-
 async function addColumnIfMissing(tableName, columnName, definition) {
-  if (await columnExists(tableName, columnName))
-    return;
-  await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
-}
-
-async function indexExists(tableName, indexName) {
-  const row = await one(
-    `SELECT COUNT(*) AS count
-      FROM INFORMATION_SCHEMA.STATISTICS
-      WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND INDEX_NAME=?`,
-    [tableName, indexName]
-  );
-  return Number(row?.count || 0) > 0;
+  try {
+    await query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  } catch (err) {
+    // ER_DUP_FIELDNAME / 1060 = column already exists
+  }
 }
 
 async function addIndexIfMissing(tableName, indexName, definition) {
-  if (await indexExists(tableName, indexName))
-    return;
-  await query(`CREATE INDEX ${indexName} ON ${tableName} ${definition}`);
+  try {
+    await query(`CREATE INDEX ${indexName} ON ${tableName} ${definition}`);
+  } catch (err) {
+    // ER_DUP_KEYNAME / 1061 = index already exists
+  }
 }
 
 export async function initialiseDatabase() {
