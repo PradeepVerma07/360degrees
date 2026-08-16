@@ -1302,6 +1302,14 @@ function SubmitJobPage({ data, reload, setTab }) {
   const firstCat = categories[0]?.name || 'Website Changes';
   const defaultClient = data.clients?.find(c => c.status === 'active')?.id || '';
   const isSuperOrAdmin = data.user?.role === 'admin' || data.user?.accountType === 'admin' || data.user?.accountType === 'super_admin';
+  const employees = (data?.clientOwners || []).filter(u => u.accountType !== 'client' && u.role !== 'client');
+
+  const [servicesList, setServicesList] = useState([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState([]);
+
+  useEffect(() => {
+    api.productivityServices().then(res => setServicesList(res || [])).catch(() => {});
+  }, []);
 
   const [form, setForm] = useState({
     clientId: defaultClient,
@@ -1310,21 +1318,80 @@ function SubmitJobPage({ data, reload, setTab }) {
     category: firstCat,
     priority: 'Medium',
     postedBy: data.user?.name || '',
-    assetLink: ''
+    assetLink: '',
+    startDate: new Date().toISOString().substring(0, 10),
+    completionDate: '',
+    valueAmount: ''
   });
+
+  const [assignments, setAssignments] = useState([
+    { userId: employees[0]?.id || data.user?.id || '', revenuePercent: 100, hoursSpent: '' }
+  ]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  const totalRevPercent = assignments.reduce((sum, a) => sum + Number(a.revenuePercent || 0), 0);
+
+  const toggleService = id => {
+    setSelectedServiceIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const addAssignee = () => {
+    setAssignments(prev => [
+      ...prev,
+      { userId: employees[0]?.id || '', revenuePercent: 0, hoursSpent: '' }
+    ]);
+  };
+
+  const updateAssignment = (idx, field, val) => {
+    setAssignments(prev =>
+      prev.map((a, i) => (i === idx ? { ...a, [field]: val } : a))
+    );
+  };
+
+  const removeAssignment = idx => {
+    setAssignments(prev => prev.filter((_, i) => i !== idx));
+  };
+
   const handleSubmit = async e => {
     e.preventDefault();
     if (!form.title.trim()) return setError('Please enter a job title');
+    if (isSuperOrAdmin && assignments.length > 0 && totalRevPercent !== 100) {
+      return setError(`Revenue allocation total must equal 100% (currently ${totalRevPercent}%)`);
+    }
+
     try {
       setSubmitting(true);
       setError('');
+      // 1. Create standard Job
       await api.createJob(form);
-      setSuccess('Job submitted successfully!');
+
+      // 2. Also log in Productivity Intelligence if user is internal
+      if (isSuperOrAdmin) {
+        try {
+          await api.createProductivityJob({
+            clientId: form.clientId,
+            startDate: form.startDate,
+            completionDate: form.completionDate || null,
+            valueAmount: Number(form.valueAmount || 0),
+            description: form.title + (form.description ? ' — ' + form.description : ''),
+            serviceIds: selectedServiceIds,
+            assignments: assignments.filter(a => a.userId).map(a => ({
+              userId: a.userId,
+              revenuePercent: Number(a.revenuePercent || 0),
+              hoursSpent: Number(a.hoursSpent || 0)
+            }))
+          });
+        } catch (_) {
+          // Non-blocking if productivity already tracked
+        }
+      }
+
+      setSuccess('Job submitted and logged successfully!');
       await reload();
       setTimeout(() => {
         setTab('jobs');
@@ -1337,51 +1404,122 @@ function SubmitJobPage({ data, reload, setTab }) {
   };
 
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '840px', margin: '0 auto' }}>
       <div className="saas-card">
         <div className="card-header">
-          <h2 className="card-title" style={{ fontSize: '18px' }}>New job request</h2>
+          <div>
+            <h2 className="card-title" style={{ fontSize: '18px' }}>Submit & Log a Job</h2>
+            <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>
+              Complete the deliverables, timing, services, and team allocations
+            </span>
+          </div>
         </div>
 
-        {error && <div className="alert-banner error">{error}</div>}
-        {success && <div className="alert-banner success">{success}</div>}
+        {error && <div className="alert-banner error" style={{ marginBottom: '16px' }}>{error}</div>}
+        {success && <div className="alert-banner success" style={{ marginBottom: '16px' }}>{success}</div>}
 
         <form onSubmit={handleSubmit}>
-          {isSuperOrAdmin && (
-            <div className="form-group">
-              <label className="form-label">Client</label>
-              <select
-                className="form-select"
-                value={form.clientId}
-                onChange={e => setForm({ ...form, clientId: e.target.value })}
+          {/* Client & Title */}
+          <div className="form-row">
+            {isSuperOrAdmin && (
+              <div className="form-group" style={{ flex: 1 }}>
+                <label className="form-label">Client / Account</label>
+                <select
+                  className="form-select"
+                  value={form.clientId}
+                  onChange={e => setForm({ ...form, clientId: e.target.value })}
+                  required
+                >
+                  {data.clients?.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.id})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="form-group" style={{ flex: 1.5 }}>
+              <label className="form-label">Job Title / Deliverable</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. Website revamp & Q3 Social Media package"
+                value={form.title}
+                onChange={e => setForm({ ...form, title: e.target.value })}
                 required
-              >
-                {data.clients?.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.id})
-                  </option>
-                ))}
-              </select>
+              />
+            </div>
+          </div>
+
+          {/* Dates & Job Value */}
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Start Date</label>
+              <input
+                type="date"
+                className="form-control"
+                value={form.startDate}
+                onChange={e => setForm({ ...form, startDate: e.target.value })}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Completion Date (optional)</label>
+              <input
+                type="date"
+                className="form-control"
+                value={form.completionDate}
+                onChange={e => setForm({ ...form, completionDate: e.target.value })}
+              />
+            </div>
+
+            {isSuperOrAdmin && (
+              <div className="form-group">
+                <label className="form-label">Job Value (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  className="form-control"
+                  placeholder="e.g. 25000"
+                  value={form.valueAmount}
+                  onChange={e => setForm({ ...form, valueAmount: e.target.value })}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Services Multi-Select Chips */}
+          {servicesList.length > 0 && isSuperOrAdmin && (
+            <div className="form-group">
+              <label className="form-label">Services Attached (Select all that apply)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                {servicesList.map(s => {
+                  const isSelected = selectedServiceIds.includes(s.id);
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '12px', padding: '3px 9px' }}
+                      onClick={() => toggleService(s.id)}
+                    >
+                      {isSelected ? '✓ ' : '+ '} {s.name} ({s.referenceHours || s.reference_hours}h)
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
+          {/* Description */}
           <div className="form-group">
-            <label className="form-label">Job Title</label>
-            <input
-              type="text"
-              className="form-control"
-              placeholder="e.g. Website banner update"
-              value={form.title}
-              onChange={e => setForm({ ...form, title: e.target.value })}
-              required
-            />
-          </div>
-
-          <div className="form-group">
-            <label className="form-label">Description</label>
+            <label className="form-label">Description / Scope of Work</label>
             <textarea
               className="form-textarea"
-              placeholder="Describe the requirements and scope for this request..."
+              rows={3}
+              placeholder="Describe the deliverables, specifics, and client requirements..."
               value={form.description}
               onChange={e => setForm({ ...form, description: e.target.value })}
               required
@@ -1390,7 +1528,7 @@ function SubmitJobPage({ data, reload, setTab }) {
 
           <div className="form-row">
             <div className="form-group">
-              <label className="form-label">Category</label>
+              <label className="form-label">Primary Category</label>
               <select
                 className="form-select"
                 value={form.category}
@@ -1418,6 +1556,82 @@ function SubmitJobPage({ data, reload, setTab }) {
               </select>
             </div>
           </div>
+
+          {/* Team Assigned & Revenue / Hours Allocation */}
+          {isSuperOrAdmin && employees.length > 0 && (
+            <div className="form-group" style={{ background: 'var(--ci-surface)', padding: '14px', borderRadius: '10px', border: '1px solid var(--ci-border-light)' }}>
+              <label className="form-label" style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>People Assigned — % Revenue Credit & Hours Spent</span>
+                <span className={`badge ${totalRevPercent === 100 ? 'badge-status-completed' : 'badge-priority-urgent'}`} style={{ fontSize: '11px' }}>
+                  {totalRevPercent}% allocated {totalRevPercent === 100 ? '✓' : '(Must total 100%)'}
+                </span>
+              </label>
+
+              {assignments.map((a, i) => (
+                <div key={i} style={{ display: 'grid', gridToColumns: '1.6fr 1fr 1fr auto', gridTemplateColumns: '2fr 1.2fr 1.2fr auto', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
+                  <select
+                    className="form-select"
+                    style={{ height: '36px', fontSize: '12.5px' }}
+                    value={a.userId}
+                    onChange={e => updateAssignment(i, 'userId', e.target.value)}
+                  >
+                    <option value="">Select Team Member...</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    ))}
+                  </select>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      className="form-control"
+                      style={{ height: '36px', fontSize: '12.5px' }}
+                      placeholder="% Rev"
+                      value={a.revenuePercent}
+                      onChange={e => updateAssignment(i, 'revenuePercent', e.target.value)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>%</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      className="form-control"
+                      style={{ height: '36px', fontSize: '12.5px' }}
+                      placeholder="Hours"
+                      value={a.hoursSpent}
+                      onChange={e => updateAssignment(i, 'hoursSpent', e.target.value)}
+                    />
+                    <span style={{ fontSize: '12px', color: 'var(--ci-text-secondary)' }}>hrs</span>
+                  </div>
+
+                  {assignments.length > 1 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ color: 'var(--ci-danger)', height: '36px', padding: '0 10px' }}
+                      onClick={() => removeAssignment(i)}
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ marginTop: '4px', fontSize: '12px' }}
+                onClick={addAssignee}
+              >
+                + Add Team Member
+              </button>
+            </div>
+          )}
 
           <div className="form-row">
             <div className="form-group">
@@ -1458,7 +1672,7 @@ function SubmitJobPage({ data, reload, setTab }) {
               className="btn btn-primary"
               disabled={submitting}
             >
-              {submitting ? 'Submitting...' : 'Submit Job'}
+              {submitting ? 'Submitting...' : 'Submit & Log Job'}
             </button>
           </div>
         </form>

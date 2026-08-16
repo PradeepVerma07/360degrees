@@ -864,25 +864,25 @@ export async function initialiseProductivitySchema() {
 
 export async function seedProductivityDefaults() {
   const defaultServices = [
-    ['Website full build', 40.00],
-    ['Connector Apps / Small Web Additions', 12.00],
-    ['Social Media Optimisation', 8.00],
-    ['Design', 6.00],
-    ['Standees / Backdrops / Advertisements', 8.00],
-    ['Films & Edits', 16.00],
-    ['Animation / Motion Graphics', 24.00],
-    ['Reels & Shorts', 6.00],
-    ['Podcasts', 12.00],
-    ['Strategy & Presentations', 16.00],
-    ['Business Development', 10.00],
-    ['Paper Advertisement Design', 6.00],
-    ['Other Design Interventions', 8.00],
-    ['Photography / Filming', 10.00]
+    ['Website (full build)', 45.00],
+    ['Connector Apps / Small Web Additions', 3.00],
+    ['Social Media Optimisation', 18.00],
+    ['Design — Brochures / Emailers', 4.00],
+    ['Standees / Backdrops / Advertisements', 3.00],
+    ['Films & Edits', 10.00],
+    ['AI-enabled Animation / Motion Graphics', 8.00],
+    ['Reels & Shorts', 4.00],
+    ['Podcasts (per episode)', 6.00],
+    ['Strategy & Presentations', 8.00],
+    ['Business Development', 5.00],
+    ['Paper Advertisement Design', 3.00],
+    ['Other Design Interventions', 3.00],
+    ['Photography / Filming (per shoot day)', 8.00]
   ];
 
   for (const [name, refHours] of defaultServices) {
     await query(
-      'INSERT IGNORE INTO productivity_services (name, reference_hours, is_active) VALUES (?, ?, 1)',
+      'INSERT INTO productivity_services (name, reference_hours, is_active) VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE reference_hours = VALUES(reference_hours)',
       [name, refHours]
     );
   }
@@ -908,4 +908,124 @@ export async function seedProductivityDefaults() {
       );
     }
   }
+
+  // 22 Default Personnel
+  const defaultPersonnel = [
+    { name: 'Pramit', email: 'pramit@360degrees.com', duties: 'Founder, Strategy, Business Development, Content Management', capacity: 48, status: 'active', role: 'admin' },
+    { name: 'Aashit', email: 'aashit@360degrees.com', duties: 'Founder, Business Development, Finance', capacity: 48, status: 'active', role: 'admin' },
+    { name: 'Urna', email: 'urna@360degrees.com', duties: 'COO, CS, Content, Operations, Billing, Overall Supervision', capacity: 48, status: 'active', role: 'admin' },
+    { name: 'Mansi', email: 'mansi@360degrees.com', duties: 'Strategy, BD, Content, Backup to Pramit, CS', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Chitra', email: 'chitra@360degrees.com', duties: 'CS, SMO', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Arushi', email: 'arushi@360degrees.com', duties: 'SMO', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Manan', email: 'manan@360degrees.com', duties: 'CS, Creative Lead', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Mary', email: 'mary@360degrees.com', duties: 'Creatives, Animations, AI, Editing of Reels etc, Storytelling', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Ajay', email: 'ajay@360degrees.com', duties: 'Editing', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Aarya', email: 'aarya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Aadya', email: 'aadya@360degrees.com', duties: 'Graphics, Creative', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'John', email: 'john@360degrees.com', duties: 'Websites — All of them, Quality Control', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Meshwa', email: 'meshwa@360degrees.com', duties: 'Website Support', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Dhawal', email: 'dhawal@360degrees.com', duties: 'Not currently functioning — part of the team', capacity: 48, status: 'inactive', role: 'employee' },
+    { name: 'Ekta', email: 'ekta@360degrees.com', duties: 'Accounts', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Khushi', email: 'khushi@360degrees.com', duties: 'Operations (intern, just joined)', capacity: 48, status: 'intern', role: 'employee' },
+    { name: 'Reehan', email: 'reehan@360degrees.com', duties: 'Websites — part of (intern)', capacity: 48, status: 'intern', role: 'employee' },
+    { name: 'Pradeep', email: 'pradeep@360degrees.com', duties: 'Websites', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Harshada', email: 'harshada@360degrees.com', duties: 'SEO', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Arjun', email: 'arjun@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'Shalini', email: 'shalini@360degrees.com', duties: 'Business Development, Prospect Pitching', capacity: 48, status: 'active', role: 'employee' },
+    { name: 'External', email: 'external@360degrees.com', duties: 'SEO and other requirements, as needed', capacity: 48, status: 'vendor', role: 'employee' }
+  ];
+
+  const defaultHash = '$2a$10$wO/4y6qg6wB/2G5gM1s9l.yPjK6gQp7.J5sC4n6kR8vP9m1q2w3e4'; // demo password hash
+
+  for (const p of defaultPersonnel) {
+    const existingUser = await one('SELECT id FROM users WHERE email=? OR name=?', [p.email, p.name]);
+    let userId = existingUser ? existingUser.id : null;
+    if (!userId) {
+      userId = p.name.toLowerCase().replace(/[^a-z0-9]/g, '') + '_' + Math.random().toString(36).slice(2, 7);
+      await query(
+        'INSERT INTO users (id, name, email, password_hash, role, account_type, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [userId, p.name, p.email, defaultHash, p.role, p.role === 'admin' ? 'admin' : 'employee', p.status !== 'inactive' ? 1 : 0]
+      );
+    }
+    // Update or insert employee settings
+    await query(
+      `INSERT INTO productivity_employee_settings (user_id, custom_duties, weekly_capacity_hours, productivity_status)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE custom_duties=VALUES(custom_duties), weekly_capacity_hours=VALUES(weekly_capacity_hours), productivity_status=VALUES(productivity_status)`,
+      [userId, p.duties, p.capacity, p.status]
+    );
+  }
+
+  // 35 Default Roster Clients
+  const defaultRoster = [
+    { clientName: 'Vardan', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Mary', copy: 'Urna', edit: 'Manan', shoot: '', seo: 'Harshada', smo: 'Arushi', qc: 'John' }, difficulty: 5, comments: 'Maintenance' },
+    { clientName: 'Shatayu', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Chitra', website: 'John', design: 'Mary', copy: 'Chitra, Urna', edit: 'Mary', shoot: '', seo: '', smo: 'Chitra', qc: 'John' }, difficulty: 4, comments: 'Maintenance' },
+    { clientName: 'Crave', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Chitra', website: '', design: 'Aadya', copy: 'Chitra, Urna', edit: 'Mary', shoot: '', seo: '', smo: 'Chitra', qc: 'John' }, difficulty: 4, comments: 'Maintenance' },
+    { clientName: 'VNA', nature: 'Existing', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John', design: 'Aarya', copy: 'Pramit, Mansi', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' }, difficulty: 8, comments: 'Website work needs a lot of work as does Reels and content' },
+    { clientName: 'Shree Sawa', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Mansi', website: 'John', design: 'Aadya', copy: 'Mansi, Chitra', edit: 'External', shoot: 'External', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 6, comments: 'Website needs to be completed in 3 weeks' },
+    { clientName: 'Thehrav', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: '', copy: 'Pramit', edit: 'Manan', shoot: 'External', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 4, comments: 'Occasional' },
+    { clientName: 'LEOZ', nature: 'Existing', roles: { strategy: 'Pramit, Mansi', cs: 'Pramit', website: 'John', design: '', copy: '', edit: '', shoot: '', seo: '', smo: '', qc: 'John' }, difficulty: 6, comments: 'Need to change the website for payment to be made' },
+    { clientName: 'PIV', nature: 'Existing', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John, External', design: 'Aarya, Manan', copy: 'Pramit, Mansi', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' }, difficulty: 9, comments: 'This will bring in huge pressures with time - loads of shoots, strategy and event' },
+    { clientName: 'Chaitanya', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Chitra', website: 'John', design: 'Aarya', copy: 'Chitra', edit: 'Ajay', shoot: 'External', seo: 'Harshada', smo: 'Arushi', qc: 'John' }, difficulty: 7, comments: 'This is also a high pressure time consuming account' },
+    { clientName: 'Media Buzz', nature: 'Existing', roles: { strategy: 'Chitra', cs: 'Chitra', website: 'John', design: 'Mary', copy: 'Chitra', edit: 'Mary', shoot: 'External', seo: '', smo: 'Chitra', qc: 'John' }, difficulty: 6, comments: 'This is for our sister company' },
+    { clientName: 'Times Abroad', nature: 'Existing', roles: { strategy: 'Mansi, Pramit', cs: 'Mansi', website: '', design: 'Aadya', copy: 'Pramit, Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 3, comments: 'Ongoing' },
+    { clientName: 'Times Property', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 4, comments: 'Ongoing' },
+    { clientName: 'Times MSME', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 8, comments: 'Yet to launch' },
+    { clientName: 'Times Mike Drop', nature: 'Existing', roles: { strategy: 'Mansi', cs: 'Mansi', website: '', design: 'Manan', copy: 'Pramit, Mansi', edit: '', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 8, comments: 'Yet to launch' },
+    { clientName: 'Ananta', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Manan', copy: 'Urna', edit: 'Ajay', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 7, comments: 'Website just launched - high pressure' },
+    { clientName: 'Ananta Aspen', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Manan', copy: 'Urna', edit: 'Ajay', shoot: '', seo: '', smo: 'Arushi', qc: 'John' }, difficulty: 7, comments: 'Website just launched - high pressure' },
+    { clientName: 'IUF', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: '', copy: 'Urna, John', edit: '', shoot: '', seo: '', smo: '', qc: 'John' }, difficulty: 2, comments: 'Website launched' },
+    { clientName: 'Gaudiya', nature: 'Existing', roles: { strategy: 'Urna', cs: 'Urna', website: 'John', design: 'Aarya', copy: 'Pramit, Urna', edit: 'Ajay', shoot: '', seo: 'External', smo: 'Arushi', qc: 'John' }, difficulty: 9, comments: 'In Bengali, English, 3 websites - yet to be made - high pressure and high frequency' },
+    { clientName: 'Brinzz', nature: 'Existing', roles: { strategy: 'Pramit, Mansi, Urna', cs: 'Pramit', website: 'TBD', design: 'TBD', copy: 'Pramit', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'John' }, difficulty: 6, comments: 'Brand approvals delayed due to government regulations. Will come back in full - SMO, website, brand book - by end of June' },
+    { clientName: 'Station Satcom', nature: 'Existing', roles: { strategy: 'Mansi, Pramit', cs: 'Mansi, Manan', website: 'John', design: 'Manan', copy: 'Mansi, Urna', edit: 'Ajay', shoot: '', seo: 'Harshada', smo: 'Arushi', qc: 'John' }, difficulty: 8, comments: 'New website to be delivered by 10th of July - rest in maintenance mode. E-Retail strategy etc to be submitted' },
+    { clientName: 'Gharenu', nature: 'Prospect', roles: { strategy: 'Pramit, Mansi, Urna', cs: 'Mansi', website: 'John, External', design: 'Manan', copy: 'Pramit, Mansi, Urna', edit: '', shoot: 'External', seo: 'External', smo: 'Arushi', qc: 'John' }, difficulty: 8, comments: 'Yet to launch' },
+    { clientName: 'Goa', nature: 'Prospect', roles: { strategy: 'Pramit, Arjun', cs: 'Mansi', website: '', design: 'TBD', copy: 'TBD', edit: 'External', shoot: 'External', seo: '', smo: 'TBD', qc: 'TBD' }, difficulty: 10, comments: 'In the pitching stage' },
+    { clientName: 'The Bottle Shop', nature: 'Prospect', roles: { strategy: 'Pramit', cs: 'Mansi', website: 'John', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 8, comments: '6000 SKU website to be developed on Shopify by John - will take time. SMO as well' },
+    { clientName: 'Kumbh Mela', nature: 'Prospect', roles: { strategy: 'Pramit, Arjun', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 8, comments: 'Pre-pitch stage' },
+    { clientName: 'Haryana Projects', nature: 'Prospect', roles: { strategy: 'Pramit, Arjun', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 8, comments: 'Pre-pitch stage' },
+    { clientName: 'MMCF', nature: 'Prospect', roles: { strategy: 'Pramit, Aashit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 10, comments: 'Discussion stage. When it comes there will be 3 websites and SMO' },
+    { clientName: 'Dhanda.ai', nature: 'Prospect', roles: { strategy: 'Pramit, Shalini', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 6, comments: 'Discussion stage' },
+    { clientName: 'Signo', nature: 'Prospect', roles: { strategy: 'Pramit, Shalini', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 8, comments: 'Pre-pitch stage' },
+    { clientName: 'Tolvv Sign', nature: 'Prospect', roles: { strategy: 'Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 7, comments: 'Pre-pitch stage' },
+    { clientName: 'Matrix Book Cover', nature: 'Prospect', roles: { strategy: 'Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 6, comments: 'Pre-pitch stage' },
+    { clientName: 'Samunnati', nature: 'Prospect', roles: { strategy: 'Urna, Pramit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 6, comments: 'Follow up stage' },
+    { clientName: 'Interview Box', nature: 'Prospect', roles: { strategy: 'Pramit, Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 6, comments: 'Follow up stage' },
+    { clientName: 'Katrankari', nature: 'Prospect', roles: { strategy: 'Pramit, Mansi', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 6, comments: 'Pre-pitch stage' },
+    { clientName: 'IFB', nature: 'Prospect', roles: { strategy: 'Pramit, Manan', cs: 'Manan', website: '', design: '', copy: '', edit: '', shoot: '', seo: 'TBD', smo: '', qc: 'TBD' }, difficulty: 10, comments: 'Pre-pitch stage' },
+    { clientName: 'Network 18', nature: 'Prospect', roles: { strategy: 'Pramit', cs: 'TBD', website: 'TBD', design: 'TBD', copy: 'TBD', edit: 'TBD', shoot: 'TBD', seo: 'TBD', smo: 'TBD', qc: 'TBD' }, difficulty: 10, comments: 'Quotation submitted' }
+  ];
+
+  const existingRosters = await query('SELECT COUNT(*) as count FROM productivity_account_rosters');
+  if (Number(existingRosters[0]?.count || 0) === 0) {
+    for (const r of defaultRoster) {
+      let client = await one('SELECT id FROM clients WHERE name=?', [r.clientName]);
+      let clientId = client ? client.id : null;
+      if (!clientId) {
+        clientId = r.clientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'c_' + Math.random().toString(36).slice(2, 6);
+        await query(
+          'INSERT INTO clients (id, name, status, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW()) ON DUPLICATE KEY UPDATE name=VALUES(name)',
+          [clientId, r.clientName, 'active']
+        );
+      }
+
+      const res = await query(
+        'INSERT INTO productivity_account_rosters (client_id, nature, difficulty_score, comments) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nature=VALUES(nature), difficulty_score=VALUES(difficulty_score), comments=VALUES(comments)',
+        [clientId, r.nature, r.difficulty, r.comments]
+      );
+      const rosterId = res.insertId || (await one('SELECT id FROM productivity_account_rosters WHERE client_id=?', [clientId]))?.id;
+
+      if (rosterId) {
+        await query('DELETE FROM productivity_account_roster_assignments WHERE roster_id=?', [rosterId]);
+        for (const [funcKey, names] of Object.entries(r.roles)) {
+          if (names && names.trim()) {
+            await query(
+              'INSERT INTO productivity_account_roster_assignments (roster_id, function_key, assignee_name) VALUES (?, ?, ?)',
+              [rosterId, funcKey, names.trim()]
+            );
+          }
+        }
+      }
+    }
+  }
 }
+
