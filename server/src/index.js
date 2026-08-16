@@ -1505,7 +1505,14 @@ app.post('/api/chat/channels', requireAuth, requirePermission('chat.manage'), as
 });
 
 app.get('/api/chat/channels/:channelId/messages', requireAuth, requirePermission('chat.view'), async (req, res) => {
-    const channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    let channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    if (!channel && req.params.channelId.startsWith('dm-')) {
+        await query(
+            'INSERT IGNORE INTO chat_channels (id, name, description, type, created_by) VALUES (?, ?, ?, ?, ?)',
+            [req.params.channelId, req.params.channelId, 'Direct Message', 'direct', req.user.id]
+        );
+        channel = { id: req.params.channelId };
+    }
     if (!channel)
         return res.status(404).json({ error: 'Channel not found' });
     const limit = Math.min(200, Math.max(1, Number(req.query.limit || 100)));
@@ -1519,7 +1526,14 @@ app.get('/api/chat/channels/:channelId/messages', requireAuth, requirePermission
 });
 
 app.post('/api/chat/channels/:channelId/messages', requireAuth, requirePermission('chat.send'), async (req, res) => {
-    const channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    let channel = await one('SELECT id FROM chat_channels WHERE id=?', [req.params.channelId]);
+    if (!channel && req.params.channelId.startsWith('dm-')) {
+        await query(
+            'INSERT IGNORE INTO chat_channels (id, name, description, type, created_by) VALUES (?, ?, ?, ?, ?)',
+            [req.params.channelId, req.params.channelId, 'Direct Message', 'direct', req.user.id]
+        );
+        channel = { id: req.params.channelId };
+    }
     if (!channel)
         return res.status(404).json({ error: 'Channel not found' });
     const parsed = z.object({

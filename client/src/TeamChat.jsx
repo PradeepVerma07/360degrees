@@ -66,7 +66,6 @@ const formatListDate = value => {
 
 const initialsFor = value => (value || 'User').split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'U';
 
-// Color palette for user names inside WhatsApp style chat bubbles
 const nameColorPalette = [
   '#008069', '#128C7E', '#027eb5', '#6C5CE7', '#D63031',
   '#E17055', '#0984E3', '#00B894', '#2D3436', '#B71540'
@@ -81,6 +80,8 @@ function getNameColor(name) {
   return nameColorPalette[Math.abs(hash) % nameColorPalette.length];
 }
 
+const getDmChannelId = (u1, u2) => 'dm-' + [String(u1), String(u2)].sort().join('-').replace(/[^a-z0-9_-]/g, '-');
+
 export default function TeamChat({ data, reload }) {
   const currentUser = data?.user || {};
   const canSend = (data?.permissions || currentUser?.permissions || []).includes('chat.send');
@@ -89,6 +90,7 @@ export default function TeamChat({ data, reload }) {
   const [channels, setChannels] = useState([]);
   const [members, setMembers] = useState([]);
   const [activeChannelId, setActiveChannelId] = useState('general');
+  const [activeDirectMember, setActiveDirectMember] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loadingChannels, setLoadingChannels] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
@@ -98,7 +100,7 @@ export default function TeamChat({ data, reload }) {
   const [error, setError] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
   const [messageSearch, setMessageSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'unread', 'favourites', 'groups'
+  const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'groups', 'direct', 'unread'
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showNewChannelModal, setShowNewChannelModal] = useState(false);
@@ -106,8 +108,10 @@ export default function TeamChat({ data, reload }) {
   const [newChannelDesc, setNewChannelDesc] = useState('');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [typingUsers, setTypingUsers] = useState(new Set());
-  const [selectedVoiceMessage, setSelectedVoiceMessage] = useState(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+
+  // Mobile navigation state (false = showing conversation list, true = showing chat messages)
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
 
   const messagesEndRef = useRef(null);
   const messagesScrollRef = useRef(null);
@@ -122,8 +126,8 @@ export default function TeamChat({ data, reload }) {
       setLoadingChannels(true);
       const res = await api.chatChannels();
       setChannels(res.channels || []);
-      setMembers(res.members || []);
-      if (res.channels?.length && !res.channels.some(c => c.id === activeChannelId)) {
+      setMembers((res.members || []).filter(m => m.id !== currentUser.id));
+      if (res.channels?.length && !res.channels.some(c => c.id === activeChannelId) && !activeDirectMember) {
         setActiveChannelId(res.channels[0].id);
       }
     } catch (err) {
@@ -131,7 +135,7 @@ export default function TeamChat({ data, reload }) {
     } finally {
       setLoadingChannels(false);
     }
-  }, [activeChannelId]);
+  }, [activeChannelId, activeDirectMember, currentUser.id]);
 
   // Load Messages for current channel
   const loadMessages = useCallback(async (channelId) => {
@@ -317,7 +321,7 @@ export default function TeamChat({ data, reload }) {
   };
 
   const handleClearChannel = async () => {
-    if (!window.confirm(`Clear all messages in #${activeChannel?.name}? This cannot be undone.`)) return;
+    if (!window.confirm(`Clear all messages in this conversation? This cannot be undone.`)) return;
     try {
       await api.clearChatChannel(activeChannelId);
       setMessages([]);
@@ -339,7 +343,9 @@ export default function TeamChat({ data, reload }) {
       setNewChannelName('');
       setNewChannelDesc('');
       if (res.channel) {
+        setActiveDirectMember(null);
         setActiveChannelId(res.channel.id);
+        setMobileChatOpen(true);
       }
       loadChannels();
     } catch (err) {
@@ -347,24 +353,51 @@ export default function TeamChat({ data, reload }) {
     }
   };
 
+  // Open Direct Message with a team member
+  const handleOpenDirectChat = (member) => {
+    const dmId = getDmChannelId(currentUser.id, member.id);
+    setActiveDirectMember(member);
+    setActiveChannelId(dmId);
+    setMobileChatOpen(true);
+  };
+
+  // Open Group Channel
+  const handleOpenChannel = (channel) => {
+    setActiveDirectMember(null);
+    setActiveChannelId(channel.id);
+    setMobileChatOpen(true);
+  };
+
   const addEmojiToInput = (emoji) => {
     setInputText(prev => prev + emoji);
   };
 
-  const activeChannel = useMemo(() => {
-    return channels.find(c => c.id === activeChannelId) || { id: activeChannelId, name: activeChannelId, description: '' };
-  }, [channels, activeChannelId]);
+  // Current active entity info
+  const currentChatInfo = useMemo(() => {
+    if (activeDirectMember) {
+      return {
+        title: activeDirectMember.name,
+        subtitle: `Online • ${activeDirectMember.role || 'Team Member'}`,
+        isDirect: true,
+        avatar: initialsFor(activeDirectMember.name)
+      };
+    }
+    const ch = channels.find(c => c.id === activeChannelId) || { name: activeChannelId, description: '' };
+    const memberNames = members.map(m => m.name.split(' ')[0]);
+    const summary = memberNames.slice(0, 4).join(', ') + (memberNames.length > 4 ? ` +${memberNames.length - 4}` : '') + ', You';
+    return {
+      title: ch.name.replace(/-/g, ' '),
+      subtitle: summary,
+      isDirect: false,
+      description: ch.description,
+      avatar: null
+    };
+  }, [activeDirectMember, activeChannelId, channels, members]);
 
-  // Participants subtitle summary
-  const participantsSummary = useMemo(() => {
-    if (!members.length) return 'You';
-    const names = members.map(m => m.name.split(' ')[0]);
-    const others = names.slice(0, 5).join(', ');
-    return `${others}${names.length > 5 ? `, +${names.length - 5} more` : ''}, You`;
-  }, [members]);
-
+  // Filter channels and members
   const filteredChannels = useMemo(() => {
-    let list = channels;
+    let list = channels.filter(c => !c.id.startsWith('dm-'));
+    if (activeFilter === 'direct') return [];
     if (activeFilter === 'unread') {
       list = list.filter(c => (c.messageCount || 0) > 0);
     }
@@ -375,21 +408,29 @@ export default function TeamChat({ data, reload }) {
     return list;
   }, [channels, activeFilter, channelSearch]);
 
+  const filteredMembers = useMemo(() => {
+    if (activeFilter === 'groups') return [];
+    let list = members;
+    if (channelSearch.trim()) {
+      const q = channelSearch.toLowerCase();
+      list = list.filter(m => m.name.toLowerCase().includes(q) || (m.role || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [members, activeFilter, channelSearch]);
+
   const filteredMessages = useMemo(() => {
     if (!messageSearch.trim()) return messages;
     const q = messageSearch.toLowerCase();
     return messages.filter(m => (m.body || '').toLowerCase().includes(q) || (m.senderName || '').toLowerCase().includes(q));
   }, [messages, messageSearch]);
 
-  // Extract pinned links or info
+  // Pinned bar content
   const pinnedInfo = useMemo(() => {
-    // Find first message containing URLs or default to general pinned notice
     const urlMsg = messages.find(m => (m.body || '').includes('http'));
-    if (urlMsg) {
-      return `${urlMsg.senderName}: ${urlMsg.body}`;
-    }
-    return activeChannel.description || 'Welcome to team workspace coordination channel.';
-  }, [messages, activeChannel]);
+    if (urlMsg) return `${urlMsg.senderName}: ${urlMsg.body}`;
+    if (activeDirectMember) return `Direct encrypted workspace conversation with ${activeDirectMember.name}`;
+    return currentChatInfo.description || 'Welcome to team workspace coordination channel.';
+  }, [messages, activeDirectMember, currentChatInfo]);
 
   // Group messages by date for dividers
   const messageGroups = useMemo(() => {
@@ -416,11 +457,10 @@ export default function TeamChat({ data, reload }) {
   }, [filteredMessages]);
 
   return (
-    <div className="wa-app-layout">
-      {/* 1. LEFT UTILITY ICON RAIL */}
+    <div className={`wa-app-layout ${mobileChatOpen ? 'mobile-chat-active' : 'mobile-list-active'}`}>
+      {/* 1. LEFT UTILITY ICON RAIL (Desktop) */}
       <aside className="wa-utility-rail">
         <div className="wa-rail-top">
-          {/* WhatsApp green icon */}
           <div className="wa-rail-icon-btn wa-brand-icon active" title="Chats">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
               <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.816 9.816 0 0 0 12.04 2zm.01 1.67c4.54 0 8.24 3.7 8.24 8.24 0 2.2-.86 4.27-2.42 5.82a8.18 8.18 0 0 1-5.82 2.42c-1.47 0-2.91-.39-4.18-1.15l-.3-.18-3.11.82.83-3.04-.2-.31a8.17 8.17 0 0 1-1.25-4.38c0-4.54 3.7-8.24 8.24-8.24z" />
@@ -433,12 +473,6 @@ export default function TeamChat({ data, reload }) {
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
             </svg>
             <span className="wa-rail-badge-mini">1</span>
-          </div>
-
-          <div className="wa-rail-icon-btn" title="Status">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" strokeDasharray="4 2" />
-            </svg>
           </div>
 
           <div className="wa-rail-icon-btn" title="Channels">
@@ -456,19 +490,13 @@ export default function TeamChat({ data, reload }) {
         </div>
 
         <div className="wa-rail-bottom">
-          <div className="wa-rail-icon-btn" title="Settings">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </div>
           <div className="wa-rail-avatar" title={currentUser.name}>
             {initialsFor(currentUser.name)}
           </div>
         </div>
       </aside>
 
-      {/* 2. CHATS LIST COLUMN */}
+      {/* 2. CHATS & TEAM MEMBERS LIST COLUMN (STARTING SCREEN ON MOBILE) */}
       <aside className="wa-chats-sidebar">
         {/* Header */}
         <div className="wa-chats-header">
@@ -478,7 +506,7 @@ export default function TeamChat({ data, reload }) {
               <button
                 type="button"
                 className="wa-icon-action-btn"
-                title="New Channel / Chat"
+                title="New Channel / Group"
                 onClick={() => setShowNewChannelModal(true)}
               >
                 <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -528,99 +556,176 @@ export default function TeamChat({ data, reload }) {
           </button>
           <button
             type="button"
-            className={`wa-filter-pill ${activeFilter === 'unread' ? 'active' : ''}`}
-            onClick={() => setActiveFilter('unread')}
-          >
-            Unread <span className="wa-filter-badge">{channels.reduce((acc, c) => acc + (c.messageCount || 0), 0)}</span>
-          </button>
-          <button
-            type="button"
-            className={`wa-filter-pill ${activeFilter === 'favourites' ? 'active' : ''}`}
-            onClick={() => setActiveFilter('favourites')}
-          >
-            Favourites
-          </button>
-          <button
-            type="button"
             className={`wa-filter-pill ${activeFilter === 'groups' ? 'active' : ''}`}
             onClick={() => setActiveFilter('groups')}
           >
-            Groups ▾
+            Groups ({channels.filter(c => !c.id.startsWith('dm-')).length})
+          </button>
+          <button
+            type="button"
+            className={`wa-filter-pill ${activeFilter === 'direct' ? 'active' : ''}`}
+            onClick={() => setActiveFilter('direct')}
+          >
+            Direct ({members.length})
+          </button>
+          <button
+            type="button"
+            className={`wa-filter-pill ${activeFilter === 'unread' ? 'active' : ''}`}
+            onClick={() => setActiveFilter('unread')}
+          >
+            Unread
           </button>
         </div>
 
-        {/* Conversation List */}
+        {/* Conversation List (Groups + Direct Team Members) */}
         <div className="wa-chats-list">
           {loadingChannels ? (
             <div className="wa-list-loading">Loading conversations...</div>
-          ) : filteredChannels.length === 0 ? (
-            <div className="wa-list-empty">No chats found</div>
           ) : (
-            filteredChannels.map((channel, idx) => {
-              const isActive = channel.id === activeChannelId;
-              const lastMsg = channel.lastMessage;
-              return (
-                <div
-                  key={channel.id}
-                  className={`wa-chat-item ${isActive ? 'active' : ''}`}
-                  onClick={() => setActiveChannelId(channel.id)}
-                >
-                  <div className="wa-chat-avatar" style={{ background: ['#DFD6C9', '#D1E4E8', '#E6D7E8', '#D6E4DE'][idx % 4] }}>
-                    <svg viewBox="0 0 24 24" width="22" height="22" fill="#54656F">
-                      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                    </svg>
-                  </div>
-                  <div className="wa-chat-info">
-                    <div className="wa-chat-top-line">
-                      <span className="wa-chat-name">{channel.name.replace(/-/g, ' ')}</span>
-                      <span className="wa-chat-time">
-                        {lastMsg?.at ? formatListDate(lastMsg.at) : 'Friday'}
-                      </span>
-                    </div>
-                    <div className="wa-chat-bottom-line">
-                      <span className="wa-chat-snippet">
-                        {lastMsg ? (
-                          <>
-                            <span className="wa-sender-tag">~{lastMsg.sender?.split(' ')[0]}: </span>
-                            {lastMsg.body || 'Attachment'}
-                          </>
-                        ) : (
-                          channel.description || 'Welcome to team coordination'
-                        )}
-                      </span>
-                      <div className="wa-chat-badges">
-                        {idx === 0 && <span className="wa-pin-icon" title="Pinned">📌</span>}
-                        {channel.messageCount > 0 && (
-                          <span className="wa-unread-count">{channel.messageCount}</span>
-                        )}
+            <>
+              {/* GROUPS / CHANNELS */}
+              {filteredChannels.length > 0 && (
+                <>
+                  {activeFilter === 'all' && (
+                    <div className="wa-list-divider-title">WORKSPACE GROUPS</div>
+                  )}
+                  {filteredChannels.map((channel, idx) => {
+                    const isActive = !activeDirectMember && channel.id === activeChannelId;
+                    const lastMsg = channel.lastMessage;
+                    return (
+                      <div
+                        key={channel.id}
+                        className={`wa-chat-item ${isActive ? 'active' : ''}`}
+                        onClick={() => handleOpenChannel(channel)}
+                      >
+                        <div className="wa-chat-avatar" style={{ background: ['#DFD6C9', '#D1E4E8', '#E6D7E8', '#D6E4DE'][idx % 4] }}>
+                          <svg viewBox="0 0 24 24" width="22" height="22" fill="#54656F">
+                            <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                          </svg>
+                        </div>
+                        <div className="wa-chat-info">
+                          <div className="wa-chat-top-line">
+                            <span className="wa-chat-name">{channel.name.replace(/-/g, ' ')}</span>
+                            <span className="wa-chat-time">
+                              {lastMsg?.at ? formatListDate(lastMsg.at) : 'Friday'}
+                            </span>
+                          </div>
+                          <div className="wa-chat-bottom-line">
+                            <span className="wa-chat-snippet">
+                              {lastMsg ? (
+                                <>
+                                  <span className="wa-sender-tag">~{lastMsg.sender?.split(' ')[0]}: </span>
+                                  {lastMsg.body || 'Attachment'}
+                                </>
+                              ) : (
+                                channel.description || 'Welcome to team coordination'
+                              )}
+                            </span>
+                            <div className="wa-chat-badges">
+                              {idx === 0 && <span className="wa-pin-icon" title="Pinned">📌</span>}
+                              {channel.messageCount > 0 && (
+                                <span className="wa-unread-count">{channel.messageCount}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* INDIVIDUAL TEAM MEMBERS DIRECT CHATS */}
+              {filteredMembers.length > 0 && (
+                <>
+                  {activeFilter === 'all' && (
+                    <div className="wa-list-divider-title" style={{ marginTop: '12px' }}>
+                      INDIVIDUAL TEAM MEMBERS
                     </div>
-                  </div>
-                </div>
-              );
-            })
+                  )}
+                  {filteredMembers.map((member, idx) => {
+                    const isMemberActive = activeDirectMember?.id === member.id;
+                    const nameColor = getNameColor(member.name);
+
+                    return (
+                      <div
+                        key={member.id}
+                        className={`wa-chat-item direct-item ${isMemberActive ? 'active' : ''}`}
+                        onClick={() => handleOpenDirectChat(member)}
+                      >
+                        <div className="wa-chat-avatar direct-avatar" style={{ background: nameColor }}>
+                          {initialsFor(member.name)}
+                          <span className="wa-online-dot" />
+                        </div>
+                        <div className="wa-chat-info">
+                          <div className="wa-chat-top-line">
+                            <span className="wa-chat-name">{member.name}</span>
+                            <span className="wa-member-role-tag">{member.role || 'Staff'}</span>
+                          </div>
+                          <div className="wa-chat-bottom-line">
+                            <span className="wa-chat-snippet">
+                              Tap to chat 1-on-1 • Direct message
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
+
+              {filteredChannels.length === 0 && filteredMembers.length === 0 && (
+                <div className="wa-list-empty">No conversations found</div>
+              )}
+            </>
           )}
         </div>
       </aside>
 
       {/* 3. MAIN CHAT CONVERSATION VIEW */}
       <main className="wa-conversation-view">
-        {/* Top Header */}
+        {/* Top Header with Back Arrow for Mobile and Left/Right User Icons */}
         <div className="wa-convo-header">
           <div className="wa-convo-header-left">
-            <div className="wa-convo-avatar">
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="#54656F">
-                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+            {/* BACK ARROW (Essential for WhatsApp Mobile Experience) */}
+            <button
+              type="button"
+              className="wa-back-arrow-btn"
+              title="Back to chats"
+              onClick={() => setMobileChatOpen(false)}
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="19" y1="12" x2="5" y2="12" />
+                <polyline points="12 19 5 12 12 5" />
               </svg>
+            </button>
+
+            {/* Avatar */}
+            <div className="wa-convo-avatar" style={{ background: currentChatInfo.isDirect ? getNameColor(currentChatInfo.title) : '#DFD6C9', color: currentChatInfo.isDirect ? '#FFFFFF' : '#54656F' }}>
+              {currentChatInfo.isDirect ? (
+                currentChatInfo.avatar
+              ) : (
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                </svg>
+              )}
             </div>
+
+            {/* Chat Title & Subtitle */}
             <div className="wa-convo-details">
-              <h2 className="wa-convo-title">{activeChannel.name.replace(/-/g, ' ')}</h2>
-              <p className="wa-convo-subtitle">{participantsSummary}</p>
+              <h2 className="wa-convo-title">{currentChatInfo.title}</h2>
+              <p className="wa-convo-subtitle">{currentChatInfo.subtitle}</p>
             </div>
           </div>
 
+          {/* Right Header Action Icons */}
           <div className="wa-convo-header-actions">
-            <button type="button" className="wa-header-icon-btn" title="Start video call">
+            <button type="button" className="wa-header-icon-btn" title="Voice call">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </button>
+            <button type="button" className="wa-header-icon-btn" title="Video call">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="23 7 16 12 23 17 23 7" />
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
@@ -629,9 +734,9 @@ export default function TeamChat({ data, reload }) {
             <button
               type="button"
               className="wa-header-icon-btn"
-              title="Search in chat"
+              title="Search messages"
               onClick={() => {
-                const term = window.prompt('Search messages:', messageSearch);
+                const term = window.prompt('Search messages in conversation:', messageSearch);
                 if (term !== null) setMessageSearch(term);
               }}
             >
@@ -675,7 +780,7 @@ export default function TeamChat({ data, reload }) {
           <span className="wa-pinned-text">{pinnedInfo}</span>
         </div>
 
-        {/* Messages Scroll Area with WhatsApp Doodle Background */}
+        {/* Messages Stream with WhatsApp Wallpaper Background */}
         <div className="wa-messages-area" ref={messagesScrollRef}>
           {error && <div className="wa-error-banner">{error}</div>}
 
@@ -686,9 +791,13 @@ export default function TeamChat({ data, reload }) {
             </div>
           ) : filteredMessages.length === 0 ? (
             <div className="wa-welcome-box">
-              <div className="wa-lock-badge">🔒 Messages are end-to-end secured.</div>
-              <h3>#{activeChannel.name}</h3>
-              <p>{activeChannel.description || 'Send a message to start team coordination.'}</p>
+              <div className="wa-lock-badge">🔒 End-to-end workspace protected</div>
+              <h3>{currentChatInfo.title}</h3>
+              <p>
+                {currentChatInfo.isDirect
+                  ? `Send a message to start direct chat with ${currentChatInfo.title}.`
+                  : (currentChatInfo.description || 'Send a message to start team coordination.')}
+              </p>
             </div>
           ) : (
             messageGroups.map((group, gIdx) => (
@@ -704,22 +813,14 @@ export default function TeamChat({ data, reload }) {
                   return (
                     <div key={msg.id} className={`wa-bubble-row ${isOwn ? 'outgoing' : 'incoming'}`}>
                       <div className="wa-bubble">
-                        {/* Sender header (only for incoming messages in group chats) */}
                         {!isOwn && (
                           <div className="wa-bubble-sender-row">
                             <span className="wa-bubble-sender-name" style={{ color: nameColor }}>
                               ~ {msg.senderName}
                             </span>
                             <span className="wa-bubble-sender-phone">
-                              {msg.senderRole || '+91 7600 918 041'}
+                              {msg.senderRole || 'Member'}
                             </span>
-                          </div>
-                        )}
-
-                        {/* Optional Forwarded Label */}
-                        {msg.isForwarded && (
-                          <div className="wa-forwarded-tag">
-                            ↪ Forwarded
                           </div>
                         )}
 
@@ -770,7 +871,7 @@ export default function TeamChat({ data, reload }) {
                           </div>
                         )}
 
-                        {/* Simulated Voice note waveform if body includes [voice note] */}
+                        {/* Audio Waveform Simulator */}
                         {msg.body && msg.body.toLowerCase().includes('voice note') ? (
                           <div className="wa-voice-note-player">
                             <button
@@ -789,7 +890,6 @@ export default function TeamChat({ data, reload }) {
                               <span className="wa-wave-bar" style={{ height: '100%' }} />
                               <span className="wa-wave-bar" style={{ height: '70%' }} />
                               <span className="wa-wave-bar" style={{ height: '45%' }} />
-                              <span className="wa-wave-bar" style={{ height: '65%' }} />
                             </div>
                             <span className="wa-voice-duration">0:12</span>
                             <div className="wa-voice-mic-badge">🎙</div>
@@ -814,7 +914,7 @@ export default function TeamChat({ data, reload }) {
                           )
                         )}
 
-                        {/* Time and checkmarks */}
+                        {/* Timestamp & double checks */}
                         <div className="wa-bubble-meta">
                           <span className="wa-bubble-time">{formatChatTime(msg.createdAt)}</span>
                           {isOwn && (
@@ -849,7 +949,7 @@ export default function TeamChat({ data, reload }) {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Bottom Input Area */}
+        {/* Bottom Input Bar */}
         <div className="wa-input-footer">
           {attachment && (
             <div className="wa-attach-preview-banner">
@@ -933,7 +1033,7 @@ export default function TeamChat({ data, reload }) {
             <input
               type="text"
               className="wa-message-input"
-              placeholder="Type a message"
+              placeholder={`Message ${currentChatInfo.title}...`}
               value={inputText}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
