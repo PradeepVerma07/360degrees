@@ -131,6 +131,8 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
 
   // Mobile navigation state (false = showing conversation list, true = showing chat messages)
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
@@ -146,6 +148,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
+  const iceCandidatesQueueRef = useRef([]);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -230,8 +233,37 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
+  // Bind media streams whenever streams or elements update
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, callActive]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(e => console.log('[CI360 Audio] AutoPlay notice:', e));
+    }
+  }, [remoteStream, callActive]);
+
+  // Helper to drain queued ICE candidates
+  const drainIceCandidates = useCallback(async (pc) => {
+    while (iceCandidatesQueueRef.current.length > 0) {
+      const candidate = iceCandidatesQueueRef.current.shift();
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.warn('[CI360 WebRTC] Queued candidate add notice:', err);
+      }
+    }
+  }, []);
+
   // Initialize WebRTC Peer Connection
-  const initPeerConnection = useCallback((localStream) => {
+  const initPeerConnection = useCallback((mediaStream) => {
     if (peerConnectionRef.current) {
       try {
         peerConnectionRef.current.close();
@@ -240,27 +272,22 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       }
     }
 
+    iceCandidatesQueueRef.current = [];
     const pc = new RTCPeerConnection(ICE_SERVERS);
     peerConnectionRef.current = pc;
 
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => {
+        pc.addTrack(track, mediaStream);
       });
     }
 
     pc.ontrack = (event) => {
-      console.log('[CI360 WebRTC] Inbound stream track received:', event.track.kind);
-      if (event.streams && event.streams[0]) {
-        remoteStreamRef.current = event.streams[0];
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = event.streams[0];
-          remoteAudioRef.current.play().catch(() => {});
-        }
-      }
+      console.log('[CI360 WebRTC] Inbound stream track received:', event.track.kind, event.streams);
+      const inboundStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      remoteStreamRef.current = inboundStream;
+      setRemoteStream(inboundStream);
+      setCallStatus('connected');
     };
 
     pc.onicecandidate = (event) => {
@@ -292,13 +319,14 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     setIsMuted(false);
     setIsVideoOff(false);
     setIsScreenSharing(false);
+    setRemoteStream(null);
 
     let stream = null;
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
-          video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+          video: type === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
         }).catch(err => {
           console.warn('[CI360] getUserMedia error:', err);
           return null;
@@ -306,9 +334,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
 
         if (stream) {
           localStreamRef.current = stream;
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
-          }
+          setLocalStream(stream);
         }
       }
     } catch (e) {
@@ -319,7 +345,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     try {
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
-        offerToReceiveVideo: type === 'video'
+        offerToReceiveVideo: true
       });
       await pc.setLocalDescription(offer);
 
@@ -337,10 +363,9 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       console.warn('[CI360 WebRTC] offer creation notice:', err);
     }
 
-    // Safety timer to mark connected if answer is slightly delayed
     setTimeout(() => {
       setCallStatus(s => s === 'calling' ? 'connected' : s);
-    }, 2500);
+    }, 3000);
   };
 
   // Accept Incoming Call
@@ -354,13 +379,14 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     setIsMuted(false);
     setIsVideoOff(false);
     setIsScreenSharing(false);
+    setRemoteStream(null);
 
     let stream = null;
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
-          video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+          video: type === 'video' ? { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' } : false
         }).catch(err => {
           console.warn('[CI360] getUserMedia accept error:', err);
           return null;
@@ -368,9 +394,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
 
         if (stream) {
           localStreamRef.current = stream;
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
-          }
+          setLocalStream(stream);
         }
       }
     } catch (e) {
@@ -381,6 +405,8 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     if (callData.offer) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
+        await drainIceCandidates(pc);
+
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -416,6 +442,10 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     if (remoteStreamRef.current) {
       remoteStreamRef.current = null;
     }
+    iceCandidatesQueueRef.current = [];
+    setLocalStream(null);
+    setRemoteStream(null);
+
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
@@ -454,9 +484,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
           if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             const vStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             localStreamRef.current = vStream;
-            if (localVideoRef.current) {
-              localVideoRef.current.srcObject = vStream;
-            }
+            setLocalStream(vStream);
             if (peerConnectionRef.current) {
               vStream.getVideoTracks().forEach(track => {
                 peerConnectionRef.current.addTrack(track, vStream);
@@ -478,17 +506,15 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
       setIsScreenSharing(false);
-      if (callType === 'video' && localStreamRef.current && localVideoRef.current) {
-        localVideoRef.current.srcObject = localStreamRef.current;
+      if (callType === 'video' && localStreamRef.current) {
+        setLocalStream(localStreamRef.current);
       }
     } else {
       try {
         if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
           const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
           setIsScreenSharing(true);
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = screenStream;
-          }
+          setLocalStream(screenStream);
           if (peerConnectionRef.current) {
             const screenTrack = screenStream.getVideoTracks()[0];
             const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
@@ -498,8 +524,8 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
           }
           screenStream.getVideoTracks()[0].onended = () => {
             setIsScreenSharing(false);
-            if (localStreamRef.current && localVideoRef.current) {
-              localVideoRef.current.srcObject = localStreamRef.current;
+            if (localStreamRef.current) {
+              setLocalStream(localStreamRef.current);
             }
           };
         }
@@ -580,6 +606,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       if (data.fromId !== currentUser.id && peerConnectionRef.current && data.answer) {
         try {
           await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          await drainIceCandidates(peerConnectionRef.current);
           setCallStatus('connected');
         } catch (e) {
           console.warn('[CI360 WebRTC] setRemoteDescription error on accept:', e);
@@ -588,13 +615,17 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     };
 
     const onCallSignal = async (data) => {
-      if (data.fromId !== currentUser.id && peerConnectionRef.current && data.signal) {
-        try {
-          if (data.signal.type === 'candidate' && data.signal.candidate) {
-            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+      if (data.fromId !== currentUser.id && data.signal) {
+        if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription && peerConnectionRef.current.remoteDescription.type) {
+          try {
+            if (data.signal.type === 'candidate' && data.signal.candidate) {
+              await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+            }
+          } catch (e) {
+            console.warn('[CI360 WebRTC] addIceCandidate error:', e);
           }
-        } catch (e) {
-          console.warn('[CI360 WebRTC] addIceCandidate error:', e);
+        } else if (data.signal.type === 'candidate' && data.signal.candidate) {
+          iceCandidatesQueueRef.current.push(data.signal.candidate);
         }
       }
     };
@@ -629,7 +660,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       socket.off('call:signal', onCallSignal);
       socket.off('call:ended', onCallEnded);
     };
-  }, [activeChannelId, currentUser.name, currentUser.id, callActive, scrollToBottom]);
+  }, [activeChannelId, currentUser.name, currentUser.id, callActive, scrollToBottom, drainIceCandidates]);
 
   const handleInputChange = (e) => {
     setInputText(e.target.value);
@@ -1754,8 +1785,8 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
                     className="wa-call-remote-video"
                   />
 
-                  {/* Fallback Display if video camera is off / initializing */}
-                  {(!remoteStreamRef.current || isVideoOff) && (
+                  {/* Fallback Display if remote stream is connecting or video camera is off */}
+                  {(!remoteStream || isVideoOff) && (
                     <div
                       style={{
                         position: 'absolute',
@@ -1777,7 +1808,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
                         </div>
                         <h4 style={{ margin: '0 0 6px', fontSize: '18px' }}>{currentChatInfo.title}</h4>
                         <p style={{ color: '#25D366', fontSize: '12.5px', margin: 0 }}>
-                          {callStatus === 'calling' ? 'Connecting media...' : 'Real-Time HD Video Active'}
+                          {callStatus === 'calling' ? 'Calling...' : 'Connecting live stream...'}
                         </p>
                       </div>
                     </div>
