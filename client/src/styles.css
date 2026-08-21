@@ -3345,6 +3345,598 @@ a {
   font-weight: 600;
 }
 
+/* ==========================================================================
+   CALLING FEATURE (VOICE & VIDEO) + GENERAL ICON SECTION STYLES
+   ========================================================================== */
+
+/* 1. Interactive Message Search Bar */
+.wa-search-inline-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #FFFFFF;
+  border-bottom: 1px solid #E9EDEF;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+  z-index: 10;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.wa-search-inline-input {
+  flex: 1;
+  border: 1px solid #D1D7DB;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  background: #F0F2F5;
+  outline: none;
+}
+
+.wa-search-inline-input:focus {
+  border-color: #008069;
+  background: #FFFFFF;
+}
+
+.wa-search-match-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #008069;
+  background: #E7FCE3;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.wa-search-close-btn {
+  background: none;
+  border: none;
+  color: #54656F;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.wa-search-close-btn:hover {
+  background: #F0F2F5;
+  color: #111B21;
+}
+
+/* 2. Channel Header Hover / Clickable Area */
+.wa-convo-header-left.clickable {
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.wa-convo-header-left.clickable:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+/* 3. General Icon Section / Channel Info Drawer */
+.wa-info-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 20, 26, 0.6);
+  z-index: 1200;
+  display: flex;
+  justify-content: flex-end;
+  backdrop-filter: blur(3px);
+  animation: fadeIn 0.2s ease;
+}
+
+.wa-info-drawer {
+  width: 380px;
+  max-width: 90vw;
+  height: 100%;
+  background: #F0F2F5;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: slideInRight 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.wa-info-drawer-header {
+  height: 60px;
+  background: #008069;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  flex-shrink: 0;
+}
+
+.wa-info-drawer-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.wa-info-drawer-close {
+  background: transparent;
+  border: none;
+  color: #FFFFFF;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-info-drawer-body {
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wa-info-profile-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.wa-info-avatar-large {
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: #008069;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  box-shadow: 0 4px 12px rgba(0, 128, 105, 0.25);
+}
+
+.wa-info-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111B21;
+  margin: 0 0 4px;
+}
+
+.wa-info-tag {
+  font-size: 12.5px;
+  color: #667781;
+  margin: 0 0 16px;
+}
+
+.wa-info-action-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  justify-content: center;
+}
+
+.wa-info-action-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  background: #F0F2F5;
+  border: 1px solid #E9EDEF;
+  border-radius: 10px;
+  color: #008069;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.wa-info-action-btn:hover {
+  background: #E7FCE3;
+  border-color: #C1ECC0;
+  transform: translateY(-1px);
+}
+
+.wa-info-section-card {
+  background: #FFFFFF;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.wa-info-section-header {
+  font-size: 13px;
+  font-weight: 700;
+  color: #008069;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wa-info-member-search {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #D1D7DB;
+  background: #F0F2F5;
+  font-size: 13px;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.wa-info-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.wa-info-member-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background 0.12s;
+}
+
+.wa-info-member-item:hover {
+  background: #F5F6F6;
+}
+
+.wa-info-member-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #008069;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.wa-info-member-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.wa-info-member-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #111B21;
+  margin: 0;
+}
+
+.wa-info-member-role {
+  font-size: 11.5px;
+  color: #667781;
+}
+
+.wa-info-member-call-btn {
+  background: none;
+  border: none;
+  color: #008069;
+  padding: 6px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.wa-info-member-call-btn:hover {
+  background: #E7FCE3;
+}
+
+/* 4. REAL-TIME AUDIO & VIDEO CALL MODAL */
+.wa-call-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 20, 26, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.25s ease;
+}
+
+.wa-call-window {
+  width: 100%;
+  max-width: 720px;
+  height: 520px;
+  background: #111B21;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.wa-call-header {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(17, 27, 33, 0.9) 0%, rgba(17, 27, 33, 0) 100%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+}
+
+.wa-call-header-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wa-call-channel-badge {
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wa-call-status-text {
+  color: #25D366;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wa-call-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: #0C1317;
+}
+
+/* Audio Call Visualizer */
+.wa-call-audio-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.wa-call-avatar-pulse {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: #008069;
+  color: #FFFFFF;
+  font-size: 42px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.7);
+  animation: callPulse 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+@keyframes callPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 25px rgba(37, 211, 102, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(37, 211, 102, 0);
+  }
+}
+
+.wa-call-name {
+  color: #FFFFFF;
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.wa-call-timer {
+  color: #8696A0;
+  font-size: 14px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px 14px;
+  border-radius: 12px;
+}
+
+/* Video Call Display */
+.wa-call-video-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #000000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wa-call-remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wa-call-local-pip {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  width: 140px;
+  height: 105px;
+  background: #1F2C34;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+}
+
+.wa-call-local-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+/* Call Control Footer */
+.wa-call-footer {
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: linear-gradient(0deg, rgba(17, 27, 33, 0.95) 0%, rgba(17, 27, 33, 0) 100%);
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+}
+
+.wa-call-ctrl-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.wa-call-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.08);
+}
+
+.wa-call-ctrl-btn.active-off {
+  background: #EA4335;
+  color: #FFFFFF;
+}
+
+.wa-call-ctrl-btn.end-call {
+  background: #EA4335;
+  width: 54px;
+  height: 54px;
+  color: #FFFFFF;
+}
+
+.wa-call-ctrl-btn.end-call:hover {
+  background: #D93025;
+  transform: scale(1.1);
+}
+
+/* 5. Incoming Call Alert Toast */
+.wa-incoming-call-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  background: #111B21;
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  border-radius: 14px;
+  padding: 16px 20px;
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.wa-incoming-toast-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #008069;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.wa-incoming-toast-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.wa-btn-accept-call {
+  background: #25D366;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.wa-btn-accept-call:hover {
+  transform: scale(1.1);
+}
+
+.wa-btn-decline-call {
+  background: #EA4335;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.wa-btn-decline-call:hover {
+  transform: scale(1.1);
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 @media (max-width: 900px) {
   .wa-utility-rail {
     display: none !important;

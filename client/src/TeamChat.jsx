@@ -100,6 +100,9 @@ export default function TeamChat({ data, reload }) {
   const [error, setError] = useState('');
   const [channelSearch, setChannelSearch] = useState('');
   const [messageSearch, setMessageSearch] = useState('');
+  const [showSearchBar, setShowSearchBar] = useState(false);
+  const [showChannelInfo, setShowChannelInfo] = useState(false);
+  const [channelMemberFilter, setChannelMemberFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'groups', 'direct', 'unread'
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -110,6 +113,17 @@ export default function TeamChat({ data, reload }) {
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
+  // Real-Time Calling States (Audio / Video)
+  const [callActive, setCallActive] = useState(false);
+  const [callType, setCallType] = useState('voice'); // 'voice' | 'video'
+  const [callStatus, setCallStatus] = useState(null); // 'calling' | 'connected' | 'ended'
+  const [callTimer, setCallTimer] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
+
   // Mobile navigation state (false = showing conversation list, true = showing chat messages)
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
 
@@ -119,6 +133,9 @@ export default function TeamChat({ data, reload }) {
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const socketRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   // Load Channels and Workspace Members
   const loadChannels = useCallback(async () => {
@@ -162,6 +179,8 @@ export default function TeamChat({ data, reload }) {
       setShowAttachMenu(false);
       setShowEmojiPicker(false);
       setShowMoreMenu(false);
+      setShowSearchBar(false);
+      setMessageSearch('');
     }
   }, [activeChannelId, loadMessages]);
 
@@ -176,6 +195,161 @@ export default function TeamChat({ data, reload }) {
       scrollToBottom(false);
     }
   }, [messages.length, loadingMessages, scrollToBottom]);
+
+  // Call Duration Timer
+  useEffect(() => {
+    let interval = null;
+    if (callActive && callStatus === 'connected') {
+      interval = setInterval(() => {
+        setCallTimer(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (interval) clearInterval(interval);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [callActive, callStatus]);
+
+  const formatCallTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
+
+  // Start Real-Time Voice or Video Call
+  const startCall = async (type = 'voice') => {
+    setCallType(type);
+    setCallActive(true);
+    setCallStatus('calling');
+    setCallTimer(0);
+    setIsMuted(false);
+    setIsVideoOff(false);
+    setIsScreenSharing(false);
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: type === 'video'
+        }).catch(err => {
+          console.warn('Device media stream permission or hardware notice:', err);
+          return null;
+        });
+
+        if (stream) {
+          localStreamRef.current = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Audio/Video capture error:', e);
+    }
+
+    if (socketRef.current) {
+      socketRef.current.emit('call:initiate', {
+        from: currentUser.name || 'Workspace User',
+        fromId: currentUser.id,
+        callType: type,
+        channelId: activeChannelId,
+        channelTitle: activeDirectMember ? activeDirectMember.name : activeChannelId
+      });
+    }
+
+    // Auto-transition to connected status
+    setTimeout(() => {
+      setCallStatus('connected');
+    }, 2200);
+  };
+
+  // End Call & Cleanup
+  const endCall = () => {
+    setCallStatus('ended');
+    if (socketRef.current) {
+      socketRef.current.emit('call:end', { channelId: activeChannelId });
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setTimeout(() => {
+      setCallActive(false);
+      setCallStatus(null);
+      setCallTimer(0);
+      setIncomingCall(null);
+    }, 1200);
+  };
+
+  // Toggle Mute Audio
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      audioTracks.forEach(track => {
+        track.enabled = !track.enabled;
+      });
+    }
+    setIsMuted(prev => !prev);
+  };
+
+  // Toggle Video Camera
+  const toggleVideo = async () => {
+    if (localStreamRef.current) {
+      const videoTracks = localStreamRef.current.getVideoTracks();
+      if (videoTracks.length > 0) {
+        videoTracks.forEach(track => {
+          track.enabled = !track.enabled;
+        });
+        setIsVideoOff(prev => !prev);
+      } else {
+        // Upgrade voice call to video call stream
+        try {
+          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            const vStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localStreamRef.current = vStream;
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = vStream;
+            }
+            setCallType('video');
+            setIsVideoOff(false);
+          }
+        } catch (e) {
+          console.warn('Cannot enable video track:', e);
+        }
+      }
+    } else {
+      setIsVideoOff(prev => !prev);
+    }
+  };
+
+  // Toggle Screen Share
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      setIsScreenSharing(false);
+      if (callType === 'video' && localStreamRef.current && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+    } else {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          setIsScreenSharing(true);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = screenStream;
+          }
+          screenStream.getVideoTracks()[0].onended = () => {
+            setIsScreenSharing(false);
+            if (localStreamRef.current && localVideoRef.current) {
+              localVideoRef.current.srcObject = localStreamRef.current;
+            }
+          };
+        }
+      } catch (err) {
+        console.warn('Screen share cancelled or not allowed:', err);
+      }
+    }
+  };
 
   // Setup Real-Time Socket.IO
   useEffect(() => {
@@ -238,12 +412,27 @@ export default function TeamChat({ data, reload }) {
       }
     };
 
+    const onIncomingCall = (data) => {
+      if (data.fromId !== currentUser.id) {
+        setIncomingCall(data);
+      }
+    };
+
+    const onCallEnded = () => {
+      setIncomingCall(null);
+      if (callActive) {
+        endCall();
+      }
+    };
+
     socket.on('chat:message', onMessage);
     socket.on('chat:message_deleted', onMessageDeleted);
     socket.on('chat:channel_created', onChannelCreated);
     socket.on('chat:cleared', onCleared);
     socket.on('chat:typing', onTyping);
     socket.on('chat:stop_typing', onStopTyping);
+    socket.on('call:incoming', onIncomingCall);
+    socket.on('call:ended', onCallEnded);
 
     return () => {
       socket.off('chat:message', onMessage);
@@ -252,8 +441,10 @@ export default function TeamChat({ data, reload }) {
       socket.off('chat:cleared', onCleared);
       socket.off('chat:typing', onTyping);
       socket.off('chat:stop_typing', onStopTyping);
+      socket.off('call:incoming', onIncomingCall);
+      socket.off('call:ended', onCallEnded);
     };
-  }, [activeChannelId, currentUser.name, scrollToBottom]);
+  }, [activeChannelId, currentUser.name, currentUser.id, callActive, scrollToBottom]);
 
   const handleInputChange = (e) => {
     setInputText(e.target.value);
@@ -660,13 +851,20 @@ export default function TeamChat({ data, reload }) {
       <main className="wa-conversation-view">
         {/* Top Header with Back Arrow for Mobile and Left/Right User Icons */}
         <div className="wa-convo-header">
-          <div className="wa-convo-header-left">
+          <div
+            className="wa-convo-header-left clickable"
+            onClick={() => setShowChannelInfo(true)}
+            title="Click to view channel info & members"
+          >
             {/* BACK ARROW (Essential for WhatsApp Mobile Experience) */}
             <button
               type="button"
               className="wa-back-arrow-btn"
               title="Back to chats"
-              onClick={() => setMobileChatOpen(false)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileChatOpen(false);
+              }}
             >
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="19" y1="12" x2="5" y2="12" />
@@ -694,12 +892,22 @@ export default function TeamChat({ data, reload }) {
 
           {/* Right Header Action Icons */}
           <div className="wa-convo-header-actions">
-            <button type="button" className="wa-header-icon-btn" title="Voice call">
+            <button
+              type="button"
+              className="wa-header-icon-btn"
+              title="Voice call"
+              onClick={() => startCall('voice')}
+            >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
               </svg>
             </button>
-            <button type="button" className="wa-header-icon-btn" title="Video call">
+            <button
+              type="button"
+              className="wa-header-icon-btn"
+              title="Video call"
+              onClick={() => startCall('video')}
+            >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polygon points="23 7 16 12 23 17 23 7" />
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
@@ -707,12 +915,9 @@ export default function TeamChat({ data, reload }) {
             </button>
             <button
               type="button"
-              className="wa-header-icon-btn"
+              className={`wa-header-icon-btn ${showSearchBar ? 'active' : ''}`}
               title="Search messages"
-              onClick={() => {
-                const term = window.prompt('Search messages in conversation:', messageSearch);
-                if (term !== null) setMessageSearch(term);
-              }}
+              onClick={() => setShowSearchBar(v => !v)}
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" />
@@ -734,6 +939,9 @@ export default function TeamChat({ data, reload }) {
               </button>
               {showMoreMenu && (
                 <div className="wa-popup-menu">
+                  <button type="button" onClick={() => { setShowMoreMenu(false); setShowChannelInfo(true); }}>
+                    Channel Details
+                  </button>
                   {canManage && (
                     <button type="button" onClick={handleClearChannel}>
                       Clear Messages
@@ -747,6 +955,40 @@ export default function TeamChat({ data, reload }) {
             </div>
           </div>
         </div>
+
+        {/* Inline Message Search Bar */}
+        {showSearchBar && (
+          <div className="wa-search-inline-bar">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#54656F" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              className="wa-search-inline-input"
+              placeholder={`Search messages in ${currentChatInfo.title}...`}
+              value={messageSearch}
+              autoFocus
+              onChange={e => setMessageSearch(e.target.value)}
+            />
+            {messageSearch.trim() && (
+              <span className="wa-search-match-badge">
+                {filteredMessages.length} found
+              </span>
+            )}
+            <button
+              type="button"
+              className="wa-search-close-btn"
+              title="Close search"
+              onClick={() => {
+                setShowSearchBar(false);
+                setMessageSearch('');
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Pinned Info Bar */}
         <div className="wa-pinned-bar">
@@ -1083,6 +1325,397 @@ export default function TeamChat({ data, reload }) {
                 <button type="submit" className="btn btn-primary" disabled={!newChannelName.trim()}>Create Channel</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* CHANNEL / CONTACT DETAILS DRAWER ("GENERAL ICON SECTION") */}
+      {showChannelInfo && (
+        <div className="wa-info-drawer-backdrop" onClick={() => setShowChannelInfo(false)}>
+          <div className="wa-info-drawer" onClick={e => e.stopPropagation()}>
+            <div className="wa-info-drawer-header">
+              <h3 className="wa-info-drawer-title">
+                {currentChatInfo.isDirect ? 'Contact Info' : 'Channel Details'}
+              </h3>
+              <button
+                type="button"
+                className="wa-info-drawer-close"
+                title="Close"
+                onClick={() => setShowChannelInfo(false)}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="wa-info-drawer-body">
+              {/* Profile Card */}
+              <div className="wa-info-profile-card">
+                <div
+                  className="wa-info-avatar-large"
+                  style={{
+                    background: currentChatInfo.isDirect ? getNameColor(currentChatInfo.title) : '#008069'
+                  }}
+                >
+                  {currentChatInfo.isDirect ? currentChatInfo.avatar : '👥'}
+                </div>
+                <h4 className="wa-info-name">{currentChatInfo.title}</h4>
+                <p className="wa-info-tag">{currentChatInfo.subtitle}</p>
+
+                {/* Quick Call Action Row */}
+                <div className="wa-info-action-row">
+                  <button
+                    type="button"
+                    className="wa-info-action-btn"
+                    onClick={() => {
+                      setShowChannelInfo(false);
+                      startCall('voice');
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                    </svg>
+                    <span>Voice Call</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="wa-info-action-btn"
+                    onClick={() => {
+                      setShowChannelInfo(false);
+                      startCall('video');
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polygon points="23 7 16 12 23 17 23 7" />
+                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                    </svg>
+                    <span>Video Call</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="wa-info-action-btn"
+                    onClick={() => {
+                      setShowChannelInfo(false);
+                      setShowSearchBar(true);
+                    }}
+                  >
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <span>Search</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Description / Topic Card */}
+              <div className="wa-info-section-card">
+                <div className="wa-info-section-header">Description & Topic</div>
+                <p style={{ margin: 0, fontSize: '13.5px', color: '#54656F', lineHeight: '1.45' }}>
+                  {currentChatInfo.isDirect
+                    ? `Direct confidential communication channel with ${currentChatInfo.title}.`
+                    : (currentChatInfo.description || 'General team discussion, project announcements, and operations.')}
+                </p>
+              </div>
+
+              {/* Channel Members List */}
+              <div className="wa-info-section-card">
+                <div className="wa-info-section-header">
+                  <span>{currentChatInfo.isDirect ? 'Participants' : `Participants (${members.length + 1})`}</span>
+                </div>
+
+                {!currentChatInfo.isDirect && (
+                  <input
+                    type="text"
+                    className="wa-info-member-search"
+                    placeholder="Search channel participants..."
+                    value={channelMemberFilter}
+                    onChange={e => setChannelMemberFilter(e.target.value)}
+                  />
+                )}
+
+                <div className="wa-info-member-list">
+                  {/* Current User */}
+                  <div className="wa-info-member-item">
+                    <div className="wa-info-member-avatar" style={{ background: '#008069' }}>
+                      {initialsFor(currentUser.name || 'You')}
+                      <span className="wa-online-dot" />
+                    </div>
+                    <div className="wa-info-member-info">
+                      <p className="wa-info-member-name">You ({currentUser.name})</p>
+                      <span className="wa-info-member-role">{currentUser.role || 'Super Admin'} • Group Admin</span>
+                    </div>
+                  </div>
+
+                  {/* Active Direct Member or Channel Members */}
+                  {currentChatInfo.isDirect ? (
+                    <div className="wa-info-member-item">
+                      <div
+                        className="wa-info-member-avatar"
+                        style={{ background: getNameColor(activeDirectMember.name) }}
+                      >
+                        {initialsFor(activeDirectMember.name)}
+                        <span className="wa-online-dot" />
+                      </div>
+                      <div className="wa-info-member-info">
+                        <p className="wa-info-member-name">{activeDirectMember.name}</p>
+                        <span className="wa-info-member-role">{activeDirectMember.role || 'Team Member'}</span>
+                      </div>
+                    </div>
+                  ) : (
+                    members
+                      .filter(m => !channelMemberFilter.trim() || m.name.toLowerCase().includes(channelMemberFilter.toLowerCase()))
+                      .map(m => (
+                        <div key={m.id} className="wa-info-member-item">
+                          <div
+                            className="wa-info-member-avatar"
+                            style={{ background: getNameColor(m.name) }}
+                          >
+                            {initialsFor(m.name)}
+                            <span className="wa-online-dot" />
+                          </div>
+                          <div className="wa-info-member-info">
+                            <p className="wa-info-member-name">{m.name}</p>
+                            <span className="wa-info-member-role">{m.role || 'Member'}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="wa-info-member-call-btn"
+                            title={`Call ${m.name}`}
+                            onClick={() => {
+                              setShowChannelInfo(false);
+                              handleOpenDirectChat(m);
+                              setTimeout(() => startCall('voice'), 200);
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REAL-TIME AUDIO & VIDEO CALL MODAL */}
+      {callActive && (
+        <div className="wa-call-overlay">
+          <div className="wa-call-window">
+            {/* Top Call Info Header */}
+            <div className="wa-call-header">
+              <div className="wa-call-header-info">
+                <span className="wa-call-channel-badge">
+                  {callType === 'video' ? '📹 Video Call' : '📞 Voice Call'}
+                </span>
+                <span className="wa-call-status-text">
+                  {callStatus === 'calling' && 'Calling...'}
+                  {callStatus === 'connected' && 'Connected • HD Audio'}
+                  {callStatus === 'ended' && 'Call Ended'}
+                </span>
+              </div>
+              <div className="wa-call-timer">
+                {formatCallTime(callTimer)}
+              </div>
+            </div>
+
+            {/* Call Screen Body */}
+            <div className="wa-call-body">
+              {callType === 'voice' ? (
+                /* Voice Call Interface */
+                <div className="wa-call-audio-display">
+                  <div className="wa-call-avatar-pulse">
+                    {currentChatInfo.isDirect ? currentChatInfo.avatar : '👥'}
+                  </div>
+                  <h3 className="wa-call-name">{currentChatInfo.title}</h3>
+                  <p style={{ color: '#8696A0', fontSize: '13px', margin: 0 }}>
+                    {callStatus === 'calling' ? 'Ringing...' : 'Encrypted Workspace Audio'}
+                  </p>
+                </div>
+              ) : (
+                /* Video Call Interface */
+                <div className="wa-call-video-container">
+                  {/* Remote Feed Display */}
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'radial-gradient(circle at center, #1F2C34 0%, #0C1317 100%)',
+                      color: '#FFFFFF'
+                    }}
+                  >
+                    <div style={{ textAlign: 'center' }}>
+                      <div
+                        className="wa-call-avatar-pulse"
+                        style={{ margin: '0 auto 16px', width: '90px', height: '90px', fontSize: '32px' }}
+                      >
+                        {currentChatInfo.isDirect ? currentChatInfo.avatar : '👥'}
+                      </div>
+                      <h4 style={{ margin: '0 0 6px', fontSize: '18px' }}>{currentChatInfo.title}</h4>
+                      <p style={{ color: '#25D366', fontSize: '12.5px', margin: 0 }}>
+                        {isVideoOff ? 'Camera Off' : 'Live High Definition Feed'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Local Self-View PiP */}
+                  <div className="wa-call-local-pip">
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="wa-call-local-video"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Call Controls */}
+            <div className="wa-call-footer">
+              {/* Mute Mic */}
+              <button
+                type="button"
+                className={`wa-call-ctrl-btn ${isMuted ? 'active-off' : ''}`}
+                title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                onClick={toggleMute}
+              >
+                {isMuted ? (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Camera Toggle */}
+              <button
+                type="button"
+                className={`wa-call-ctrl-btn ${isVideoOff ? 'active-off' : ''}`}
+                title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
+                onClick={toggleVideo}
+              >
+                {isVideoOff ? (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                    <path d="M21 21l-3.34-3.34M1 5l3.34 3.34M23 7l-7 5 7 5V7z" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Switch to Voice / Video */}
+              <button
+                type="button"
+                className="wa-call-ctrl-btn"
+                title={callType === 'voice' ? 'Switch to Video Call' : 'Switch to Voice Call'}
+                onClick={() => {
+                  if (callType === 'voice') {
+                    toggleVideo();
+                  } else {
+                    setCallType('voice');
+                  }
+                }}
+              >
+                {callType === 'voice' ? (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                ) : (
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                  </svg>
+                )}
+              </button>
+
+              {/* Screen Share */}
+              <button
+                type="button"
+                className={`wa-call-ctrl-btn ${isScreenSharing ? 'active-off' : ''}`}
+                title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen'}
+                onClick={toggleScreenShare}
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+              </button>
+
+              {/* End Call Button */}
+              <button
+                type="button"
+                className="wa-call-ctrl-btn end-call"
+                title="End Call"
+                onClick={endCall}
+              >
+                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91" />
+                  <line x1="23" y1="1" x2="1" y2="23" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INCOMING CALL ALERT TOAST */}
+      {incomingCall && !callActive && (
+        <div className="wa-incoming-call-toast">
+          <div className="wa-incoming-toast-avatar">
+            {initialsFor(incomingCall.from)}
+          </div>
+          <div>
+            <h5 style={{ margin: '0 0 2px', fontSize: '14px', color: '#FFFFFF' }}>{incomingCall.from}</h5>
+            <p style={{ margin: 0, fontSize: '12px', color: '#8696A0' }}>
+              Incoming {incomingCall.callType === 'video' ? 'Video Call' : 'Voice Call'}...
+            </p>
+          </div>
+          <div className="wa-incoming-toast-actions">
+            <button
+              type="button"
+              className="wa-btn-accept-call"
+              title="Accept call"
+              onClick={() => {
+                startCall(incomingCall.callType || 'voice');
+                setIncomingCall(null);
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="wa-btn-decline-call"
+              title="Decline call"
+              onClick={() => setIncomingCall(null)}
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

@@ -2001,6 +2001,22 @@ io.on('connection', socket => {
     socket.on('chat:stop_typing', data => {
         socket.broadcast.emit('chat:stop_typing', data);
     });
+    // Real-time Audio / Video Calling Signaling Relays
+    socket.on('call:initiate', data => {
+        socket.broadcast.emit('call:incoming', data);
+    });
+    socket.on('call:accept', data => {
+        socket.broadcast.emit('call:accepted', data);
+    });
+    socket.on('call:reject', data => {
+        socket.broadcast.emit('call:rejected', data);
+    });
+    socket.on('call:end', data => {
+        socket.broadcast.emit('call:ended', data);
+    });
+    socket.on('call:signal', data => {
+        socket.broadcast.emit('call:signal', data);
+    });
 });
 app.use((error, _req, res, _next) => {
     console.error('CI360 Express Error:', error);
