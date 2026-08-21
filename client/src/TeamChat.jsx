@@ -90,7 +90,14 @@ const ICE_SERVERS = {
   ]
 };
 
-export default function TeamChat({ data, reload, onCloseMobile }) {
+export default function TeamChat({
+  data,
+  reload,
+  onCloseMobile,
+  pendingCallAccept,
+  onClearPendingCallAccept,
+  targetChannelId
+}) {
   const currentUser = data?.user || {};
   const canSend = (data?.permissions || currentUser?.permissions || []).includes('chat.send');
   const canManage = (data?.permissions || currentUser?.permissions || []).includes('chat.manage');
@@ -199,6 +206,31 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       setMessageSearch('');
     }
   }, [activeChannelId, loadMessages]);
+
+  // Handle globally accepted incoming calls from outside Team Chat
+  useEffect(() => {
+    if (pendingCallAccept) {
+      acceptIncomingCall(pendingCallAccept);
+      if (onClearPendingCallAccept) onClearPendingCallAccept();
+    }
+  }, [pendingCallAccept, onClearPendingCallAccept]);
+
+  // Handle external channel navigation (e.g. from global chat toast or notification dropdown)
+  useEffect(() => {
+    if (targetChannelId && targetChannelId !== activeChannelId) {
+      if (targetChannelId.startsWith('dm-')) {
+        const otherId = targetChannelId.replace('dm-', '').split('-').find(id => id !== currentUser.id);
+        const member = members.find(m => m.id === otherId);
+        if (member) {
+          setActiveDirectMember(member);
+        }
+      } else {
+        setActiveDirectMember(null);
+      }
+      setActiveChannelId(targetChannelId);
+      setMobileChatOpen(true);
+    }
+  }, [targetChannelId, activeChannelId, currentUser.id, members]);
 
   const scrollToBottom = useCallback((smooth = true) => {
     if (messagesEndRef.current) {
@@ -423,7 +455,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     }
   };
 
-  // End Call & Full Cleanup
+  // End Call & Full Immediate Dual-Sided Cleanup
   const endCall = () => {
     setCallStatus('ended');
     if (socketRef.current) {
@@ -450,12 +482,10 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
 
-    setTimeout(() => {
-      setCallActive(false);
-      setCallStatus(null);
-      setCallTimer(0);
-      setIncomingCall(null);
-    }, 1000);
+    setCallActive(false);
+    setCallStatus(null);
+    setCallTimer(0);
+    setIncomingCall(null);
   };
 
   // Toggle Mute Audio
@@ -545,12 +575,27 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
         if (c.id === newMsg.channelId) {
           return {
             ...c,
+            updatedAt: newMsg.createdAt,
             messageCount: (c.messageCount || 0) + 1,
             lastMessage: { at: newMsg.createdAt, body: newMsg.body, sender: newMsg.senderName }
           };
         }
         return c;
       }));
+
+      // If DM, update direct member lastActivity so they move to the top
+      if (newMsg.channelId.startsWith('dm-')) {
+        setMembers(prev => prev.map(m => {
+          if (newMsg.channelId.includes(m.id)) {
+            return {
+              ...m,
+              lastActivity: Date.now(),
+              lastMessage: { at: newMsg.createdAt, body: newMsg.body }
+            };
+          }
+          return m;
+        }));
+      }
 
       if (newMsg.channelId === activeChannelId) {
         setMessages(prev => {
@@ -632,9 +677,26 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
 
     const onCallEnded = () => {
       setIncomingCall(null);
-      if (callActive) {
-        endCall();
+      if (peerConnectionRef.current) {
+        try { peerConnectionRef.current.close(); } catch {}
+        peerConnectionRef.current = null;
       }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (remoteStreamRef.current) {
+        remoteStreamRef.current = null;
+      }
+      iceCandidatesQueueRef.current = [];
+      setLocalStream(null);
+      setRemoteStream(null);
+      if (localVideoRef.current) localVideoRef.current.srcObject = null;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+      setCallActive(false);
+      setCallStatus(null);
+      setCallTimer(0);
     };
 
     socket.on('chat:message', onMessage);
@@ -705,6 +767,30 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
         socketRef.current.emit('chat:stop_typing', { channelId: activeChannelId, user: currentUser.name });
       }
 
+      // Update recent activity timestamp for this channel / direct member immediately
+      setChannels(prev => prev.map(c => {
+        if (c.id === activeChannelId) {
+          return {
+            ...c,
+            updatedAt: new Date().toISOString(),
+            lastMessage: { at: new Date().toISOString(), body: inputText.trim() || 'Attachment', sender: 'You' }
+          };
+        }
+        return c;
+      }));
+      if (activeDirectMember) {
+        setMembers(prev => prev.map(m => {
+          if (m.id === activeDirectMember.id) {
+            return {
+              ...m,
+              lastActivity: Date.now(),
+              lastMessage: { at: new Date().toISOString(), body: inputText.trim() || 'Attachment' }
+            };
+          }
+          return m;
+        }));
+      }
+
       await api.sendChatMessage(activeChannelId, {
         body: inputText.trim(),
         attachment: attachment || null
@@ -751,36 +837,34 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
   };
 
   const handleCreateChannel = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!newChannelName.trim()) return;
     try {
       const res = await api.createChatChannel({
-        name: newChannelName.trim().toLowerCase().replace(/\s+/g, '-'),
+        name: newChannelName.trim(),
         description: newChannelDesc.trim()
       });
       setShowNewChannelModal(false);
       setNewChannelName('');
       setNewChannelDesc('');
       if (res.channel) {
-        setActiveDirectMember(null);
+        setChannels(prev => [res.channel, ...prev]);
         setActiveChannelId(res.channel.id);
+        setActiveDirectMember(null);
         setMobileChatOpen(true);
       }
-      loadChannels();
     } catch (err) {
       setError(err.message || 'Failed to create channel');
     }
   };
 
-  // Open Direct Message with a team member
   const handleOpenDirectChat = (member) => {
-    const dmId = getDmChannelId(currentUser.id, member.id);
+    const dmId = `dm-${[currentUser.id, member.id].sort().join('-')}`;
     setActiveDirectMember(member);
     setActiveChannelId(dmId);
     setMobileChatOpen(true);
   };
 
-  // Open Group Channel
   const handleOpenChannel = (channel) => {
     setActiveDirectMember(null);
     setActiveChannelId(channel.id);
@@ -813,7 +897,7 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
     };
   }, [activeDirectMember, activeChannelId, channels, members]);
 
-  // Filter channels and members
+  // Filter & sort channels by latest message / activity (descending, so active chats are ALWAYS at the top)
   const filteredChannels = useMemo(() => {
     let list = channels.filter(c => !c.id.startsWith('dm-'));
     if (activeFilter === 'direct') return [];
@@ -824,9 +908,14 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       const q = channelSearch.toLowerCase();
       list = list.filter(c => c.name.toLowerCase().includes(q) || (c.description || '').toLowerCase().includes(q));
     }
-    return list;
+    return list.sort((a, b) => {
+      const timeA = a.lastMessage?.at ? new Date(a.lastMessage.at).getTime() : new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const timeB = b.lastMessage?.at ? new Date(b.lastMessage.at).getTime() : new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
   }, [channels, activeFilter, channelSearch]);
 
+  // Filter & sort direct members by latest message / activity (descending, so recently messaged members are ALWAYS at the top)
   const filteredMembers = useMemo(() => {
     if (activeFilter === 'groups') return [];
     let list = members;
@@ -834,7 +923,11 @@ export default function TeamChat({ data, reload, onCloseMobile }) {
       const q = channelSearch.toLowerCase();
       list = list.filter(m => m.name.toLowerCase().includes(q) || (m.role || '').toLowerCase().includes(q));
     }
-    return list;
+    return list.sort((a, b) => {
+      const timeA = a.lastMessage?.at ? new Date(a.lastMessage.at).getTime() : (a.lastActivity || 0);
+      const timeB = b.lastMessage?.at ? new Date(b.lastMessage.at).getTime() : (b.lastActivity || 0);
+      return timeB - timeA;
+    });
   }, [members, activeFilter, channelSearch]);
 
   const filteredMessages = useMemo(() => {

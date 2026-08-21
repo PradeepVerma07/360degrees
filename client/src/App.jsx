@@ -347,6 +347,13 @@ export default function App() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [supportCreateSignal, setSupportCreateSignal] = useState(0);
 
+  // Global In-App Notifications & Calling
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [chatNotifications, setChatNotifications] = useState([]);
+  const [chatMessageToast, setChatMessageToast] = useState(null);
+  const [pendingCallAccept, setPendingCallAccept] = useState(null);
+  const [targetChatChannel, setTargetChatChannel] = useState(null);
+
   const load = useCallback(async () => {
     try {
       const res = await api.bootstrap();
@@ -377,6 +384,58 @@ export default function App() {
     socket.on('data:changed', load);
     socket.on('permissions:updated', load);
     socket.on('productivity:changed', load);
+
+    const onIncomingCall = (callData) => {
+      if (callData.fromId !== data?.user?.id) {
+        setIncomingCall(callData);
+        setChatNotifications(prev => [
+          {
+            id: 'call-' + Date.now(),
+            type: 'call',
+            title: callData.from,
+            subtitle: `Incoming ${callData.callType === 'video' ? 'Video' : 'Voice'} Call`,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            callData
+          },
+          ...prev.slice(0, 19)
+        ]);
+      }
+    };
+
+    const onCallEnded = () => {
+      setIncomingCall(null);
+      setPendingCallAccept(null);
+    };
+
+    const onChatMessage = (msg) => {
+      if (msg.senderId !== data?.user?.id) {
+        if (tab !== 'chat') {
+          setChatMessageToast({
+            id: msg.id,
+            sender: msg.senderName,
+            body: msg.body || (msg.attachment ? 'Sent an attachment' : 'New message'),
+            channelId: msg.channelId,
+            time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          });
+        }
+        setChatNotifications(prev => [
+          {
+            id: 'msg-' + msg.id,
+            type: 'message',
+            title: msg.senderName,
+            subtitle: msg.body || (msg.attachment ? 'Sent an attachment' : 'New message'),
+            time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            channelId: msg.channelId
+          },
+          ...prev.filter(n => n.id !== 'msg-' + msg.id).slice(0, 19)
+        ]);
+      }
+    };
+
+    socket.on('call:incoming', onIncomingCall);
+    socket.on('call:ended', onCallEnded);
+    socket.on('chat:message', onChatMessage);
+
     if (socket.connected) setSocketConnected(true);
     return () => {
       socket.off('connect', handleConnect);
@@ -384,8 +443,43 @@ export default function App() {
       socket.off('data:changed', load);
       socket.off('permissions:updated', load);
       socket.off('productivity:changed', load);
+      socket.off('call:incoming', onIncomingCall);
+      socket.off('call:ended', onCallEnded);
+      socket.off('chat:message', onChatMessage);
     };
-  }, [auth, load]);
+  }, [auth, load, data?.user?.id, tab]);
+
+  // Auto-dismiss chat message toast after 5s
+  useEffect(() => {
+    if (!chatMessageToast) return;
+    const t = setTimeout(() => {
+      setChatMessageToast(null);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [chatMessageToast]);
+
+  const handleAcceptIncomingCall = (callData) => {
+    setIncomingCall(null);
+    setPendingCallAccept(callData);
+    setTab('chat');
+  };
+
+  const handleDeclineIncomingCall = (callData) => {
+    setIncomingCall(null);
+    const socket = getSocket();
+    if (socket) {
+      socket.emit('call:end', { channelId: callData?.channelId, fromId: data?.user?.id });
+    }
+  };
+
+  const handleOpenChatNotification = (notif) => {
+    if (notif.type === 'call' && notif.callData) {
+      handleAcceptIncomingCall(notif.callData);
+    } else {
+      setTargetChatChannel(notif.channelId || 'general');
+      setTab('chat');
+    }
+  };
 
   if (!auth) {
     return <LoginPage onLogin={() => setAuth(true)} />;
@@ -415,25 +509,104 @@ export default function App() {
   };
 
   return (
-    <DashboardShell
-      data={data}
-      tab={tab}
-      setTab={setTab}
-      logout={logout}
-      socketConnected={socketConnected}
-      openSupportModal={openSupportModal}
-    >
-      {tab === 'overview' && <OverviewPage data={data} reload={load} setTab={setTab} openSupportModal={openSupportModal} />}
-      {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
-      {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
-      {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
-      {tab === 'chat' && <TeamChat data={data} reload={load} onCloseMobile={() => setTab('overview')} />}
-      {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
-      {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
-      {tab === 'employees' && <ManageEmployees data={data} reload={load} setTab={setTab} />}
-      {tab === 'users' && <ManageUsersAndRoles data={data} reload={load} />}
-      {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
-    </DashboardShell>
+    <>
+      <DashboardShell
+        data={data}
+        tab={tab}
+        setTab={setTab}
+        logout={logout}
+        socketConnected={socketConnected}
+        openSupportModal={openSupportModal}
+        chatNotifications={chatNotifications}
+        onOpenChatNotification={handleOpenChatNotification}
+      >
+        {tab === 'overview' && <OverviewPage data={data} reload={load} setTab={setTab} openSupportModal={openSupportModal} />}
+        {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
+        {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
+        {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
+        {tab === 'chat' && (
+          <TeamChat
+            data={data}
+            reload={load}
+            onCloseMobile={() => setTab('overview')}
+            pendingCallAccept={pendingCallAccept}
+            onClearPendingCallAccept={() => setPendingCallAccept(null)}
+            targetChannelId={targetChatChannel}
+          />
+        )}
+        {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
+        {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
+        {tab === 'employees' && <ManageEmployees data={data} reload={load} setTab={setTab} />}
+        {tab === 'users' && <ManageUsersAndRoles data={data} reload={load} />}
+        {tab === 'support' && <SupportTickets data={data} reload={load} openCreateSignal={supportCreateSignal} />}
+      </DashboardShell>
+
+      {/* Global In-App Incoming Call Popup Toast (Desktop Bottom-Right, Mobile Top) */}
+      {incomingCall && (
+        <div className="app-global-call-popup">
+          <div className="app-global-popup-avatar">
+            {incomingCall.from ? incomingCall.from.charAt(0).toUpperCase() : '📞'}
+          </div>
+          <div className="app-global-popup-info">
+            <h4 className="app-global-popup-name">{incomingCall.from}</h4>
+            <p className="app-global-popup-sub">
+              Incoming {incomingCall.callType === 'video' ? '📹 Video Call' : '📞 Voice Call'}...
+            </p>
+          </div>
+          <div className="app-global-popup-actions">
+            <button
+              type="button"
+              className="wa-btn-accept-call"
+              title="Accept call"
+              onClick={() => handleAcceptIncomingCall(incomingCall)}
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="wa-btn-decline-call"
+              title="Decline call"
+              onClick={() => handleDeclineIncomingCall(incomingCall)}
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Global In-App Chat Message Popup Toast (Desktop Bottom-Right, Mobile Top) */}
+      {chatMessageToast && !incomingCall && (
+        <div
+          className="app-global-chat-popup"
+          onClick={() => {
+            setTargetChatChannel(chatMessageToast.channelId || 'general');
+            setChatMessageToast(null);
+            setTab('chat');
+          }}
+        >
+          <div className="app-global-popup-avatar" style={{ background: '#071F5C' }}>
+            💬
+          </div>
+          <div className="app-global-popup-info">
+            <h4 className="app-global-popup-name">{chatMessageToast.sender}</h4>
+            <p className="app-global-popup-sub">{chatMessageToast.body}</p>
+          </div>
+          <button
+            type="button"
+            className="btn-link-subtle"
+            style={{ color: '#8696A0', padding: '4px 8px', fontSize: '12px' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setChatMessageToast(null);
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -441,7 +614,7 @@ export default function App() {
 // 1. DASHBOARD SHELL (SIDEBAR + TOP HEADER)
 // ==========================================================================
 
-function DashboardShell({ data, tab, setTab, logout, socketConnected, openSupportModal, children }) {
+function DashboardShell({ data, tab, setTab, logout, socketConnected, openSupportModal, chatNotifications = [], onOpenChatNotification, children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
@@ -708,8 +881,10 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
                 }}
               >
                 <DashboardIcon name="bell" />
-                {openTicketCount > 0 && (
-                  <span className="notification-badge-count">{openTicketCount}</span>
+                {(openTicketCount + (chatNotifications?.length || 0)) > 0 && (
+                  <span className="notification-badge-count">
+                    {openTicketCount + (chatNotifications?.length || 0)}
+                  </span>
                 )}
               </button>
 
@@ -719,7 +894,7 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
                     <div>
                       <strong>Notifications</strong>
                       <span className="badge badge-category" style={{ marginLeft: '6px' }}>
-                        {openTicketCount} Open
+                        {openTicketCount + (chatNotifications?.length || 0)} Total
                       </span>
                     </div>
                     <button
@@ -732,7 +907,41 @@ function DashboardShell({ data, tab, setTab, logout, socketConnected, openSuppor
                   </div>
 
                   <div className="dropdown-menu-list">
-                    {openTickets.length === 0 && recentJobs.length === 0 ? (
+                    {/* Live Chat & Call Notifications */}
+                    {chatNotifications && chatNotifications.length > 0 && (
+                      <>
+                        <div style={{ padding: '8px 14px 4px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--ci-text-secondary)', letterSpacing: '0.04em' }}>
+                          Team Chat & Calls
+                        </div>
+                        {chatNotifications.map(n => (
+                          <div
+                            key={n.id}
+                            className="dropdown-notification-item"
+                            style={{ background: n.type === 'call' ? 'rgba(37, 211, 102, 0.08)' : undefined }}
+                            onClick={() => {
+                              setNotificationOpen(false);
+                              if (onOpenChatNotification) onOpenChatNotification(n);
+                            }}
+                          >
+                            <div className="notif-icon-circle" style={{ background: n.type === 'call' ? '#25D366' : '#071F5C', color: '#FFFFFF', fontSize: '14px' }}>
+                              {n.type === 'call' ? '📞' : '💬'}
+                            </div>
+                            <div className="notif-item-body">
+                              <div className="notif-item-title">
+                                <strong>{n.title}</strong>
+                                <span className="badge" style={{ background: n.type === 'call' ? '#25D366' : 'var(--ci-bg-secondary)', color: n.type === 'call' ? '#FFFFFF' : 'var(--ci-text-primary)', fontSize: '10px' }}>
+                                  {n.time}
+                                </span>
+                              </div>
+                              <p className="notif-item-desc">{n.subtitle}</p>
+                            </div>
+                          </div>
+                        ))}
+                        <div style={{ borderBottom: '1px solid var(--ci-border-light)', margin: '6px 0' }} />
+                      </>
+                    )}
+
+                    {openTickets.length === 0 && recentJobs.length === 0 && (!chatNotifications || chatNotifications.length === 0) ? (
                       <div className="dropdown-empty-state">
                         <span>🔔</span>
                         <p>No new notifications</p>

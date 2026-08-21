@@ -3856,38 +3856,81 @@ a {
   transform: scale(1.1);
 }
 
-/* 5. Incoming Call Alert Toast */
+/* 5. Incoming Call Alert Toast & Global In-App Notifications */
+.app-global-call-popup,
+.app-global-chat-popup,
 .wa-incoming-call-toast {
   position: fixed;
-  top: 24px;
+  bottom: 24px;
   right: 24px;
   background: #111B21;
   color: #FFFFFF;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
-  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  border-radius: 16px;
   padding: 16px 20px;
-  z-index: 2100;
+  z-index: 9999;
   display: flex;
   align-items: center;
   gap: 16px;
-  animation: slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  max-width: 420px;
+  animation: slideInUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.app-global-chat-popup {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.app-global-chat-popup:hover {
+  background: #1F2C34;
+}
+
+.app-global-popup-avatar,
 .wa-incoming-toast-avatar {
-  width: 46px;
-  height: 46px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   background: #008069;
+  color: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
+  font-size: 16px;
+  flex-shrink: 0;
 }
 
+.app-global-popup-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-global-popup-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-global-popup-sub {
+  font-size: 12.5px;
+  color: #8696A0;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-global-popup-actions,
 .wa-incoming-toast-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .wa-btn-accept-call {
@@ -3924,6 +3967,28 @@ a {
 
 .wa-btn-decline-call:hover {
   transform: scale(1.1);
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 @keyframes slideInRight {
@@ -4022,6 +4087,17 @@ a {
     max-height: 100dvh !important;
     border-radius: 0 !important;
     border: none !important;
+  }
+
+  .app-global-call-popup,
+  .app-global-chat-popup,
+  .wa-incoming-call-toast {
+    bottom: auto !important;
+    top: 16px !important;
+    left: 12px !important;
+    right: 12px !important;
+    max-width: calc(100vw - 24px) !important;
+    animation: slideInDown 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
   }
 }
 
