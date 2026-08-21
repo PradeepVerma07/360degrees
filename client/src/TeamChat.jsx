@@ -82,7 +82,15 @@ function getNameColor(name) {
 
 const getDmChannelId = (u1, u2) => 'dm-' + [String(u1), String(u2)].sort().join('-').replace(/[^a-z0-9_-]/g, '-');
 
-export default function TeamChat({ data, reload }) {
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' }
+  ]
+};
+
+export default function TeamChat({ data, reload, onCloseMobile }) {
   const currentUser = data?.user || {};
   const canSend = (data?.permissions || currentUser?.permissions || []).includes('chat.send');
   const canManage = (data?.permissions || currentUser?.permissions || []).includes('chat.manage');
@@ -113,7 +121,7 @@ export default function TeamChat({ data, reload }) {
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
-  // Real-Time Calling States (Audio / Video)
+  // Real-Time WebRTC Calling States (Voice & Video)
   const [callActive, setCallActive] = useState(false);
   const [callType, setCallType] = useState('voice'); // 'voice' | 'video'
   const [callStatus, setCallStatus] = useState(null); // 'calling' | 'connected' | 'ended'
@@ -133,9 +141,14 @@ export default function TeamChat({ data, reload }) {
   const fileInputRef = useRef(null);
   const imageInputRef = useRef(null);
   const socketRef = useRef(null);
+
+  // WebRTC Media Refs
+  const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
 
   // Load Channels and Workspace Members
   const loadChannels = useCallback(async () => {
@@ -217,6 +230,59 @@ export default function TeamChat({ data, reload }) {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
+  // Initialize WebRTC Peer Connection
+  const initPeerConnection = useCallback((localStream) => {
+    if (peerConnectionRef.current) {
+      try {
+        peerConnectionRef.current.close();
+      } catch (err) {
+        console.warn('Error closing existing peer connection:', err);
+      }
+    }
+
+    const pc = new RTCPeerConnection(ICE_SERVERS);
+    peerConnectionRef.current = pc;
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+    }
+
+    pc.ontrack = (event) => {
+      console.log('[CI360 WebRTC] Inbound stream track received:', event.track.kind);
+      if (event.streams && event.streams[0]) {
+        remoteStreamRef.current = event.streams[0];
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = event.streams[0];
+        }
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = event.streams[0];
+          remoteAudioRef.current.play().catch(() => {});
+        }
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current) {
+        socketRef.current.emit('call:signal', {
+          channelId: activeChannelId,
+          fromId: currentUser.id,
+          signal: { type: 'candidate', candidate: event.candidate }
+        });
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      console.log('[CI360 WebRTC] Connection state:', pc.connectionState);
+      if (pc.connectionState === 'connected') {
+        setCallStatus('connected');
+      }
+    };
+
+    return pc;
+  }, [activeChannelId, currentUser.id]);
+
   // Start Real-Time Voice or Video Call
   const startCall = async (type = 'voice') => {
     setCallType(type);
@@ -227,13 +293,14 @@ export default function TeamChat({ data, reload }) {
     setIsVideoOff(false);
     setIsScreenSharing(false);
 
+    let stream = null;
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
-          video: type === 'video'
+          video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
         }).catch(err => {
-          console.warn('Device media stream permission or hardware notice:', err);
+          console.warn('[CI360] getUserMedia error:', err);
           return null;
         });
 
@@ -248,38 +315,117 @@ export default function TeamChat({ data, reload }) {
       console.warn('Audio/Video capture error:', e);
     }
 
-    if (socketRef.current) {
-      socketRef.current.emit('call:initiate', {
-        from: currentUser.name || 'Workspace User',
-        fromId: currentUser.id,
-        callType: type,
-        channelId: activeChannelId,
-        channelTitle: activeDirectMember ? activeDirectMember.name : activeChannelId
+    const pc = initPeerConnection(stream);
+    try {
+      const offer = await pc.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: type === 'video'
       });
+      await pc.setLocalDescription(offer);
+
+      if (socketRef.current) {
+        socketRef.current.emit('call:initiate', {
+          from: currentUser.name || 'Workspace User',
+          fromId: currentUser.id,
+          callType: type,
+          channelId: activeChannelId,
+          channelTitle: activeDirectMember ? activeDirectMember.name : activeChannelId,
+          offer: offer
+        });
+      }
+    } catch (err) {
+      console.warn('[CI360 WebRTC] offer creation notice:', err);
     }
 
-    // Auto-transition to connected status
+    // Safety timer to mark connected if answer is slightly delayed
     setTimeout(() => {
-      setCallStatus('connected');
-    }, 2200);
+      setCallStatus(s => s === 'calling' ? 'connected' : s);
+    }, 2500);
   };
 
-  // End Call & Cleanup
+  // Accept Incoming Call
+  const acceptIncomingCall = async (callData) => {
+    setIncomingCall(null);
+    const type = callData.callType || 'voice';
+    setCallType(type);
+    setCallActive(true);
+    setCallStatus('connected');
+    setCallTimer(0);
+    setIsMuted(false);
+    setIsVideoOff(false);
+    setIsScreenSharing(false);
+
+    let stream = null;
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false
+        }).catch(err => {
+          console.warn('[CI360] getUserMedia accept error:', err);
+          return null;
+        });
+
+        if (stream) {
+          localStreamRef.current = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Media capture error on call accept:', e);
+    }
+
+    const pc = initPeerConnection(stream);
+    if (callData.offer) {
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(callData.offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        if (socketRef.current) {
+          socketRef.current.emit('call:accept', {
+            channelId: callData.channelId,
+            fromId: currentUser.id,
+            answer: answer
+          });
+        }
+      } catch (err) {
+        console.warn('[CI360 WebRTC] accept answer error:', err);
+      }
+    }
+  };
+
+  // End Call & Full Cleanup
   const endCall = () => {
     setCallStatus('ended');
     if (socketRef.current) {
-      socketRef.current.emit('call:end', { channelId: activeChannelId });
+      socketRef.current.emit('call:end', { channelId: activeChannelId, fromId: currentUser.id });
+    }
+    if (peerConnectionRef.current) {
+      try {
+        peerConnectionRef.current.close();
+      } catch {}
+      peerConnectionRef.current = null;
     }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
     }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current = null;
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+
     setTimeout(() => {
       setCallActive(false);
       setCallStatus(null);
       setCallTimer(0);
       setIncomingCall(null);
-    }, 1200);
+    }, 1000);
   };
 
   // Toggle Mute Audio
@@ -311,6 +457,11 @@ export default function TeamChat({ data, reload }) {
             if (localVideoRef.current) {
               localVideoRef.current.srcObject = vStream;
             }
+            if (peerConnectionRef.current) {
+              vStream.getVideoTracks().forEach(track => {
+                peerConnectionRef.current.addTrack(track, vStream);
+              });
+            }
             setCallType('video');
             setIsVideoOff(false);
           }
@@ -337,6 +488,13 @@ export default function TeamChat({ data, reload }) {
           setIsScreenSharing(true);
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = screenStream;
+          }
+          if (peerConnectionRef.current) {
+            const screenTrack = screenStream.getVideoTracks()[0];
+            const sender = peerConnectionRef.current.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (sender) {
+              sender.replaceTrack(screenTrack);
+            }
           }
           screenStream.getVideoTracks()[0].onended = () => {
             setIsScreenSharing(false);
@@ -418,6 +576,29 @@ export default function TeamChat({ data, reload }) {
       }
     };
 
+    const onCallAccepted = async (data) => {
+      if (data.fromId !== currentUser.id && peerConnectionRef.current && data.answer) {
+        try {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.answer));
+          setCallStatus('connected');
+        } catch (e) {
+          console.warn('[CI360 WebRTC] setRemoteDescription error on accept:', e);
+        }
+      }
+    };
+
+    const onCallSignal = async (data) => {
+      if (data.fromId !== currentUser.id && peerConnectionRef.current && data.signal) {
+        try {
+          if (data.signal.type === 'candidate' && data.signal.candidate) {
+            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.signal.candidate));
+          }
+        } catch (e) {
+          console.warn('[CI360 WebRTC] addIceCandidate error:', e);
+        }
+      }
+    };
+
     const onCallEnded = () => {
       setIncomingCall(null);
       if (callActive) {
@@ -432,6 +613,8 @@ export default function TeamChat({ data, reload }) {
     socket.on('chat:typing', onTyping);
     socket.on('chat:stop_typing', onStopTyping);
     socket.on('call:incoming', onIncomingCall);
+    socket.on('call:accepted', onCallAccepted);
+    socket.on('call:signal', onCallSignal);
     socket.on('call:ended', onCallEnded);
 
     return () => {
@@ -442,6 +625,8 @@ export default function TeamChat({ data, reload }) {
       socket.off('chat:typing', onTyping);
       socket.off('chat:stop_typing', onStopTyping);
       socket.off('call:incoming', onIncomingCall);
+      socket.off('call:accepted', onCallAccepted);
+      socket.off('call:signal', onCallSignal);
       socket.off('call:ended', onCallEnded);
     };
   }, [activeChannelId, currentUser.name, currentUser.id, callActive, scrollToBottom]);
@@ -691,6 +876,16 @@ export default function TeamChat({ data, reload }) {
                 <circle cx="12" cy="18" r="1.7" />
               </svg>
             </button>
+            {onCloseMobile && (
+              <button
+                type="button"
+                className="wa-mobile-exit-btn mobile-only"
+                title="Exit Fullscreen Chat"
+                onClick={onCloseMobile}
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
 
@@ -953,6 +1148,16 @@ export default function TeamChat({ data, reload }) {
                 </div>
               )}
             </div>
+            {onCloseMobile && (
+              <button
+                type="button"
+                className="wa-mobile-exit-btn mobile-only"
+                title="Exit Fullscreen Chat"
+                onClick={onCloseMobile}
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
 
@@ -1524,6 +1729,9 @@ export default function TeamChat({ data, reload }) {
 
             {/* Call Screen Body */}
             <div className="wa-call-body">
+              {/* Invisible autoPlay audio element for continuous bidirectional sound */}
+              <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+
               {callType === 'voice' ? (
                 /* Voice Call Interface */
                 <div className="wa-call-audio-display">
@@ -1532,37 +1740,48 @@ export default function TeamChat({ data, reload }) {
                   </div>
                   <h3 className="wa-call-name">{currentChatInfo.title}</h3>
                   <p style={{ color: '#8696A0', fontSize: '13px', margin: 0 }}>
-                    {callStatus === 'calling' ? 'Ringing...' : 'Encrypted Workspace Audio'}
+                    {callStatus === 'calling' ? 'Ringing...' : 'Connected • Real-Time Voice Audio'}
                   </p>
                 </div>
               ) : (
                 /* Video Call Interface */
                 <div className="wa-call-video-container">
-                  {/* Remote Feed Display */}
-                  <div
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: 'radial-gradient(circle at center, #1F2C34 0%, #0C1317 100%)',
-                      color: '#FFFFFF'
-                    }}
-                  >
-                    <div style={{ textAlign: 'center' }}>
-                      <div
-                        className="wa-call-avatar-pulse"
-                        style={{ margin: '0 auto 16px', width: '90px', height: '90px', fontSize: '32px' }}
-                      >
-                        {currentChatInfo.isDirect ? currentChatInfo.avatar : '👥'}
+                  {/* Remote WebRTC Video Stream Feed */}
+                  <video
+                    ref={remoteVideoRef}
+                    autoPlay
+                    playsInline
+                    className="wa-call-remote-video"
+                  />
+
+                  {/* Fallback Display if video camera is off / initializing */}
+                  {(!remoteStreamRef.current || isVideoOff) && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'radial-gradient(circle at center, #1F2C34 0%, #0C1317 100%)',
+                        color: '#FFFFFF',
+                        zIndex: 1
+                      }}
+                    >
+                      <div style={{ textAlign: 'center' }}>
+                        <div
+                          className="wa-call-avatar-pulse"
+                          style={{ margin: '0 auto 16px', width: '90px', height: '90px', fontSize: '32px' }}
+                        >
+                          {currentChatInfo.isDirect ? currentChatInfo.avatar : '👥'}
+                        </div>
+                        <h4 style={{ margin: '0 0 6px', fontSize: '18px' }}>{currentChatInfo.title}</h4>
+                        <p style={{ color: '#25D366', fontSize: '12.5px', margin: 0 }}>
+                          {callStatus === 'calling' ? 'Connecting media...' : 'Real-Time HD Video Active'}
+                        </p>
                       </div>
-                      <h4 style={{ margin: '0 0 6px', fontSize: '18px' }}>{currentChatInfo.title}</h4>
-                      <p style={{ color: '#25D366', fontSize: '12.5px', margin: 0 }}>
-                        {isVideoOff ? 'Camera Off' : 'Live High Definition Feed'}
-                      </p>
                     </div>
-                  </div>
+                  )}
 
                   {/* Local Self-View PiP */}
                   <div className="wa-call-local-pip">
@@ -1699,10 +1918,7 @@ export default function TeamChat({ data, reload }) {
               type="button"
               className="wa-btn-accept-call"
               title="Accept call"
-              onClick={() => {
-                startCall(incomingCall.callType || 'voice');
-                setIncomingCall(null);
-              }}
+              onClick={() => acceptIncomingCall(incomingCall)}
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />

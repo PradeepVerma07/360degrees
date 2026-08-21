@@ -427,7 +427,7 @@ export default function App() {
       {tab === 'submit' && <SubmitJobPage data={data} reload={load} setTab={setTab} />}
       {tab === 'jobs' && <JobsListPage data={data} reload={load} />}
       {tab === 'productivity' && <ProductivityIntelligence data={data} reload={load} />}
-      {tab === 'chat' && <TeamChat data={data} reload={load} />}
+      {tab === 'chat' && <TeamChat data={data} reload={load} onCloseMobile={() => setTab('overview')} />}
       {tab === 'settings' && <TatStandardsPage data={data} reload={load} />}
       {tab === 'clients' && <ManageClientsPage data={data} reload={load} />}
       {tab === 'employees' && <ManageEmployees data={data} reload={load} setTab={setTab} />}
