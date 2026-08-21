@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import bcrypt from 'bcryptjs';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +97,31 @@ app.use(cors({
     origin: (requestOrigin, callback) => callback(null, true),
     credentials: true
 }));
+
+// High-performance gzip response compression
+app.use((req, res, next) => {
+    const acceptEncoding = req.headers['accept-encoding'] || '';
+    if (!acceptEncoding.includes('gzip') || req.method === 'HEAD') {
+        return next();
+    }
+    const origJson = res.json.bind(res);
+    res.json = (body) => {
+        const str = JSON.stringify(body);
+        if (str.length < 1024) {
+            return origJson(body);
+        }
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Encoding', 'gzip');
+        res.removeHeader('Content-Length');
+        zlib.gzip(Buffer.from(str), (err, zipped) => {
+            if (err) return origJson(body);
+            res.setHeader('Content-Length', zipped.length);
+            res.end(zipped);
+        });
+    };
+    next();
+});
+
 app.use(express.json({ limit: '20mb' }));
 const emitRefresh = () => io.emit('data:changed', { at: new Date().toISOString() });
 const loginAttempts = new Map();
@@ -1957,10 +1983,22 @@ app.get('/favicon.ico', (req, res) => {
 
 if (publicDir) {
     console.log(`[CI360] Serving frontend static build from: ${publicDir}`);
-    app.use(express.static(publicDir));
+    app.use(express.static(publicDir, {
+        maxAge: '30d',
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.html')) {
+                res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+            } else if (filePath.includes('/assets/') || filePath.includes('\\assets\\')) {
+                res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+            } else {
+                res.setHeader('Cache-Control', 'public, max-age=86400');
+            }
+        }
+    }));
     app.use((req, res, next) => {
         if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/socket.io'))
             return next();
+        res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
         res.sendFile(path.join(publicDir, 'index.html'));
     });
 } else {

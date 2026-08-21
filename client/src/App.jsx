@@ -334,7 +334,14 @@ function DashboardIcon({ name }) {
 // Main App Component
 export default function App() {
   const [auth, setAuth] = useState(Boolean(getToken()));
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(() => {
+    try {
+      const cached = localStorage.getItem('ci360_workspace_cache');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [error, setError] = useState('');
   const [tab, setTab] = useState('overview');
   const [socketConnected, setSocketConnected] = useState(false);
@@ -345,9 +352,13 @@ export default function App() {
       const res = await api.bootstrap();
       setData(res);
       setError('');
+      try {
+        localStorage.setItem('ci360_workspace_cache', JSON.stringify(res));
+      } catch {}
     } catch (e) {
       if (e.message.includes('Session') || e.message.includes('token') || e.message.includes('Authentication')) {
         setToken(null);
+        try { localStorage.removeItem('ci360_workspace_cache'); } catch {}
         setAuth(false);
       } else {
         setError(e.message);
@@ -382,14 +393,18 @@ export default function App() {
 
   if (!data) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--ci-bg)' }}>
-        <p style={{ color: 'var(--ci-text-secondary)', fontWeight: 500 }}>{error || 'Loading workspace...'}</p>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--ci-bg)', gap: '14px' }}>
+        <div style={{ width: '36px', height: '36px', border: '3px solid #E4E7EC', borderTopColor: '#071F5C', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+        <p style={{ color: 'var(--ci-text-secondary)', fontWeight: 500, fontSize: '14px', margin: 0 }}>
+          {error || 'Loading CI360 workspace...'}
+        </p>
       </div>
     );
   }
 
   const logout = () => {
     setToken(null);
+    try { localStorage.removeItem('ci360_workspace_cache'); } catch {}
     setAuth(false);
     setData(null);
   };
