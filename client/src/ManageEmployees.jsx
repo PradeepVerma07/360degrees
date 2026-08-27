@@ -288,7 +288,7 @@ export default function ManageEmployees({ data, reload, setTab }) {
                   flexDirection: 'column',
                   gap: '14px',
                   padding: '20px',
-                  borderTop: `4px solid ${pStatus === 'active' ? 'var(--ci-navy)' : pStatus === 'intern' ? 'var(--ci-accent)' : pStatus === 'vendor' ? 'var(--ci-gold)' : '#98A2B3'}`
+                  borderTop: `4px solid ${pStatus === 'active' ? 'var(--primary)' : pStatus === 'intern' ? 'var(--accent-cyan)' : pStatus === 'vendor' ? 'var(--accent-purple)' : 'var(--border)'}`
                 }}
               >
                 {/* TOP PROFILE ROW */}
@@ -299,19 +299,20 @@ export default function ManageEmployees({ data, reload, setTab }) {
                       style={{
                         width: '46px',
                         height: '46px',
-                        fontSize: '16px',
-                        background: 'var(--ci-navy)',
-                        color: '#fff',
+                        fontSize: '15px',
+                        background: 'var(--primary-soft)',
+                        color: 'var(--primary)',
+                        border: '1px solid rgba(255, 130, 72, 0.25)',
                         fontWeight: 700
                       }}
                     >
                       {initialsFor(emp.name)}
                     </div>
                     <div>
-                      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ci-text)' }}>
+                      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)' }}>
                         {emp.name}
                       </h3>
-                      <span style={{ fontSize: '13px', color: 'var(--ci-text-secondary)', display: 'block' }}>
+                      <span style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block' }}>
                         {emp.designationName || emp.roleName || (emp.role === 'admin' ? 'Administrator' : 'Team Member')}
                       </span>
                     </div>

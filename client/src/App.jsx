@@ -1438,7 +1438,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
             {/* Metric 1: Active Jobs */}
             <div className="metric-box">
               <div className="metric-box-top">
-                <div className="metric-icon-wrap green">
+                <div className="metric-icon-wrap orange">
                   <DashboardIcon name="jobs" />
                 </div>
               </div>
@@ -1474,7 +1474,7 @@ function OverviewPage({ data, reload, setTab, openSupportModal }) {
             {/* Metric 4: Clients or My Jobs */}
             <div className="metric-box">
               <div className="metric-box-top">
-                <div className="metric-icon-wrap blue">
+                <div className="metric-icon-wrap purple">
                   <DashboardIcon name="users" />
                 </div>
               </div>
@@ -3283,23 +3283,37 @@ function LoginPage({ onLogin }) {
     <div className="auth-page-wrap">
       <div className="auth-card-container">
         <div className="auth-brand-header">
-          <img src="/logo.png" alt="360degrees" className="auth-brand-logo" />
+          <div className="auth-badge-pill">
+            <span>💬</span>
+            <span>Friend Chat & CI360</span>
+          </div>
+          <img src="/logo.png" alt="Friend Chat & CI360" className="auth-brand-logo" />
+          <h2 className="auth-form-title">Welcome back</h2>
+          <p className="auth-form-sub">Sign in to access your team chat and workspace</p>
         </div>
 
-        <h2 className="auth-form-title" style={{ textAlign: 'center', marginBottom: '24px' }}>CI360 Workspace</h2>
-
-        {error && <div className="alert-banner error">{error}</div>}
+        {error && (
+          <div className="alert-banner error">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )}
 
         <form onSubmit={submit}>
           <div className="form-group">
-            <label className="form-label">Email or User ID</label>
+            <label className="form-label">Email or Workspace ID</label>
             <input
               type="text"
               className="form-control"
-              placeholder="name@company.com or workspace ID"
+              placeholder="name@company.com or User ID"
               value={id}
               onChange={e => setId(e.target.value)}
               required
+              autoFocus
             />
           </div>
 
@@ -3322,7 +3336,7 @@ function LoginPage({ onLogin }) {
                 checked={remember}
                 onChange={e => setRemember(e.target.checked)}
               />
-              <span>Remember me</span>
+              <span>Remember this device</span>
             </label>
           </div>
 
@@ -3331,7 +3345,7 @@ function LoginPage({ onLogin }) {
             className="auth-submit-btn"
             disabled={loading}
           >
-            {loading ? 'Signing in...' : 'Log In'}
+            {loading ? 'Signing in...' : 'Sign In to Workspace →'}
           </button>
         </form>
       </div>
